@@ -469,6 +469,132 @@ body {
 .msg-time.visible { opacity: 0.5; }
 .msg:hover .msg-time { opacity: 0.5; }
 
+/* Forward header */
+.forward-header {
+  font-size: 11px;
+  color: var(--vscode-textLink-foreground, #3794ff);
+  margin-bottom: 4px;
+  font-style: italic;
+}
+
+/* Reply quote */
+.reply-quote {
+  border-left: 3px solid var(--vscode-textLink-foreground, #3794ff);
+  padding: 3px 8px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  opacity: 0.85;
+  border-radius: 2px;
+  background: rgba(255,255,255,0.04);
+  max-width: 100%;
+  overflow: hidden;
+}
+.reply-sender {
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--vscode-textLink-foreground, #3794ff);
+}
+.reply-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.7;
+}
+
+/* Media */
+.msg-photo {
+  max-width: 100%;
+  border-radius: 8px;
+  margin-bottom: 4px;
+  cursor: pointer;
+}
+.msg-photo:hover { opacity: 0.9; }
+.msg-file, .msg-voice, .msg-video, .msg-sticker, .msg-gif {
+  font-size: 12px;
+  padding: 4px 0;
+  opacity: 0.8;
+}
+
+/* Edited label */
+.msg-edited {
+  font-size: 10px;
+  opacity: 0.4;
+  margin-left: 6px;
+  font-style: italic;
+}
+
+/* Link preview card */
+.link-preview {
+  border-left: 3px solid var(--vscode-textLink-foreground, #3794ff);
+  padding: 6px 10px;
+  margin-top: 6px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.04);
+  font-size: 12px;
+}
+.lp-image {
+  max-width: 100%;
+  border-radius: 4px;
+  margin-bottom: 4px;
+}
+.lp-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.lp-desc {
+  opacity: 0.7;
+  margin-bottom: 2px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.lp-url {
+  font-size: 11px;
+  opacity: 0.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Code styling */
+.msg-bubble code {
+  background: rgba(255,255,255,0.08);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+}
+.msg-bubble pre {
+  background: rgba(0,0,0,0.2);
+  padding: 8px;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 4px 0;
+}
+.msg-bubble pre code {
+  background: transparent;
+  padding: 0;
+}
+
+/* Image lightbox overlay */
+.lightbox-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  cursor: pointer;
+}
+.lightbox-overlay img {
+  max-width: 95vw;
+  max-height: 95vh;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
 /* Emoji-only messages */
 .msg-bubble.emoji-only {
   background: transparent !important;
@@ -593,6 +719,30 @@ function linkify(text) {
   return text.replace(/(https?:\\/\\/[^\\s<]+)/g, '<a href="$1" title="$1">$1</a>');
 }
 
+function applyEntities(text, entities) {
+  if (!entities || entities.length === 0) return linkify(esc(text));
+  var sorted = entities.slice().sort(function(a, b) { return b.offset - a.offset; });
+  var chars = Array.from(text);
+  var escaped = chars.map(function(c) { return esc(c); });
+  for (var i = 0; i < sorted.length; i++) {
+    var e = sorted[i];
+    var slice = escaped.slice(e.offset, e.offset + e.length).join('');
+    var replacement;
+    switch (e.type) {
+      case 'bold': replacement = '<strong>' + slice + '</strong>'; break;
+      case 'italic': replacement = '<em>' + slice + '</em>'; break;
+      case 'code': replacement = '<code>' + slice + '</code>'; break;
+      case 'pre': replacement = '<pre><code' + (e.language ? ' class="language-' + esc(e.language) + '"' : '') + '>' + slice + '</code></pre>'; break;
+      case 'strikethrough': replacement = '<del>' + slice + '</del>'; break;
+      case 'text_link': var safeUrl = (e.url || '').match(/^https?:\\/\\//) ? e.url : '#'; replacement = '<a href="' + esc(safeUrl || '#') + '">' + slice + '</a>'; break;
+      case 'url': replacement = '<a href="' + slice + '">' + slice + '</a>'; break;
+      default: replacement = slice;
+    }
+    escaped.splice(e.offset, e.length, replacement);
+  }
+  return escaped.join('');
+}
+
 function isEmojiOnly(text) {
   if (!text) return false;
   const stripped = text.replace(/[\\s]/g, '');
@@ -637,10 +787,60 @@ function renderMessages(msgs) {
       const isLast = i === len - 1;
       const emoji = isEmojiOnly(m.text);
       const bubbleCls = 'msg-bubble' + (emoji ? ' emoji-only' : '');
-      const content = emoji ? esc(m.text) : linkify(esc(m.text));
+      const textContent = emoji ? esc(m.text) : applyEntities(m.text, m.entities);
+
+      var bubbleInner = '';
+
+      // Forward header
+      if (m.forwardFrom) {
+        bubbleInner += '<div class="forward-header">Forwarded from <strong>' + esc(m.forwardFrom) + '</strong></div>';
+      }
+
+      // Reply quote
+      if (m.replyToId) {
+        bubbleInner += '<div class="reply-quote">';
+        if (m.replyToSender) bubbleInner += '<div class="reply-sender">' + esc(m.replyToSender) + '</div>';
+        bubbleInner += '<div class="reply-text">' + esc(m.replyToText || '') + '</div>';
+        bubbleInner += '</div>';
+      }
+
+      // Media
+      if (m.mediaType === 'photo' && m.mediaUrl) {
+        bubbleInner += '<img class="msg-photo" src="' + esc(m.mediaUrl) + '" onclick="showLightbox(this.src)" />';
+      } else if (m.mediaType === 'file' && m.fileName) {
+        bubbleInner += '<div class="msg-file">📎 ' + esc(m.fileName) + (m.fileSize ? ' (' + Math.round(m.fileSize / 1024) + ' KB)' : '') + '</div>';
+      } else if (m.mediaType === 'voice') {
+        bubbleInner += '<div class="msg-voice">🎤 Voice message</div>';
+      } else if (m.mediaType === 'video') {
+        bubbleInner += '<div class="msg-video">🎬 Video</div>';
+      } else if (m.mediaType === 'sticker') {
+        bubbleInner += '<div class="msg-sticker">🏷️ Sticker</div>';
+      } else if (m.mediaType === 'gif') {
+        bubbleInner += '<div class="msg-gif">🎞️ GIF</div>';
+      }
+
+      // Text
+      if (m.text) {
+        bubbleInner += textContent;
+      }
+
+      // Edited indicator
+      var timeStr = formatTime(m.timestamp);
+      if (m.isEdited) timeStr = '<span class="msg-edited">edited</span> ' + timeStr;
+
+      // Link preview
+      if (m.linkPreview) {
+        bubbleInner += '<div class="link-preview">';
+        if (m.linkPreview.imageUrl) bubbleInner += '<img class="lp-image" src="' + esc(m.linkPreview.imageUrl) + '" />';
+        if (m.linkPreview.title) bubbleInner += '<div class="lp-title">' + esc(m.linkPreview.title) + '</div>';
+        if (m.linkPreview.description) bubbleInner += '<div class="lp-desc">' + esc(m.linkPreview.description) + '</div>';
+        bubbleInner += '<div class="lp-url">' + esc(m.linkPreview.url) + '</div>';
+        bubbleInner += '</div>';
+      }
+
       html += '<div class="msg ' + pos + '">' +
-        '<div class="' + bubbleCls + '">' + content + '</div>' +
-        '<div class="msg-time' + (isLast ? ' visible' : '') + '">' + formatTime(m.timestamp) + '</div>' +
+        '<div class="' + bubbleCls + '">' + bubbleInner + '</div>' +
+        '<div class="msg-time' + (isLast ? ' visible' : '') + '">' + timeStr + '</div>' +
         '</div>';
     }
     html += '</div>';
@@ -683,6 +883,14 @@ window.addEventListener('message', (event) => {
       break;
   }
 });
+
+function showLightbox(src) {
+  var overlay = document.createElement('div');
+  overlay.className = 'lightbox-overlay';
+  overlay.innerHTML = '<img src="' + src + '" />';
+  overlay.addEventListener('click', function() { overlay.remove(); });
+  document.body.appendChild(overlay);
+}
 
 vscode.postMessage({ type: 'init' });
 </script>

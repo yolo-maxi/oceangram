@@ -23,6 +23,21 @@ export interface DialogInfo {
   topicName?: string;   // just the topic name (for topics)
 }
 
+export interface LinkPreview {
+  url: string;
+  title?: string;
+  description?: string;
+  imageUrl?: string;
+}
+
+export interface MessageEntity {
+  type: 'bold' | 'italic' | 'code' | 'pre' | 'strikethrough' | 'url' | 'text_link';
+  offset: number;
+  length: number;
+  url?: string;      // for text_link
+  language?: string;  // for pre (code blocks)
+}
+
 export interface MessageInfo {
   id: number;
   senderId: string;
@@ -30,6 +45,24 @@ export interface MessageInfo {
   text: string;
   timestamp: number;
   isOutgoing: boolean;
+  // Media
+  mediaType?: 'photo' | 'video' | 'voice' | 'file' | 'sticker' | 'gif';
+  mediaUrl?: string;
+  thumbnailUrl?: string;
+  fileName?: string;
+  fileSize?: number;
+  // Reply
+  replyToId?: number;
+  replyToText?: string;
+  replyToSender?: string;
+  // Forward
+  forwardFrom?: string;
+  // Edited
+  isEdited?: boolean;
+  // Entities (for markdown rendering)
+  entities?: MessageEntity[];
+  // Link preview
+  linkPreview?: LinkPreview;
 }
 
 export class TelegramService {
@@ -273,13 +306,18 @@ export class TelegramService {
 
     let msgs;
     if (topicId) {
-      // Fetch messages from a specific forum topic
       msgs = await this.client.getMessages(entity, {
         limit,
         replyTo: topicId,
       });
     } else {
       msgs = await this.client.getMessages(entity, { limit });
+    }
+
+    // Build a map of message IDs for reply lookups
+    const msgMap = new Map<number, any>();
+    for (const m of msgs) {
+      msgMap.set(m.id, m);
     }
 
     const results: MessageInfo[] = [];
@@ -291,17 +329,140 @@ export class TelegramService {
           senderName = this.getEntityName(sender);
         } catch { /* ignore */ }
       }
-      results.push({
+
+      const info: MessageInfo = {
         id: msg.id,
         senderId: msg.senderId?.toString() || '',
         senderName,
         text: msg.message || '',
         timestamp: msg.date || 0,
         isOutgoing: msg.out || false,
-      });
+      };
+
+      // --- Media detection ---
+      if (msg.photo) {
+        info.mediaType = 'photo';
+        try {
+          const buffer = await this.client!.downloadMedia(msg, {});
+          if (buffer && Buffer.isBuffer(buffer)) {
+            info.mediaUrl = `data:image/jpeg;base64,${buffer.toString('base64')}`;
+          }
+        } catch { /* ignore download errors */ }
+      } else if (msg.media) {
+        const media = msg.media as any;
+        const className = media.className || '';
+        if (className === 'MessageMediaPhoto') {
+          info.mediaType = 'photo';
+          try {
+            const buffer = await this.client!.downloadMedia(msg, {});
+            if (buffer && Buffer.isBuffer(buffer)) {
+              info.mediaUrl = `data:image/jpeg;base64,${buffer.toString('base64')}`;
+            }
+          } catch { /* ignore */ }
+        } else if (className === 'MessageMediaDocument') {
+          const doc = media.document;
+          if (doc) {
+            const attrs = doc.attributes || [];
+            const isVideo = attrs.some((a: any) => a.className === 'DocumentAttributeVideo');
+            const isAudio = attrs.some((a: any) => a.className === 'DocumentAttributeAudio');
+            const isSticker = attrs.some((a: any) => a.className === 'DocumentAttributeSticker');
+            const isAnimated = attrs.some((a: any) => a.className === 'DocumentAttributeAnimated');
+            const filenameAttr = attrs.find((a: any) => a.className === 'DocumentAttributeFilename');
+
+            if (isSticker) {
+              info.mediaType = 'sticker';
+            } else if (isAnimated) {
+              info.mediaType = 'gif';
+            } else if (isVideo) {
+              info.mediaType = 'video';
+            } else if (isAudio) {
+              const audioAttr = attrs.find((a: any) => a.className === 'DocumentAttributeAudio');
+              info.mediaType = audioAttr?.voice ? 'voice' : 'file';
+            } else {
+              info.mediaType = 'file';
+            }
+            if (filenameAttr) info.fileName = filenameAttr.fileName;
+            if (doc.size) info.fileSize = typeof doc.size === 'number' ? doc.size : Number(doc.size);
+          }
+        } else if (className === 'MessageMediaWebPage') {
+          // Link preview
+          const webpage = media.webpage;
+          if (webpage && webpage.className === 'WebPage') {
+            info.linkPreview = {
+              url: webpage.url || '',
+              title: webpage.title,
+              description: webpage.description,
+            };
+            // We could extract image but skip for now
+          }
+        }
+      }
+
+      // --- Reply-to ---
+      if (msg.replyTo && msg.replyTo.replyToMsgId) {
+        info.replyToId = msg.replyTo.replyToMsgId;
+        const repliedMsg = msgMap.get(msg.replyTo.replyToMsgId);
+        if (repliedMsg) {
+          info.replyToText = (repliedMsg.message || '').slice(0, 100);
+          if (repliedMsg.senderId) {
+            try {
+              const replySender = await this.client!.getEntity(repliedMsg.senderId);
+              info.replyToSender = this.getEntityName(replySender);
+            } catch { /* ignore */ }
+          }
+        }
+      }
+
+      // --- Forward ---
+      if (msg.fwdFrom) {
+        if (msg.fwdFrom.fromName) {
+          info.forwardFrom = msg.fwdFrom.fromName;
+        } else if (msg.fwdFrom.fromId) {
+          try {
+            const fwdEntity = await this.client!.getEntity(msg.fwdFrom.fromId);
+            info.forwardFrom = this.getEntityName(fwdEntity);
+          } catch {
+            info.forwardFrom = 'Unknown';
+          }
+        }
+      }
+
+      // --- Edited ---
+      if (msg.editDate) {
+        info.isEdited = true;
+      }
+
+      // --- Entities ---
+      if (msg.entities && msg.entities.length > 0) {
+        info.entities = msg.entities.map((e: any) => {
+          const entity: MessageEntity = {
+            type: this.mapEntityType(e.className),
+            offset: e.offset,
+            length: e.length,
+          };
+          if (e.url) entity.url = e.url;
+          if (e.language) entity.language = e.language;
+          return entity;
+        }).filter((e: MessageEntity) => e.type !== undefined);
+      }
+
+      results.push(info);
     }
 
     return results.reverse();
+  }
+
+  private mapEntityType(className: string): MessageEntity['type'] {
+    const map: Record<string, MessageEntity['type']> = {
+      'MessageEntityBold': 'bold',
+      'MessageEntityItalic': 'italic',
+      'MessageEntityCode': 'code',
+      'MessageEntityPre': 'pre',
+      'MessageEntityStrike': 'strikethrough',
+      'MessageEntityUrl': 'url',
+      'MessageEntityTextUrl': 'text_link',
+    };
+    return map[className] as MessageEntity['type'];
   }
 
   async sendMessage(dialogId: string, text: string): Promise<void> {
