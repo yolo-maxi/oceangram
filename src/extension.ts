@@ -1,12 +1,12 @@
 import * as vscode from 'vscode';
-import { CommsPanel } from './commsPanel';
+import { CommsPicker } from './commsPanel';
 import { SimplePanel } from './simplePanel';
 
 export function activate(context: vscode.ExtensionContext) {
-  // Comms — Telegram chat (Cmd+Shift+1)
+  // Comms — chat picker (Cmd+Shift+1)
   context.subscriptions.push(
     vscode.commands.registerCommand('oceangram.openComms', () => {
-      CommsPanel.createOrShow(context);
+      CommsPicker.show(context);
     })
   );
 
@@ -31,10 +31,10 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // Auto-open Comms on activation
-  CommsPanel.createOrShow(context);
+  // Auto-open chat picker
+  CommsPicker.show(context);
 
-  console.log('Oceangram activated — no sidebar, all tabs. Cmd+Shift+1-4 to switch.');
+  console.log('Oceangram activated — Cmd+Shift+1-4');
 }
 
 export function deactivate() {}

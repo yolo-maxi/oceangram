@@ -45,5 +45,6 @@
   "window.commandCenter": false,
   "window.title": "Oceangram — ${activeEditorShort}",
 
-  "files.autoSave": "onFocusChange"
+  "files.autoSave": "onFocusChange",
+  "workbench.editor.tabActionCloseVisibility": false
 }
