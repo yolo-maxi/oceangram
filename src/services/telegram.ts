@@ -487,15 +487,15 @@ export class TelegramService {
     return map[className] as MessageEntity['type'];
   }
 
-  async sendMessage(dialogId: string, text: string): Promise<void> {
+  async sendMessage(dialogId: string, text: string, replyToMsgId?: number): Promise<void> {
     if (!this.client) throw new Error('Not connected');
     const { chatId, topicId } = TelegramService.parseDialogId(dialogId);
     const entity = await this.client.getEntity(chatId);
 
-    if (topicId) {
-      await this.client.sendMessage(entity, { message: text, replyTo: topicId });
-    } else {
-      await this.client.sendMessage(entity, { message: text });
-    }
+    const opts: any = { message: text };
+    if (topicId) opts.replyTo = topicId;
+    if (replyToMsgId) opts.replyTo = replyToMsgId;
+
+    await this.client.sendMessage(entity, opts);
   }
 }

@@ -318,7 +318,7 @@ export class ChatTab {
             break;
           case 'sendMessage':
             await tg.connect();
-            await tg.sendMessage(this.chatId, msg.text);
+            await tg.sendMessage(this.chatId, msg.text, msg.replyToId);
             const updated = await tg.getMessages(this.chatId, 50);
             this.panel.webview.postMessage({ type: 'messages', messages: updated });
             break;
@@ -682,6 +682,49 @@ body {
   line-height: 1.2;
 }
 
+/* Reply bar */
+.reply-bar {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--vscode-panel-border, rgba(255,255,255,0.08));
+  border-left: 3px solid var(--vscode-textLink-foreground, #3794ff);
+  background: rgba(55,148,255,0.06);
+  flex-shrink: 0;
+}
+.reply-bar.active { display: flex; }
+.reply-bar-content { flex: 1; min-width: 0; }
+.reply-bar-sender { font-size: 11px; font-weight: 600; color: var(--vscode-textLink-foreground, #3794ff); }
+.reply-bar-text { font-size: 12px; opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.reply-bar-close {
+  cursor: pointer; padding: 4px; border-radius: 4px; opacity: 0.6;
+  font-size: 14px; flex-shrink: 0; background: none; border: none;
+  color: var(--vscode-foreground, #ccc);
+}
+.reply-bar-close:hover { opacity: 1; background: rgba(255,255,255,0.1); }
+
+/* Context menu */
+.ctx-menu {
+  position: fixed;
+  background: var(--vscode-menu-background, #252526);
+  border: 1px solid var(--vscode-menu-border, #454545);
+  border-radius: 6px;
+  padding: 4px 0;
+  min-width: 120px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  z-index: 100;
+  font-size: 13px;
+}
+.ctx-menu-item {
+  padding: 6px 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ctx-menu-item:hover { background: var(--vscode-list-hoverBackground, #2a2a2a); }
+
 /* Composer */
 .composer {
   display: flex;
@@ -755,6 +798,13 @@ body {
   <div class="loading">Loading…</div>
 </div>
 <button class="new-msgs-btn" id="newMsgsBtn" onclick="scrollToBottom()">↓ New messages</button>
+<div class="reply-bar" id="replyBar">
+  <div class="reply-bar-content">
+    <div class="reply-bar-sender" id="replyBarSender"></div>
+    <div class="reply-bar-text" id="replyBarText"></div>
+  </div>
+  <button class="reply-bar-close" id="replyBarClose">✕</button>
+</div>
 <div class="composer">
   <textarea id="msgInput" rows="1" placeholder="Message ${name}…" autofocus></textarea>
   <button class="send-btn" id="sendBtn" title="Send">
@@ -939,7 +989,7 @@ function renderMessages(msgs) {
         reactionsHtml += '</div>';
       }
 
-      html += '<div class="msg ' + pos + '">' +
+      html += '<div class="msg ' + pos + '" data-msg-id="' + m.id + '" data-sender="' + esc(m.senderName || '') + '" data-text="' + esc((m.text || '').slice(0, 100)) + '">' +
         '<div class="' + bubbleCls + '">' + bubbleInner + '</div>' +
         reactionsHtml +
         '<div class="msg-time' + (isLast ? ' visible' : '') + '">' + timeStr + '</div>' +
@@ -965,12 +1015,35 @@ function autoGrow() {
 }
 msgInput.addEventListener('input', autoGrow);
 
+// Reply state
+const replyBar = document.getElementById('replyBar');
+const replyBarSender = document.getElementById('replyBarSender');
+const replyBarText = document.getElementById('replyBarText');
+const replyBarClose = document.getElementById('replyBarClose');
+let replyToId = null;
+
+function setReply(msgId, sender, text) {
+  replyToId = msgId;
+  replyBarSender.textContent = sender || 'Unknown';
+  replyBarText.textContent = (text || '').slice(0, 100);
+  replyBar.classList.add('active');
+  msgInput.focus();
+}
+function clearReply() {
+  replyToId = null;
+  replyBar.classList.remove('active');
+}
+replyBarClose.addEventListener('click', clearReply);
+
 function doSend() {
   const text = msgInput.value.trim();
   if (!text) return;
   msgInput.value = '';
   msgInput.style.height = 'auto';
-  vscode.postMessage({ type: 'sendMessage', text });
+  var payload = { type: 'sendMessage', text: text };
+  if (replyToId) payload.replyToId = replyToId;
+  vscode.postMessage(payload);
+  clearReply();
 }
 sendBtn.addEventListener('click', doSend);
 msgInput.addEventListener('keydown', (e) => {
@@ -1046,6 +1119,39 @@ messagesList.addEventListener('scroll', () => {
     newMsgsBtn.style.display = 'none';
     newMsgCount = 0;
   }
+});
+
+// Context menu for messages
+let activeCtxMenu = null;
+function removeCtxMenu() {
+  if (activeCtxMenu) { activeCtxMenu.remove(); activeCtxMenu = null; }
+}
+document.addEventListener('click', removeCtxMenu);
+document.addEventListener('contextmenu', (e) => {
+  removeCtxMenu();
+  const msgEl = e.target.closest('.msg[data-msg-id]');
+  if (!msgEl) return;
+  e.preventDefault();
+  const menu = document.createElement('div');
+  menu.className = 'ctx-menu';
+  menu.style.left = e.clientX + 'px';
+  menu.style.top = e.clientY + 'px';
+  menu.innerHTML =
+    '<div class="ctx-menu-item" data-action="reply">↩️ Reply</div>' +
+    '<div class="ctx-menu-item" data-action="copy">📋 Copy text</div>';
+  menu.querySelectorAll('.ctx-menu-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const action = item.dataset.action;
+      if (action === 'reply') {
+        setReply(parseInt(msgEl.dataset.msgId), msgEl.dataset.sender, msgEl.dataset.text);
+      } else if (action === 'copy') {
+        navigator.clipboard.writeText(msgEl.dataset.text || '');
+      }
+      removeCtxMenu();
+    });
+  });
+  document.body.appendChild(menu);
+  activeCtxMenu = menu;
 });
 
 function showLightbox(src) {
