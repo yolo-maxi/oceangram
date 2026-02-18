@@ -1,6 +1,9 @@
 import * as vscode from 'vscode';
 import { CommsPicker } from './commsPanel';
+import { KanbanPanel } from './kanbanPanel';
 import { SimplePanel } from './simplePanel';
+import { ResourcePanel } from './resourcePanel';
+import { AgentPanel } from './agentPanel';
 
 export function activate(context: vscode.ExtensionContext) {
   // Comms — chat picker (Cmd+Shift+1)
@@ -13,21 +16,21 @@ export function activate(context: vscode.ExtensionContext) {
   // Kanban (Cmd+Shift+2)
   context.subscriptions.push(
     vscode.commands.registerCommand('oceangram.openKanban', () => {
-      SimplePanel.createOrShow('kanban', '📋 Kanban', context);
+      KanbanPanel.createOrShow(context);
     })
   );
 
   // Resources (Cmd+Shift+3)
   context.subscriptions.push(
     vscode.commands.registerCommand('oceangram.openResources', () => {
-      SimplePanel.createOrShow('resources', '📦 Resources', context);
+      ResourcePanel.createOrShow(context);
     })
   );
 
   // Agent Status (Cmd+Shift+4)
   context.subscriptions.push(
     vscode.commands.registerCommand('oceangram.openAgent', () => {
-      SimplePanel.createOrShow('agent', '🤖 Agent', context);
+      AgentPanel.createOrShow(context);
     })
   );
 

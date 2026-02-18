@@ -1,0 +1,550 @@
+import * as vscode from 'vscode';
+import * as fs from 'fs';
+import {
+  loadProjects,
+  readBoard,
+  writeBoard,
+  moveTask,
+  createTask,
+  KanbanBoard,
+  ProjectInfo,
+} from './services/kanban';
+
+export class KanbanPanel {
+  private static current: KanbanPanel | undefined;
+  private panel: vscode.WebviewPanel;
+  private disposables: vscode.Disposable[] = [];
+  private projects: ProjectInfo[] = [];
+  private currentProject: ProjectInfo | undefined;
+  private board: KanbanBoard | undefined;
+  private watcher: fs.FSWatcher | undefined;
+
+  static createOrShow(context: vscode.ExtensionContext) {
+    if (KanbanPanel.current) {
+      KanbanPanel.current.panel.reveal(vscode.ViewColumn.One);
+      return;
+    }
+    const panel = vscode.window.createWebviewPanel(
+      'oceangram.kanban', '📋 Kanban', vscode.ViewColumn.One,
+      { enableScripts: true, retainContextWhenHidden: true }
+    );
+    KanbanPanel.current = new KanbanPanel(panel, context);
+  }
+
+  private constructor(panel: vscode.WebviewPanel, context: vscode.ExtensionContext) {
+    this.panel = panel;
+    this.panel.webview.html = this.getHtml();
+
+    this.panel.onDidDispose(() => {
+      KanbanPanel.current = undefined;
+      this.stopWatching();
+      this.disposables.forEach(d => d.dispose());
+    }, null, this.disposables);
+
+    this.panel.webview.onDidReceiveMessage(async (msg) => {
+      try {
+        switch (msg.type) {
+          case 'init':
+            this.projects = loadProjects();
+            this.panel.webview.postMessage({
+              type: 'projects',
+              projects: this.projects.map(p => ({ id: p.id, name: p.name })),
+            });
+            // Auto-select first project
+            if (this.projects.length > 0) {
+              this.selectProject(this.projects[0].id);
+            }
+            break;
+
+          case 'selectProject':
+            this.selectProject(msg.projectId);
+            break;
+
+          case 'moveTask':
+            if (this.board && this.currentProject) {
+              const ok = moveTask(this.board, msg.taskId, msg.targetColumn);
+              if (ok) {
+                writeBoard(this.currentProject.file, this.board);
+                this.sendBoard();
+              }
+            }
+            break;
+
+          case 'createTask':
+            if (this.board && this.currentProject) {
+              const task = createTask(
+                this.board, msg.column, msg.title,
+                msg.priority || 'P2', msg.category || 'Feature',
+                msg.assigned || '', msg.tags || [], msg.description || ''
+              );
+              if (task) {
+                writeBoard(this.currentProject.file, this.board);
+                this.sendBoard();
+              }
+            }
+            break;
+        }
+      } catch (e: any) {
+        this.panel.webview.postMessage({ type: 'error', message: e.message });
+      }
+    }, null, this.disposables);
+  }
+
+  private selectProject(projectId: string) {
+    this.currentProject = this.projects.find(p => p.id === projectId);
+    if (!this.currentProject) return;
+
+    this.stopWatching();
+
+    if (fs.existsSync(this.currentProject.file)) {
+      this.board = readBoard(this.currentProject.file);
+      this.sendBoard();
+      this.startWatching(this.currentProject.file);
+    } else {
+      this.panel.webview.postMessage({ type: 'error', message: `File not found: ${this.currentProject.file}` });
+    }
+  }
+
+  private sendBoard() {
+    if (this.board) {
+      this.panel.webview.postMessage({
+        type: 'board',
+        board: this.board,
+        projectId: this.currentProject?.id,
+      });
+    }
+  }
+
+  private startWatching(filePath: string) {
+    try {
+      this.watcher = fs.watch(filePath, (event) => {
+        if (event === 'change' && this.currentProject) {
+          setTimeout(() => {
+            try {
+              this.board = readBoard(this.currentProject!.file);
+              this.sendBoard();
+            } catch (e) {
+              // File might be mid-write
+            }
+          }, 100);
+        }
+      });
+    } catch (e) {
+      // Watch not supported
+    }
+  }
+
+  private stopWatching() {
+    if (this.watcher) {
+      this.watcher.close();
+      this.watcher = undefined;
+    }
+  }
+
+  private getHtml(): string {
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: var(--vscode-font-family, system-ui);
+  color: var(--vscode-foreground, #ccc);
+  background: var(--vscode-editor-background, #1e1e1e);
+  overflow: hidden;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Toolbar */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--vscode-panel-border, #333);
+  flex-shrink: 0;
+}
+.toolbar select {
+  background: var(--vscode-input-background, #2d2d2d);
+  color: var(--vscode-input-foreground, #ccc);
+  border: 1px solid var(--vscode-input-border, #444);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  outline: none;
+}
+.toolbar .board-name {
+  font-weight: 600;
+  font-size: 14px;
+  opacity: 0.7;
+  margin-left: auto;
+}
+
+/* Board */
+.board {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex: 1;
+  align-items: flex-start;
+}
+
+/* Column */
+.column {
+  min-width: 260px;
+  max-width: 300px;
+  background: var(--vscode-sideBar-background, #252526);
+  border: 1px solid var(--vscode-panel-border, #333);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+  flex-shrink: 0;
+}
+.column-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  font-weight: 600;
+  font-size: 13px;
+  border-bottom: 1px solid var(--vscode-panel-border, #333);
+  flex-shrink: 0;
+}
+.column-header .count {
+  background: var(--vscode-badge-background, #444);
+  color: var(--vscode-badge-foreground, #fff);
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 400;
+}
+.column-header .add-btn {
+  cursor: pointer;
+  opacity: 0.5;
+  font-size: 16px;
+  border: none;
+  background: none;
+  color: var(--vscode-foreground, #ccc);
+  padding: 0 4px;
+}
+.column-header .add-btn:hover { opacity: 1; }
+.column-body {
+  overflow-y: auto;
+  padding: 6px;
+  flex: 1;
+}
+.column-body.drag-over {
+  background: rgba(59, 130, 246, 0.08);
+}
+
+/* Card */
+.card {
+  background: var(--vscode-editor-background, #1e1e1e);
+  border: 1px solid var(--vscode-panel-border, #333);
+  border-radius: 4px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  cursor: grab;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  font-size: 12px;
+}
+.card:hover {
+  border-color: var(--vscode-focusBorder, #007fd4);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+}
+.card.dragging { opacity: 0.4; }
+.card-title {
+  font-weight: 600;
+  font-size: 12.5px;
+  margin-bottom: 4px;
+  cursor: pointer;
+}
+.card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.badge {
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+}
+.badge-P0 { background: #ef4444; }
+.badge-P1 { background: #f97316; }
+.badge-P2 { background: #3b82f6; }
+.badge-P3 { background: #6b7280; }
+.tag {
+  font-size: 10px;
+  opacity: 0.6;
+}
+.assigned {
+  font-size: 10px;
+  opacity: 0.5;
+  margin-left: auto;
+}
+.card-id {
+  font-size: 10px;
+  opacity: 0.35;
+}
+
+/* Expanded description */
+.card-desc {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--vscode-panel-border, #333);
+  font-size: 11px;
+  opacity: 0.7;
+  white-space: pre-wrap;
+  display: none;
+}
+.card-desc.show { display: block; }
+
+/* Create form */
+.create-form {
+  padding: 6px;
+  border-top: 1px solid var(--vscode-panel-border, #333);
+  display: none;
+}
+.create-form.show { display: block; }
+.create-form input, .create-form select, .create-form textarea {
+  width: 100%;
+  background: var(--vscode-input-background, #2d2d2d);
+  color: var(--vscode-input-foreground, #ccc);
+  border: 1px solid var(--vscode-input-border, #444);
+  padding: 4px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+  margin-bottom: 4px;
+  font-family: inherit;
+  outline: none;
+}
+.create-form textarea { resize: vertical; min-height: 40px; }
+.create-form .form-row {
+  display: flex;
+  gap: 4px;
+}
+.create-form .form-row select { width: 50%; }
+.create-form .form-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+.create-form button {
+  padding: 3px 10px;
+  border-radius: 3px;
+  font-size: 11px;
+  cursor: pointer;
+  border: none;
+}
+.btn-create {
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
+}
+.btn-cancel {
+  background: transparent;
+  color: var(--vscode-foreground, #ccc);
+  border: 1px solid var(--vscode-panel-border, #444) !important;
+}
+
+/* Loading / Error */
+.status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  opacity: 0.5;
+  font-size: 14px;
+}
+</style>
+</head>
+<body>
+<div class="toolbar">
+  <select id="projectSelect"><option value="">Loading...</option></select>
+  <span class="board-name" id="boardName"></span>
+</div>
+<div class="board" id="board">
+  <div class="status">Loading projects...</div>
+</div>
+
+<script>
+const vscode = acquireVsCodeApi();
+let board = null;
+let expandedTasks = new Set();
+
+// Init
+vscode.postMessage({ type: 'init' });
+
+window.addEventListener('message', (e) => {
+  const msg = e.data;
+  switch (msg.type) {
+    case 'projects':
+      renderProjectSelect(msg.projects);
+      break;
+    case 'board':
+      board = msg.board;
+      renderBoard(board);
+      break;
+    case 'error':
+      document.getElementById('board').innerHTML = '<div class="status">' + escHtml(msg.message) + '</div>';
+      break;
+  }
+});
+
+function renderProjectSelect(projects) {
+  const sel = document.getElementById('projectSelect');
+  sel.innerHTML = projects.map(p =>
+    '<option value="' + p.id + '">' + escHtml(p.name) + '</option>'
+  ).join('');
+  sel.onchange = () => {
+    vscode.postMessage({ type: 'selectProject', projectId: sel.value });
+  };
+}
+
+function renderBoard(board) {
+  document.getElementById('boardName').textContent = board.name;
+  const el = document.getElementById('board');
+  el.innerHTML = board.columns.map(col => renderColumn(col)).join('');
+  initDragDrop();
+}
+
+function renderColumn(col) {
+  const colId = col.title;
+  return '<div class="column" data-column="' + escAttr(colId) + '">' +
+    '<div class="column-header">' +
+      '<span>' + escHtml(colId) + '</span>' +
+      '<span><span class="count">' + col.tasks.length + '</span> ' +
+      '<button class="add-btn" onclick="toggleCreateForm(this)" title="Add task">+</button></span>' +
+    '</div>' +
+    '<div class="column-body" data-column="' + escAttr(colId) + '">' +
+      col.tasks.map(t => renderCard(t)).join('') +
+    '</div>' +
+    '<div class="create-form" data-column="' + escAttr(colId) + '">' +
+      '<input type="text" placeholder="Task title" class="cf-title">' +
+      '<div class="form-row">' +
+        '<select class="cf-priority"><option value="P0">P0</option><option value="P1">P1</option><option value="P2" selected>P2</option><option value="P3">P3</option></select>' +
+        '<select class="cf-category"><option value="Feature">Feature</option><option value="Bug">Bug</option><option value="Infra">Infra</option><option value="Research">Research</option><option value="Task">Task</option></select>' +
+      '</div>' +
+      '<input type="text" placeholder="@assigned" class="cf-assigned">' +
+      '<input type="text" placeholder="#tag1 #tag2" class="cf-tags">' +
+      '<textarea placeholder="Description (optional)" class="cf-desc"></textarea>' +
+      '<div class="form-actions">' +
+        '<button class="btn-create" onclick="submitCreate(this)">Create</button>' +
+        '<button class="btn-cancel" onclick="toggleCreateForm(this)">Cancel</button>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+}
+
+function renderCard(t) {
+  const expanded = expandedTasks.has(t.id);
+  return '<div class="card" draggable="true" data-task-id="' + t.id + '">' +
+    '<div class="card-title" onclick="toggleDesc(\\'' + t.id + '\\')">' + escHtml(t.title) + '</div>' +
+    '<div class="card-meta">' +
+      '<span class="badge badge-' + t.priority + '">' + t.priority + '</span>' +
+      '<span class="card-id">' + t.id + '</span>' +
+      t.tags.map(tag => '<span class="tag">' + escHtml(tag) + '</span>').join('') +
+      (t.assigned ? '<span class="assigned">' + escHtml(t.assigned) + '</span>' : '') +
+    '</div>' +
+    (t.description ? '<div class="card-desc' + (expanded ? ' show' : '') + '" data-task-id="' + t.id + '">' + escHtml(t.description) + '</div>' : '') +
+  '</div>';
+}
+
+function toggleDesc(taskId) {
+  if (expandedTasks.has(taskId)) {
+    expandedTasks.delete(taskId);
+  } else {
+    expandedTasks.add(taskId);
+  }
+  const descs = document.querySelectorAll('.card-desc[data-task-id="' + taskId + '"]');
+  descs.forEach(d => d.classList.toggle('show'));
+}
+
+function toggleCreateForm(btn) {
+  const form = btn.closest('.column').querySelector('.create-form');
+  form.classList.toggle('show');
+  if (form.classList.contains('show')) {
+    form.querySelector('.cf-title').focus();
+  }
+}
+
+function submitCreate(btn) {
+  const form = btn.closest('.create-form');
+  const column = form.dataset.column;
+  const title = form.querySelector('.cf-title').value.trim();
+  if (!title) return;
+
+  const tags = form.querySelector('.cf-tags').value.trim().split(/\\s+/).filter(t => t);
+
+  vscode.postMessage({
+    type: 'createTask',
+    column,
+    title,
+    priority: form.querySelector('.cf-priority').value,
+    category: form.querySelector('.cf-category').value,
+    assigned: form.querySelector('.cf-assigned').value.trim(),
+    tags,
+    description: form.querySelector('.cf-desc').value.trim(),
+  });
+
+  // Reset form
+  form.querySelector('.cf-title').value = '';
+  form.querySelector('.cf-desc').value = '';
+  form.querySelector('.cf-tags').value = '';
+  form.querySelector('.cf-assigned').value = '';
+  form.classList.remove('show');
+}
+
+/* Drag & Drop */
+function initDragDrop() {
+  document.querySelectorAll('.card').forEach(card => {
+    card.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/plain', card.dataset.taskId);
+      card.classList.add('dragging');
+    });
+    card.addEventListener('dragend', () => {
+      card.classList.remove('dragging');
+      document.querySelectorAll('.column-body').forEach(cb => cb.classList.remove('drag-over'));
+    });
+  });
+
+  document.querySelectorAll('.column-body').forEach(colBody => {
+    colBody.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      colBody.classList.add('drag-over');
+    });
+    colBody.addEventListener('dragleave', () => {
+      colBody.classList.remove('drag-over');
+    });
+    colBody.addEventListener('drop', (e) => {
+      e.preventDefault();
+      colBody.classList.remove('drag-over');
+      const taskId = e.dataTransfer.getData('text/plain');
+      const targetColumn = colBody.dataset.column;
+      if (taskId && targetColumn) {
+        vscode.postMessage({ type: 'moveTask', taskId, targetColumn });
+      }
+    });
+  });
+}
+
+function escHtml(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escAttr(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+</script>
+</body>
+</html>`;
+  }
+}
