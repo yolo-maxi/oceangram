@@ -1,15 +1,19 @@
 import * as vscode from 'vscode';
 import { OceangramWebviewProvider } from './webviewProvider';
-import { CommsWebviewProvider } from './commsProvider';
+import { CommsPanel } from './commsPanel';
 
 export function activate(context: vscode.ExtensionContext) {
-  // Comms panel — real Telegram integration
-  const commsProvider = new CommsWebviewProvider(context.extensionUri);
+  // Comms — opens as editor tab
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider('oceangram.comms', commsProvider)
+    vscode.commands.registerCommand('oceangram.openComms', () => {
+      CommsPanel.createOrShow(context);
+    })
   );
 
-  // Other panels — placeholder
+  // Auto-open Comms on activation
+  CommsPanel.createOrShow(context);
+
+  // Other panels — sidebar placeholders
   const placeholderPanels = [
     { viewId: 'oceangram.kanban', title: 'Kanban', emoji: '📋' },
     { viewId: 'oceangram.resources', title: 'Resources', emoji: '📦' },

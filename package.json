@@ -26,11 +26,6 @@
       "oceangram": [
         {
           "type": "webview",
-          "id": "oceangram.comms",
-          "name": "Comms"
-        },
-        {
-          "type": "webview",
           "id": "oceangram.kanban",
           "name": "Kanban"
         },
@@ -50,6 +45,18 @@
       {
         "command": "oceangram.refreshAll",
         "title": "Oceangram: Refresh All Panels"
+      },
+      {
+        "command": "oceangram.openComms",
+        "title": "Oceangram: Open Comms",
+        "icon": "💬"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "oceangram.openComms",
+        "key": "ctrl+shift+t",
+        "mac": "cmd+shift+t"
       }
     ]
   },
