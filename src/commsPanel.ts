@@ -134,6 +134,18 @@ input[type="text"]:focus { border-color: var(--vscode-focusBorder, #007acc); }
 .chat-info { flex: 1; min-width: 0; }
 .chat-name { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-preview { font-size: 12px; opacity: 0.6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 3px; }
+.chat-group-name { font-size: 11px; opacity: 0.55; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; }
+.chat-topic-name { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.avatar { position: relative; }
+.topic-badge {
+  position: absolute; bottom: -2px; right: -2px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--vscode-badge-background, #007acc);
+  color: var(--vscode-badge-foreground, #fff);
+  font-size: 10px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid var(--vscode-editor-background, #1e1e1e);
+}
 .chat-meta { text-align: right; flex-shrink: 0; }
 .chat-time { font-size: 11px; opacity: 0.5; }
 .chat-unread {
@@ -193,10 +205,22 @@ function renderDialogs(dialogs, container, showPinBtn) {
     const actionBtn = showPinBtn
       ? (d.isPinned ? '' : '<span class="pin-btn" data-id="' + d.id + '">📌</span>')
       : '<span class="unpin-btn" data-id="' + d.id + '" title="Unpin">✕</span>';
+
+    const isTopic = d.groupName && d.topicName;
+    const avatarHtml = isTopic
+      ? '<div class="avatar">' + esc(d.initials) + '<span class="topic-badge">#</span></div>'
+      : '<div class="avatar">' + esc(d.initials) + '</div>';
+
+    const infoHtml = isTopic
+      ? '<div class="chat-info">' +
+          '<div class="chat-group-name">⌗ ' + esc(d.groupName) + '</div>' +
+          '<div class="chat-topic-name">' + esc(d.topicEmoji || '') + ' ' + esc(d.topicName) + '</div>' +
+        '</div>'
+      : '<div class="chat-info"><div class="chat-name">' + esc(d.name) + '</div>' +
+        '<div class="chat-preview">' + esc(d.lastMessage.slice(0, 80)) + '</div></div>';
+
     return '<div class="chat-item" data-id="' + d.id + '" data-name="' + esc(d.name) + '">' +
-      '<div class="avatar">' + esc(d.initials) + '</div>' +
-      '<div class="chat-info"><div class="chat-name">' + esc(d.name) + '</div>' +
-      '<div class="chat-preview">' + esc(d.lastMessage.slice(0, 80)) + '</div></div>' +
+      avatarHtml + infoHtml +
       '<div class="chat-meta"><div class="chat-time">' + formatTime(d.lastMessageTime) + '</div>' +
       (d.unreadCount > 0 ? '<div class="chat-unread">' + d.unreadCount + '</div>' : '') + '</div>' +
       actionBtn + '</div>';

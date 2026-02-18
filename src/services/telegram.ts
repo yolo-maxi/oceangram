@@ -18,6 +18,9 @@ export interface DialogInfo {
   initials: string;
   isPinned: boolean;
   isForum: boolean;
+  topicEmoji?: string;  // emoji for forum topic (extracted or fallback)
+  groupName?: string;   // parent group name (for topics)
+  topicName?: string;   // just the topic name (for topics)
 }
 
 export interface MessageInfo {
@@ -175,8 +178,21 @@ export class TelegramService {
           for (const topic of topics) {
             const topicId = topic.id;
             const dialogId = TelegramService.makeDialogId(chatId, topicId);
-            const topicName = topic.title || 'General';
-            const displayName = `${groupName} / ${topicName}`;
+            const topicTitle = topic.title || 'General';
+            const displayName = `${groupName} / ${topicTitle}`;
+
+            // Extract topic emoji
+            let topicEmoji: string | undefined;
+            // Check if title ends with an emoji
+            const emojiMatch = topicTitle.match(/([\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}])\s*$/u);
+            if (emojiMatch) {
+              topicEmoji = emojiMatch[1];
+            } else if (topicTitle === 'General' || topicId === 1) {
+              topicEmoji = '💬';
+            } else {
+              topicEmoji = '⌗';
+            }
+
             results.push({
               id: dialogId,
               chatId,
@@ -185,9 +201,12 @@ export class TelegramService {
               lastMessage: '', // Topic-level last message requires extra fetch
               lastMessageTime: topic.date || 0,
               unreadCount: topic.unreadCount || 0,
-              initials: this.getInitials(topicName),
+              initials: this.getInitials(groupName),
               isPinned: pinnedIds.includes(dialogId),
               isForum: true,
+              topicEmoji,
+              groupName,
+              topicName: topicTitle,
             });
           }
         } catch {
