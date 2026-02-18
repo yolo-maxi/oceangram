@@ -13,50 +13,44 @@
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
-    "viewsContainers": {
-      "activitybar": [
-        {
-          "id": "oceangram",
-          "title": "Oceangram",
-          "icon": "media/oceangram.svg"
-        }
-      ]
-    },
-    "views": {
-      "oceangram": [
-        {
-          "type": "webview",
-          "id": "oceangram.kanban",
-          "name": "Kanban"
-        },
-        {
-          "type": "webview",
-          "id": "oceangram.resources",
-          "name": "Resources"
-        },
-        {
-          "type": "webview",
-          "id": "oceangram.agentStatus",
-          "name": "Agent Status"
-        }
-      ]
-    },
     "commands": [
       {
-        "command": "oceangram.refreshAll",
-        "title": "Oceangram: Refresh All Panels"
+        "command": "oceangram.openComms",
+        "title": "Oceangram: Open Comms"
       },
       {
-        "command": "oceangram.openComms",
-        "title": "Oceangram: Open Comms",
-        "icon": "💬"
+        "command": "oceangram.openKanban",
+        "title": "Oceangram: Open Kanban"
+      },
+      {
+        "command": "oceangram.openResources",
+        "title": "Oceangram: Open Resources"
+      },
+      {
+        "command": "oceangram.openAgent",
+        "title": "Oceangram: Open Agent Status"
       }
     ],
     "keybindings": [
       {
         "command": "oceangram.openComms",
-        "key": "ctrl+shift+t",
-        "mac": "cmd+shift+t"
+        "key": "ctrl+shift+1",
+        "mac": "cmd+shift+1"
+      },
+      {
+        "command": "oceangram.openKanban",
+        "key": "ctrl+shift+2",
+        "mac": "cmd+shift+2"
+      },
+      {
+        "command": "oceangram.openResources",
+        "key": "ctrl+shift+3",
+        "mac": "cmd+shift+3"
+      },
+      {
+        "command": "oceangram.openAgent",
+        "key": "ctrl+shift+4",
+        "mac": "cmd+shift+4"
       }
     ]
   },
