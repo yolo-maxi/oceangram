@@ -322,6 +322,11 @@ export class ChatTab {
             const updated = await tg.getMessages(this.chatId, 50);
             this.panel.webview.postMessage({ type: 'messages', messages: updated });
             break;
+          case 'loadOlder':
+            await tg.connect();
+            const older = await tg.getMessages(this.chatId, 30, msg.beforeId);
+            this.panel.webview.postMessage({ type: 'olderMessages', messages: older });
+            break;
           case 'poll':
             await tg.connect();
             const polled = await tg.getMessages(this.chatId, 50);
@@ -551,6 +556,28 @@ body {
 .reaction-emoji { font-size: 14px; }
 .reaction-count { font-size: 11px; opacity: 0.7; }
 
+/* New messages indicator */
+.new-msgs-btn {
+  position: sticky;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 16px;
+  border-radius: 16px;
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  z-index: 10;
+  display: none;
+  width: fit-content;
+  margin: 0 auto;
+}
+.new-msgs-btn:hover { opacity: 0.9; }
+
 /* Date separator */
 .date-separator {
   text-align: center;
@@ -727,6 +754,7 @@ body {
 <div class="messages-list" id="messagesList">
   <div class="loading">Loading…</div>
 </div>
+<button class="new-msgs-btn" id="newMsgsBtn" onclick="scrollToBottom()">↓ New messages</button>
 <div class="composer">
   <textarea id="msgInput" rows="1" placeholder="Message ${name}…" autofocus></textarea>
   <button class="send-btn" id="sendBtn" title="Send">
@@ -952,15 +980,71 @@ msgInput.addEventListener('keydown', (e) => {
   }
 });
 
+// Track all messages for prepending older ones
+let allMessages = [];
+let loadingOlder = false;
+let oldestId = 0;
+const newMsgsBtn = document.getElementById('newMsgsBtn');
+let newMsgCount = 0;
+
+function isScrolledToBottom() {
+  return messagesList.scrollHeight - messagesList.scrollTop - messagesList.clientHeight < 60;
+}
+function scrollToBottom() {
+  messagesList.scrollTop = messagesList.scrollHeight;
+  newMsgsBtn.style.display = 'none';
+  newMsgCount = 0;
+}
+
 window.addEventListener('message', (event) => {
   const msg = event.data;
   switch (msg.type) {
-    case 'messages': renderMessages(msg.messages); break;
+    case 'messages':
+      var wasAtBottom = isScrolledToBottom();
+      var prevLen = allMessages.length;
+      allMessages = msg.messages;
+      if (allMessages.length > 0) oldestId = allMessages[0].id || 0;
+      renderMessages(allMessages);
+      if (!wasAtBottom && allMessages.length > prevLen && prevLen > 0) {
+        newMsgCount += allMessages.length - prevLen;
+        newMsgsBtn.textContent = '↓ ' + newMsgCount + ' new message' + (newMsgCount > 1 ? 's' : '');
+        newMsgsBtn.style.display = 'block';
+      }
+      break;
+    case 'olderMessages':
+      loadingOlder = false;
+      if (msg.messages && msg.messages.length > 0) {
+        // Prepend older messages, avoid duplicates
+        const existingIds = new Set(allMessages.map(m => m.id));
+        const newOlder = msg.messages.filter(m => !existingIds.has(m.id));
+        if (newOlder.length > 0) {
+          allMessages = [...newOlder, ...allMessages];
+          oldestId = allMessages[0].id || 0;
+          // Save scroll height to maintain position
+          const prevHeight = messagesList.scrollHeight;
+          renderMessages(allMessages);
+          // Restore scroll position
+          messagesList.scrollTop = messagesList.scrollHeight - prevHeight;
+        }
+      }
+      break;
     case 'error':
       errorBox.textContent = msg.message;
       errorBox.style.display = 'block';
       setTimeout(() => errorBox.style.display = 'none', 5000);
       break;
+  }
+});
+
+// Infinite scroll — load older on scroll to top, hide new msg btn at bottom
+messagesList.addEventListener('scroll', () => {
+  if (messagesList.scrollTop < 80 && !loadingOlder && oldestId > 0) {
+    loadingOlder = true;
+    vscode.postMessage({ type: 'loadOlder', beforeId: oldestId });
+  }
+  if (isScrolledToBottom()) {
+    newMsgsBtn.style.display = 'none';
+    newMsgCount = 0;
   }
 });
 

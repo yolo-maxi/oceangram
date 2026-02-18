@@ -308,20 +308,16 @@ export class TelegramService {
 
   // --- Messages ---
 
-  async getMessages(dialogId: string, limit = 50): Promise<MessageInfo[]> {
+  async getMessages(dialogId: string, limit = 50, offsetId?: number): Promise<MessageInfo[]> {
     if (!this.client) throw new Error('Not connected');
     const { chatId, topicId } = TelegramService.parseDialogId(dialogId);
     const entity = await this.client.getEntity(chatId);
 
-    let msgs;
-    if (topicId) {
-      msgs = await this.client.getMessages(entity, {
-        limit,
-        replyTo: topicId,
-      });
-    } else {
-      msgs = await this.client.getMessages(entity, { limit });
-    }
+    const opts: any = { limit };
+    if (topicId) opts.replyTo = topicId;
+    if (offsetId) opts.offsetId = offsetId;
+
+    const msgs = await this.client.getMessages(entity, opts);
 
     // Build a map of message IDs for reply lookups
     const msgMap = new Map<number, any>();
