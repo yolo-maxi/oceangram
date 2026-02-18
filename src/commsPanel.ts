@@ -262,11 +262,11 @@ export class ChatTab {
   static createOrShow(chatId: string, chatName: string, context: vscode.ExtensionContext) {
     const existing = ChatTab.tabs.get(chatId);
     if (existing) {
-      existing.panel.reveal(vscode.ViewColumn.One);
+      existing.panel.reveal();
       return;
     }
     const panel = vscode.window.createWebviewPanel(
-      'oceangram.chat', `💬 ${chatName}`, vscode.ViewColumn.One,
+      'oceangram.chat', `💬 ${chatName}`, vscode.ViewColumn.Active,
       { enableScripts: true, retainContextWhenHidden: true }
     );
     ChatTab.tabs.set(chatId, new ChatTab(panel, chatId, chatName));
