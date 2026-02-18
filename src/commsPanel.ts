@@ -1051,6 +1051,9 @@ msgInput.addEventListener('keydown', (e) => {
     e.preventDefault();
     doSend();
   }
+  if (e.key === 'Escape' && replyToId) {
+    clearReply();
+  }
 });
 
 // Track all messages for prepending older ones
