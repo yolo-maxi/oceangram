@@ -4,3 +4,7 @@ node_modules/
 *.vsix
 out/
 .next/
+
+# Credentials
+.oceangram/
+config.json

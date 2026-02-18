@@ -40,9 +40,25 @@ export class TelegramService {
   async connect(): Promise<void> {
     if (this.connected) return;
 
-    const apiId = parseInt(process.env.TELEGRAM_API_ID || '35419737', 10);
-    const apiHash = process.env.TELEGRAM_API_HASH || 'f689329727c1f0002f72152be5f3f6fa';
-    const sessionString = process.env.TELEGRAM_SESSION || '1BAAOMTQ5LjE1NC4xNjcuOTEAUB7AWOonm5gqktEItqbPhPnn/VP+MWHhKWzhXCMxmaMt4VhoMSTfgw1uA/QKt8z7fXpF0pkdtmN8PkivXjiJb2U66HPKCAPmcFiOxly6u4NNdqlkZvWzBQT3MLnNNDwTuZ+x8XjIEEMGc13S0M6ZxGfKBSiybieLaH1eCHCYxFSYcyistaQ8gXD/DaVxSC3BcCSSgK0oG1aUa+feEzkyqvcYjv2ECiL9ACkdxokIVwXk7MD9ZFekeRmx5JY/UZcsfQDhGpr6bLtUBPbabmW78OEcDxzqvPsjmYadbFORaBRTa3IPfGXdYuTQmvV1sXRVAK3VW+lqehK1HbgUR4ut/Cg=';
+    // Credentials loaded from env vars or config file — never hardcoded
+    const configPath = path.join(CONFIG_DIR, 'config.json');
+    let fileConfig: Record<string, string> = {};
+    try {
+      if (fs.existsSync(configPath)) {
+        fileConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      }
+    } catch { /* ignore */ }
+
+    const apiId = parseInt(process.env.TELEGRAM_API_ID || fileConfig.apiId || '0', 10);
+    const apiHash = process.env.TELEGRAM_API_HASH || fileConfig.apiHash || '';
+    const sessionString = process.env.TELEGRAM_SESSION || fileConfig.session || '';
+
+    if (!apiId || !apiHash || !sessionString) {
+      throw new Error(
+        'Telegram credentials not configured. Set TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_SESSION env vars ' +
+        'or create ~/.oceangram/config.json with { "apiId": "...", "apiHash": "...", "session": "..." }'
+      );
+    }
 
     const session = new StringSession(sessionString);
     this.client = new TelegramClient(session, apiId, apiHash, {
