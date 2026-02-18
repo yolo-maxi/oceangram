@@ -34,6 +34,22 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  // Telegram login/logout command
+  context.subscriptions.push(
+    vscode.commands.registerCommand('oceangram.telegramLogin', async () => {
+      const configPath = require('path').join(process.env.HOME || '', '.oceangram', 'config.json');
+      try {
+        const fs = require('fs');
+        if (fs.existsSync(configPath)) {
+          const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+          delete config.session;
+          fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+        }
+      } catch { /* ignore */ }
+      vscode.window.showInformationMessage('Session cleared. Open Comms to log in again.');
+    })
+  );
+
   // Auto-open chat picker
   CommsPicker.show(context);
 

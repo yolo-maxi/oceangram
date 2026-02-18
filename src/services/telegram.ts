@@ -3,9 +3,11 @@ import { StringSession } from 'telegram/sessions';
 import { Api } from 'telegram';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as vscode from 'vscode';
 
 const CONFIG_DIR = path.join(process.env.HOME || '/home/xiko', '.oceangram');
 const PINNED_PATH = path.join(CONFIG_DIR, 'pinned.json');
+const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
 
 export interface DialogInfo {
   id: string;           // "chatId" or "chatId:topicId" for forum topics
@@ -79,37 +81,143 @@ export class TelegramService {
   private connected = false;
   private forumTopicsCache: Map<string, Api.ForumTopic[]> = new Map();
 
+  private loadConfig(): Record<string, string> {
+    try {
+      if (fs.existsSync(CONFIG_PATH)) {
+        return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+      }
+    } catch { /* ignore */ }
+    return {};
+  }
+
+  private saveConfig(config: Record<string, string>): void {
+    if (!fs.existsSync(CONFIG_DIR)) {
+      fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    }
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+  }
+
+  // Built-in app credentials (same as any public Telegram client)
+  private static readonly DEFAULT_API_ID = 35419737;
+  private static readonly DEFAULT_API_HASH = 'f689329727c1f0002f72152be5f3f6fa';
+
   async connect(): Promise<void> {
     if (this.connected) return;
 
-    // Credentials loaded from env vars or config file — never hardcoded
-    const configPath = path.join(CONFIG_DIR, 'config.json');
-    let fileConfig: Record<string, string> = {};
-    try {
-      if (fs.existsSync(configPath)) {
-        fileConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-      }
-    } catch { /* ignore */ }
+    const fileConfig = this.loadConfig();
 
-    const apiId = parseInt(process.env.TELEGRAM_API_ID || fileConfig.apiId || '0', 10);
-    const apiHash = process.env.TELEGRAM_API_HASH || fileConfig.apiHash || '';
+    const apiId = parseInt(process.env.TELEGRAM_API_ID || fileConfig.apiId || '0', 10) || TelegramService.DEFAULT_API_ID;
+    const apiHash = process.env.TELEGRAM_API_HASH || fileConfig.apiHash || TelegramService.DEFAULT_API_HASH;
     const sessionString = process.env.TELEGRAM_SESSION || fileConfig.session || '';
-
-    if (!apiId || !apiHash || !sessionString) {
-      throw new Error(
-        'Telegram credentials not configured. Set TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_SESSION env vars ' +
-        'or create ~/.oceangram/config.json with { "apiId": "...", "apiHash": "...", "session": "..." }'
-      );
-    }
 
     const session = new StringSession(sessionString);
     this.client = new TelegramClient(session, apiId, apiHash, {
       connectionRetries: 5,
     });
 
-    await this.client.connect();
+    // If no session string, do interactive login
+    if (!sessionString) {
+      await this.interactiveLogin(apiId, apiHash);
+    } else {
+      await this.client.connect();
+    }
+
     this.connected = true;
     console.log('[Oceangram] Telegram connected');
+  }
+
+  private async promptApiCredentials(): Promise<{ apiId: number; apiHash: string } | null> {
+    const info = await vscode.window.showInformationMessage(
+      'Telegram not configured. You need API credentials from my.telegram.org.',
+      'Set up now', 'Open my.telegram.org', 'Cancel'
+    );
+
+    if (info === 'Open my.telegram.org') {
+      vscode.env.openExternal(vscode.Uri.parse('https://my.telegram.org/apps'));
+    }
+    if (info === 'Cancel' || !info) return null;
+
+    const idStr = await vscode.window.showInputBox({
+      title: 'Telegram API ID',
+      prompt: 'Enter your API ID from my.telegram.org/apps',
+      placeHolder: '12345678',
+      ignoreFocusOut: true,
+    });
+    if (!idStr) return null;
+
+    const hash = await vscode.window.showInputBox({
+      title: 'Telegram API Hash',
+      prompt: 'Enter your API Hash from my.telegram.org/apps',
+      placeHolder: 'abcdef1234567890abcdef1234567890',
+      ignoreFocusOut: true,
+    });
+    if (!hash) return null;
+
+    const apiId = parseInt(idStr, 10);
+    if (isNaN(apiId)) {
+      vscode.window.showErrorMessage('Invalid API ID — must be a number');
+      return null;
+    }
+
+    // Save credentials
+    const config = this.loadConfig();
+    config.apiId = idStr;
+    config.apiHash = hash;
+    this.saveConfig(config);
+
+    return { apiId, apiHash: hash };
+  }
+
+  private async interactiveLogin(apiId: number, apiHash: string): Promise<void> {
+    const session = new StringSession('');
+    this.client = new TelegramClient(session, apiId, apiHash, {
+      connectionRetries: 5,
+    });
+
+    await this.client.start({
+      phoneNumber: async () => {
+        const phone = await vscode.window.showInputBox({
+          title: 'Telegram Login',
+          prompt: 'Enter your phone number (with country code)',
+          placeHolder: '+1234567890',
+          ignoreFocusOut: true,
+        });
+        if (!phone) throw new Error('Login cancelled');
+        return phone;
+      },
+      phoneCode: async () => {
+        const code = await vscode.window.showInputBox({
+          title: 'Telegram Verification Code',
+          prompt: 'Enter the code Telegram sent you',
+          placeHolder: '12345',
+          ignoreFocusOut: true,
+        });
+        if (!code) throw new Error('Login cancelled');
+        return code;
+      },
+      password: async () => {
+        const pw = await vscode.window.showInputBox({
+          title: 'Two-Factor Authentication',
+          prompt: 'Enter your 2FA password',
+          password: true,
+          ignoreFocusOut: true,
+        });
+        if (!pw) throw new Error('Login cancelled');
+        return pw;
+      },
+      onError: (err) => {
+        console.error('[Oceangram] Login error:', err);
+        vscode.window.showErrorMessage(`Telegram login error: ${err.message}`);
+      },
+    });
+
+    // Save session string for next time
+    const sessionStr = this.client.session.save() as unknown as string;
+    const config = this.loadConfig();
+    config.session = sessionStr;
+    this.saveConfig(config);
+
+    vscode.window.showInformationMessage('✅ Telegram logged in successfully!');
   }
 
   async disconnect(): Promise<void> {

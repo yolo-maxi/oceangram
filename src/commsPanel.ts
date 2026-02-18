@@ -1,11 +1,19 @@
 import * as vscode from 'vscode';
 import { TelegramService } from './services/telegram';
+import { OpenClawService, AgentSessionInfo } from './services/openclaw';
 
 // Shared telegram service across all panels
 let sharedTelegram: TelegramService | undefined;
 function getTelegram(): TelegramService {
   if (!sharedTelegram) sharedTelegram = new TelegramService();
   return sharedTelegram;
+}
+
+// Shared OpenClaw service
+let sharedOpenClaw: OpenClawService | undefined;
+function getOpenClaw(): OpenClawService {
+  if (!sharedOpenClaw) sharedOpenClaw = new OpenClawService();
+  return sharedOpenClaw;
 }
 
 /**
@@ -302,8 +310,19 @@ export class ChatTab {
     this.chatName = chatName;
     this.panel.webview.html = this.getHtml();
 
+    // Start OpenClaw session polling if configured
+    const openclaw = getOpenClaw();
+    if (openclaw.isConfigured) {
+      const { chatId: rawChatId, topicId } = TelegramService.parseDialogId(chatId);
+      openclaw.startPolling(rawChatId, topicId, (info) => {
+        this.panel.webview.postMessage({ type: 'agentInfo', info });
+      });
+    }
+
     this.panel.onDidDispose(() => {
       ChatTab.tabs.delete(this.chatId);
+      const { chatId: rawChatId, topicId } = TelegramService.parseDialogId(this.chatId);
+      getOpenClaw().stopPolling(rawChatId, topicId);
       this.disposables.forEach(d => d.dispose());
     }, null, this.disposables);
 
@@ -352,11 +371,29 @@ export class ChatTab {
 <meta charset="UTF-8">
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --tg-bg: #0e1621;
+  --tg-bg-secondary: #17212b;
+  --tg-msg-in-bg: #182533;
+  --tg-msg-out-bg: #2b5278;
+  --tg-msg-in-border: rgba(255,255,255,0.04);
+  --tg-text: #f5f5f5;
+  --tg-text-secondary: #6d7f8f;
+  --tg-link: #6ab2f2;
+  --tg-accent: #6ab2f2;
+  --tg-sender-colors: #e06c75, #e5c07b, #61afef, #c678dd, #56b6c2, #98c379, #d19a66, #be5046;
+  --tg-composer-bg: #17212b;
+  --tg-composer-input-bg: #242f3d;
+  --tg-time: #5a6e7e;
+  --tg-date-bg: rgba(0,0,0,0.35);
+  --tg-reply-bar: #2b5278;
+  --tg-scrollbar: rgba(255,255,255,0.08);
+}
 body {
-  font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, system-ui, sans-serif);
-  color: var(--vscode-foreground, #ccc);
-  background: var(--vscode-editor-background, #1e1e1e);
-  font-size: 13px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  color: var(--tg-text);
+  background: var(--tg-bg);
+  font-size: 14px;
   height: 100vh;
   display: flex;
   flex-direction: column;
@@ -368,17 +405,17 @@ body {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 16px 16px 8px;
+  padding: 8px 48px 8px;
   scroll-behavior: smooth;
 }
-.messages-list::-webkit-scrollbar { width: 6px; }
+.messages-list::-webkit-scrollbar { width: 5px; }
 .messages-list::-webkit-scrollbar-track { background: transparent; }
 .messages-list::-webkit-scrollbar-thumb {
-  background: var(--vscode-scrollbarSlider-background, rgba(255,255,255,0.1));
-  border-radius: 3px;
+  background: var(--tg-scrollbar);
+  border-radius: 5px;
 }
 .messages-list::-webkit-scrollbar-thumb:hover {
-  background: var(--vscode-scrollbarSlider-hoverBackground, rgba(255,255,255,0.2));
+  background: rgba(255,255,255,0.15);
 }
 
 /* Empty state */
@@ -388,28 +425,35 @@ body {
   align-items: center;
   justify-content: center;
   height: 100%;
-  opacity: 0.4;
+  opacity: 0.35;
   user-select: none;
 }
 .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
-.empty-state .label { font-size: 14px; }
+.empty-state .label { font-size: 14px; color: var(--tg-text-secondary); }
 
 /* Message groups */
-.msg-group { margin-bottom: 12px; display: flex; flex-direction: column; }
+.msg-group { margin-bottom: 4px; display: flex; flex-direction: column; }
 .msg-group.outgoing { align-items: flex-end; }
 .msg-group.incoming { align-items: flex-start; }
 
 .msg-group .group-sender {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--vscode-textLink-foreground, #3794ff);
-  margin-bottom: 3px;
-  margin-left: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 2px;
+  margin-left: 12px;
 }
+/* Rotate sender colors like Telegram */
+.msg-group:nth-child(7n+1) .group-sender { color: #e06c75; }
+.msg-group:nth-child(7n+2) .group-sender { color: #e5c07b; }
+.msg-group:nth-child(7n+3) .group-sender { color: #61afef; }
+.msg-group:nth-child(7n+4) .group-sender { color: #c678dd; }
+.msg-group:nth-child(7n+5) .group-sender { color: #56b6c2; }
+.msg-group:nth-child(7n+6) .group-sender { color: #98c379; }
+.msg-group:nth-child(7n+7) .group-sender { color: #d19a66; }
 
 /* Individual message row */
 .msg {
-  max-width: 75%;
+  max-width: 480px;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -419,115 +463,113 @@ body {
 
 /* Bubble */
 .msg-bubble {
-  padding: 7px 12px;
-  font-size: 13px;
-  line-height: 1.45;
+  padding: 6px 11px 7px;
+  font-size: 14px;
+  line-height: 1.35;
   word-wrap: break-word;
   overflow-wrap: break-word;
   white-space: pre-wrap;
   position: relative;
 }
 .msg-bubble a {
-  color: inherit;
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  color: var(--tg-link);
+  text-decoration: none;
 }
-.msg-bubble a:hover { opacity: 0.8; }
+.msg-bubble a:hover { text-decoration: underline; }
 
 /* Incoming bubbles */
 .msg-group.incoming .msg-bubble {
-  background: var(--vscode-input-background, #2a2d2e);
-  border: 1px solid var(--vscode-panel-border, rgba(255,255,255,0.06));
-  color: var(--vscode-foreground, #ccc);
+  background: var(--tg-msg-in-bg);
+  color: var(--tg-text);
+  border: none;
 }
 
 /* Outgoing bubbles */
 .msg-group.outgoing .msg-bubble {
-  background: var(--vscode-button-background, #0e639c);
-  color: var(--vscode-button-foreground, #fff);
+  background: var(--tg-msg-out-bg);
+  color: var(--tg-text);
   border: none;
 }
 
 /* Border radius — Telegram-style grouped bubbles */
-/* Incoming: solo */
-.msg-group.incoming .msg.solo .msg-bubble { border-radius: 4px 16px 16px 4px; }
-/* Incoming: first of group */
-.msg-group.incoming .msg.first .msg-bubble { border-radius: 16px 16px 16px 4px; }
-/* Incoming: middle of group */
-.msg-group.incoming .msg.middle .msg-bubble { border-radius: 4px 16px 16px 4px; }
-/* Incoming: last of group */
-.msg-group.incoming .msg.last .msg-bubble { border-radius: 4px 16px 16px 16px; }
+.msg-group.incoming .msg.solo .msg-bubble { border-radius: 12px 12px 12px 4px; }
+.msg-group.incoming .msg.first .msg-bubble { border-radius: 12px 12px 12px 4px; }
+.msg-group.incoming .msg.middle .msg-bubble { border-radius: 4px 12px 12px 4px; }
+.msg-group.incoming .msg.last .msg-bubble { border-radius: 4px 12px 12px 12px; }
 
-/* Outgoing: solo */
-.msg-group.outgoing .msg.solo .msg-bubble { border-radius: 16px 4px 4px 16px; }
-/* Outgoing: first of group */
-.msg-group.outgoing .msg.first .msg-bubble { border-radius: 16px 16px 4px 16px; }
-/* Outgoing: middle of group */
-.msg-group.outgoing .msg.middle .msg-bubble { border-radius: 16px 4px 4px 16px; }
-/* Outgoing: last of group */
-.msg-group.outgoing .msg.last .msg-bubble { border-radius: 16px 4px 16px 16px; }
+.msg-group.outgoing .msg.solo .msg-bubble { border-radius: 12px 12px 4px 12px; }
+.msg-group.outgoing .msg.first .msg-bubble { border-radius: 12px 12px 4px 12px; }
+.msg-group.outgoing .msg.middle .msg-bubble { border-radius: 12px 4px 4px 12px; }
+.msg-group.outgoing .msg.last .msg-bubble { border-radius: 12px 4px 12px 12px; }
 
 /* Spacing between messages in a group */
 .msg + .msg { margin-top: 2px; }
 
-/* Timestamp — shown on last msg of group or on hover */
+/* Timestamp — inline at bottom-right of bubble like Telegram */
 .msg-time {
-  font-size: 10px;
-  opacity: 0;
-  margin-top: 2px;
-  padding: 0 4px;
-  color: var(--vscode-descriptionForeground, #888);
-  transition: opacity 0.15s;
+  font-size: 11px;
+  color: var(--tg-time);
+  float: right;
+  margin-left: 8px;
+  margin-top: 4px;
+  position: relative;
+  top: 4px;
   user-select: none;
   white-space: nowrap;
+  opacity: 1;
 }
-.msg-time.visible { opacity: 0.5; }
-.msg:hover .msg-time { opacity: 0.5; }
+/* Outgoing time is lighter */
+.msg-group.outgoing .msg-time { color: rgba(255,255,255,0.45); }
+/* Hide time on non-last messages in group, show on hover */
+.msg-time.hidden { display: none; }
+.msg:hover .msg-time.hidden { display: inline; }
 
 /* Forward header */
 .forward-header {
-  font-size: 11px;
-  color: var(--vscode-textLink-foreground, #3794ff);
+  font-size: 13px;
+  color: var(--tg-accent);
   margin-bottom: 4px;
   font-style: italic;
 }
 
 /* Reply quote */
 .reply-quote {
-  border-left: 3px solid var(--vscode-textLink-foreground, #3794ff);
-  padding: 3px 8px;
-  margin-bottom: 4px;
-  font-size: 12px;
-  opacity: 0.85;
+  border-left: 2px solid var(--tg-accent);
+  padding: 4px 8px;
+  margin-bottom: 6px;
+  font-size: 13px;
   border-radius: 2px;
-  background: rgba(255,255,255,0.04);
+  background: rgba(255,255,255,0.05);
   max-width: 100%;
   overflow: hidden;
+  cursor: pointer;
 }
 .reply-sender {
-  font-weight: 600;
-  font-size: 11px;
-  color: var(--vscode-textLink-foreground, #3794ff);
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--tg-accent);
 }
 .reply-text {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  opacity: 0.7;
+  color: var(--tg-text-secondary);
+  font-size: 13px;
+  margin-top: 1px;
 }
 
 /* Media */
 .msg-photo {
   max-width: 100%;
-  border-radius: 8px;
+  border-radius: 6px;
   margin-bottom: 4px;
   cursor: pointer;
 }
-.msg-photo:hover { opacity: 0.9; }
+.msg-photo:hover { opacity: 0.92; }
 .msg-file, .msg-voice, .msg-video, .msg-sticker, .msg-gif {
-  font-size: 12px;
+  font-size: 13px;
   padding: 4px 0;
-  opacity: 0.8;
+  color: var(--tg-text-secondary);
 }
 
 /* Reactions */
@@ -543,18 +585,18 @@ body {
   gap: 3px;
   padding: 2px 8px;
   border-radius: 12px;
-  font-size: 12px;
-  background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.08);
+  font-size: 13px;
+  background: rgba(106,178,242,0.1);
+  border: 1px solid rgba(106,178,242,0.15);
   cursor: default;
   user-select: none;
 }
 .reaction-chip.selected {
-  border-color: var(--vscode-textLink-foreground, #3794ff);
-  background: rgba(55,148,255,0.12);
+  border-color: var(--tg-accent);
+  background: rgba(106,178,242,0.2);
 }
-.reaction-emoji { font-size: 14px; }
-.reaction-count { font-size: 11px; opacity: 0.7; }
+.reaction-emoji { font-size: 15px; }
+.reaction-count { font-size: 12px; color: var(--tg-text-secondary); }
 
 /* New messages indicator */
 .new-msgs-btn {
@@ -562,53 +604,53 @@ body {
   bottom: 8px;
   left: 50%;
   transform: translateX(-50%);
-  padding: 6px 16px;
-  border-radius: 16px;
-  background: var(--vscode-button-background, #0e639c);
-  color: var(--vscode-button-foreground, #fff);
-  font-size: 12px;
-  font-weight: 600;
+  padding: 8px 20px;
+  border-radius: 20px;
+  background: var(--tg-bg-secondary);
+  color: var(--tg-accent);
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
   border: none;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.4);
   z-index: 10;
   display: none;
   width: fit-content;
   margin: 0 auto;
 }
-.new-msgs-btn:hover { opacity: 0.9; }
+.new-msgs-btn:hover { background: #1e2c3a; }
 
 /* Date separator */
 .date-separator {
   text-align: center;
-  padding: 12px 0 8px;
+  padding: 8px 0 6px;
   user-select: none;
 }
 .date-separator span {
-  font-size: 11px;
-  opacity: 0.45;
-  background: var(--vscode-editor-background, #1e1e1e);
-  padding: 2px 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(255,255,255,0.06);
+  font-size: 13px;
+  font-weight: 500;
+  color: #fff;
+  background: var(--tg-date-bg);
+  padding: 4px 12px;
+  border-radius: 16px;
 }
 
 /* Edited label */
 .msg-edited {
-  font-size: 10px;
-  opacity: 0.4;
-  margin-left: 6px;
+  font-size: 11px;
+  color: var(--tg-time);
+  margin-right: 4px;
   font-style: italic;
 }
 
 /* Link preview card */
 .link-preview {
-  border-left: 3px solid var(--vscode-textLink-foreground, #3794ff);
+  border-left: 2px solid var(--tg-accent);
   padding: 6px 10px;
   margin-top: 6px;
   border-radius: 4px;
   background: rgba(255,255,255,0.04);
-  font-size: 12px;
+  font-size: 13px;
 }
 .lp-image {
   max-width: 100%;
@@ -616,11 +658,12 @@ body {
   margin-bottom: 4px;
 }
 .lp-title {
-  font-weight: 600;
+  font-weight: 500;
   margin-bottom: 2px;
+  color: var(--tg-text);
 }
 .lp-desc {
-  opacity: 0.7;
+  color: var(--tg-text-secondary);
   margin-bottom: 2px;
   display: -webkit-box;
   -webkit-line-clamp: 3;
@@ -628,8 +671,8 @@ body {
   overflow: hidden;
 }
 .lp-url {
-  font-size: 11px;
-  opacity: 0.5;
+  font-size: 12px;
+  color: var(--tg-accent);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -637,18 +680,19 @@ body {
 
 /* Code styling */
 .msg-bubble code {
-  background: rgba(255,255,255,0.08);
-  padding: 1px 4px;
-  border-radius: 3px;
-  font-family: var(--vscode-editor-font-family, monospace);
-  font-size: 12px;
+  background: rgba(0,0,0,0.2);
+  padding: 2px 5px;
+  border-radius: 4px;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 13px;
 }
 .msg-bubble pre {
-  background: rgba(0,0,0,0.2);
-  padding: 8px;
-  border-radius: 4px;
+  background: rgba(0,0,0,0.25);
+  padding: 10px 12px;
+  border-radius: 6px;
   overflow-x: auto;
-  margin: 4px 0;
+  margin: 6px 0;
+  font-size: 13px;
 }
 .msg-bubble pre code {
   background: transparent;
@@ -659,13 +703,15 @@ body {
 .lightbox-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.85);
+  background: rgba(0,0,0,0.92);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
   cursor: pointer;
+  animation: fadeIn 0.15s ease;
 }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 .lightbox-overlay img {
   max-width: 95vw;
   max-height: 95vh;
@@ -678,7 +724,7 @@ body {
   background: transparent !important;
   border: none !important;
   padding: 2px 4px;
-  font-size: 32px;
+  font-size: 36px;
   line-height: 1.2;
 }
 
@@ -686,84 +732,85 @@ body {
 .reply-bar {
   display: none;
   align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  border-top: 1px solid var(--vscode-panel-border, rgba(255,255,255,0.08));
-  border-left: 3px solid var(--vscode-textLink-foreground, #3794ff);
-  background: rgba(55,148,255,0.06);
+  gap: 10px;
+  padding: 8px 16px 8px 14px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  border-left: 3px solid var(--tg-accent);
+  background: var(--tg-composer-bg);
   flex-shrink: 0;
 }
 .reply-bar.active { display: flex; }
 .reply-bar-content { flex: 1; min-width: 0; }
-.reply-bar-sender { font-size: 11px; font-weight: 600; color: var(--vscode-textLink-foreground, #3794ff); }
-.reply-bar-text { font-size: 12px; opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.reply-bar-sender { font-size: 13px; font-weight: 500; color: var(--tg-accent); }
+.reply-bar-text { font-size: 13px; color: var(--tg-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .reply-bar-close {
-  cursor: pointer; padding: 4px; border-radius: 4px; opacity: 0.6;
+  cursor: pointer; padding: 4px; border-radius: 50%; opacity: 0.5;
   font-size: 14px; flex-shrink: 0; background: none; border: none;
-  color: var(--vscode-foreground, #ccc);
+  color: var(--tg-text);
+  width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
 }
-.reply-bar-close:hover { opacity: 1; background: rgba(255,255,255,0.1); }
+.reply-bar-close:hover { opacity: 1; background: rgba(255,255,255,0.08); }
 
 /* Context menu */
 .ctx-menu {
   position: fixed;
-  background: var(--vscode-menu-background, #252526);
-  border: 1px solid var(--vscode-menu-border, #454545);
-  border-radius: 6px;
-  padding: 4px 0;
-  min-width: 120px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  background: var(--tg-bg-secondary);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  padding: 6px 0;
+  min-width: 140px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
   z-index: 100;
-  font-size: 13px;
+  font-size: 14px;
+  animation: fadeIn 0.1s ease;
 }
 .ctx-menu-item {
-  padding: 6px 16px;
+  padding: 8px 16px;
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
-.ctx-menu-item:hover { background: var(--vscode-list-hoverBackground, #2a2a2a); }
+.ctx-menu-item:hover { background: rgba(255,255,255,0.06); }
 
 /* Composer */
 .composer {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  padding: 10px 16px 12px;
-  border-top: 1px solid var(--vscode-panel-border, rgba(255,255,255,0.08));
+  padding: 8px 12px 10px;
   flex-shrink: 0;
-  background: var(--vscode-editor-background, #1e1e1e);
+  background: var(--tg-composer-bg);
 }
 .composer textarea {
   flex: 1;
-  padding: 8px 14px;
-  background: var(--vscode-input-background, #2a2a2a);
-  color: var(--vscode-input-foreground, #ccc);
-  border: 1px solid var(--vscode-input-border, rgba(255,255,255,0.1));
-  border-radius: 18px;
-  font-size: 13px;
+  padding: 9px 14px;
+  background: var(--tg-composer-input-bg);
+  color: var(--tg-text);
+  border: none;
+  border-radius: 20px;
+  font-size: 14px;
   font-family: inherit;
-  line-height: 1.4;
+  line-height: 1.35;
   outline: none;
   resize: none;
   max-height: 120px;
   overflow-y: auto;
-  rows: 1;
 }
 .composer textarea:focus {
-  border-color: var(--vscode-focusBorder, #007acc);
+  background: var(--tg-composer-input-bg);
 }
 .composer textarea::placeholder {
-  color: var(--vscode-input-placeholderForeground, #666);
+  color: var(--tg-text-secondary);
 }
 .send-btn {
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   border: none;
-  background: var(--vscode-button-background, #0e639c);
-  color: var(--vscode-button-foreground, #fff);
+  background: transparent;
+  color: var(--tg-accent);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -771,9 +818,9 @@ body {
   flex-shrink: 0;
   transition: background 0.15s, transform 0.1s;
 }
-.send-btn:hover { background: var(--vscode-button-hoverBackground, #1177bb); }
+.send-btn:hover { background: rgba(106,178,242,0.1); }
 .send-btn:active { transform: scale(0.92); }
-.send-btn svg { width: 16px; height: 16px; fill: currentColor; }
+.send-btn svg { width: 20px; height: 20px; fill: currentColor; }
 
 /* Loading & error */
 .loading {
@@ -781,19 +828,95 @@ body {
   align-items: center;
   justify-content: center;
   height: 100%;
-  opacity: 0.4;
+  color: var(--tg-text-secondary);
 }
 .error {
-  color: var(--vscode-errorForeground, #f44);
+  color: #ef5350;
   padding: 8px 16px;
-  font-size: 12px;
-  background: var(--vscode-inputValidation-errorBackground, rgba(255,0,0,0.1));
-  border-top: 1px solid var(--vscode-inputValidation-errorBorder, rgba(255,0,0,0.3));
+  font-size: 13px;
+  background: rgba(239,83,80,0.08);
+  border-top: 1px solid rgba(239,83,80,0.2);
   flex-shrink: 0;
+}
+
+/* Agent banner — pinned Telegram-style */
+.agent-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 16px;
+  background: var(--tg-bg-secondary);
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: background 0.15s;
+  gap: 12px;
+}
+.agent-banner:hover { background: #1e2c3a; }
+.agent-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.agent-icon { font-size: 14px; flex-shrink: 0; }
+.agent-model {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--tg-accent);
+  white-space: nowrap;
+}
+.agent-status {
+  font-size: 11px;
+  color: var(--tg-text-secondary);
+  white-space: nowrap;
+}
+.agent-status.active { color: #98c379; }
+.agent-banner-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.agent-context-bar {
+  width: 80px;
+  height: 4px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.agent-context-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.5s ease, background 0.3s;
+  background: var(--tg-accent);
+}
+.agent-context-fill.warn { background: #e5c07b; }
+.agent-context-fill.critical { background: #e06c75; }
+.agent-context-label {
+  font-size: 11px;
+  color: var(--tg-text-secondary);
+  white-space: nowrap;
+  min-width: 36px;
+  text-align: right;
 }
 </style>
 </head>
 <body>
+<!-- Agent banner (hidden if no OpenClaw session) -->
+<div class="agent-banner" id="agentBanner" style="display:none">
+  <div class="agent-banner-left">
+    <span class="agent-icon">🦞</span>
+    <span class="agent-model" id="agentModel"></span>
+    <span class="agent-status" id="agentStatus"></span>
+  </div>
+  <div class="agent-banner-right">
+    <div class="agent-context-bar">
+      <div class="agent-context-fill" id="agentContextFill"></div>
+    </div>
+    <span class="agent-context-label" id="agentContextLabel"></span>
+  </div>
+</div>
 <div class="messages-list" id="messagesList">
   <div class="loading">Loading…</div>
 </div>
@@ -962,9 +1085,9 @@ function renderMessages(msgs) {
         bubbleInner += textContent;
       }
 
-      // Edited indicator
+      // Edited indicator — time is now inline inside bubble
       var timeStr = formatTime(m.timestamp);
-      if (m.isEdited) timeStr = '<span class="msg-edited">edited</span> ' + timeStr;
+      if (m.isEdited) timeStr = '<span class="msg-edited">edited</span>' + timeStr;
 
       // Link preview
       if (m.linkPreview) {
@@ -989,17 +1112,22 @@ function renderMessages(msgs) {
         reactionsHtml += '</div>';
       }
 
+      // Time goes inside bubble, inline at bottom-right like Telegram
+      var timeClass = isLast ? '' : ' hidden';
       html += '<div class="msg ' + pos + '" data-msg-id="' + m.id + '" data-sender="' + esc(m.senderName || '') + '" data-text="' + esc((m.text || '').slice(0, 100)) + '">' +
-        '<div class="' + bubbleCls + '">' + bubbleInner + '</div>' +
+        '<div class="' + bubbleCls + '">' + bubbleInner + '<span class="msg-time' + timeClass + '">' + timeStr + '</span></div>' +
         reactionsHtml +
-        '<div class="msg-time' + (isLast ? ' visible' : '') + '">' + timeStr + '</div>' +
         '</div>';
     }
     html += '</div>';
   }
 
+  // Check scroll position BEFORE replacing content
+  var shouldScroll = messagesList.scrollHeight - messagesList.scrollTop - messagesList.clientHeight < 60;
   messagesList.innerHTML = html;
-  messagesList.scrollTop = messagesList.scrollHeight;
+  if (shouldScroll) {
+    messagesList.scrollTop = messagesList.scrollHeight;
+  }
 
   // Track last message ID for polling
   if (msgs.length > 0) {
@@ -1080,7 +1208,9 @@ window.addEventListener('message', (event) => {
       var prevLen = allMessages.length;
       allMessages = msg.messages;
       if (allMessages.length > 0) oldestId = allMessages[0].id || 0;
+      var isFirstLoad = prevLen === 0;
       renderMessages(allMessages);
+      if (isFirstLoad) { messagesList.scrollTop = messagesList.scrollHeight; }
       if (!wasAtBottom && allMessages.length > prevLen && prevLen > 0) {
         newMsgCount += allMessages.length - prevLen;
         newMsgsBtn.textContent = '↓ ' + newMsgCount + ' new message' + (newMsgCount > 1 ? 's' : '');
@@ -1104,6 +1234,9 @@ window.addEventListener('message', (event) => {
         }
       }
       break;
+    case 'agentInfo':
+      updateAgentBanner(msg.info);
+      break;
     case 'error':
       errorBox.textContent = msg.message;
       errorBox.style.display = 'block';
@@ -1111,6 +1244,34 @@ window.addEventListener('message', (event) => {
       break;
   }
 });
+
+// Agent banner
+const agentBanner = document.getElementById('agentBanner');
+const agentModel = document.getElementById('agentModel');
+const agentStatus = document.getElementById('agentStatus');
+const agentContextFill = document.getElementById('agentContextFill');
+const agentContextLabel = document.getElementById('agentContextLabel');
+
+function updateAgentBanner(info) {
+  if (!info) {
+    agentBanner.style.display = 'none';
+    return;
+  }
+  agentBanner.style.display = 'flex';
+  var modelName = (info.model || 'unknown').replace(/^anthropic\\//, '').replace(/^openai\\//, '');
+  agentModel.textContent = modelName;
+  var ago = Math.round((Date.now() - info.updatedAt) / 1000);
+  var agoText;
+  if (ago < 60) agoText = 'just now';
+  else if (ago < 3600) agoText = Math.round(ago / 60) + 'm ago';
+  else agoText = Math.round(ago / 3600) + 'h ago';
+  agentStatus.textContent = info.isActive ? '● active' : '○ ' + agoText;
+  agentStatus.className = 'agent-status' + (info.isActive ? ' active' : '');
+  var pct = info.contextPercent || 0;
+  agentContextFill.style.width = pct + '%';
+  agentContextFill.className = 'agent-context-fill' + (pct > 80 ? ' critical' : pct > 60 ? ' warn' : '');
+  agentContextLabel.textContent = Math.round(info.totalTokens / 1000) + 'k/' + Math.round(info.contextTokens / 1000) + 'k';
+}
 
 // Infinite scroll — load older on scroll to top, hide new msg btn at bottom
 messagesList.addEventListener('scroll', () => {

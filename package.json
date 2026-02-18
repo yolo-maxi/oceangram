@@ -29,6 +29,10 @@
       {
         "command": "oceangram.openAgent",
         "title": "Oceangram: Open Agent Status"
+      },
+      {
+        "command": "oceangram.telegramLogin",
+        "title": "Oceangram: Telegram Login / Switch Account"
       }
     ],
     "keybindings": [
@@ -51,6 +55,13 @@
         "command": "oceangram.openAgent",
         "key": "ctrl+shift+4",
         "mac": "cmd+shift+4"
+      }
+    ],
+    "themes": [
+      {
+        "label": "Telegram Dark",
+        "uiTheme": "vs-dark",
+        "path": "./themes/telegram-dark.json"
       }
     ]
   },
