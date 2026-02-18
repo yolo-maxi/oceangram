@@ -1,26 +1,46 @@
 {
   "name": "oceangram",
+  "displayName": "Oceangram",
+  "description": "Developer cockpit — Comms, Kanban, Resources, and Agent Status in one sidebar",
   "version": "0.1.0",
-  "private": true,
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
+  "publisher": "oceangram",
+  "engines": {
+    "vscode": "^1.85.0"
   },
-  "dependencies": {
-    "next": "16.1.6",
-    "react": "19.2.3",
-    "react-dom": "19.2.3"
+  "categories": ["Other"],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "oceangram",
+          "title": "Oceangram",
+          "icon": "media/oceangram.svg"
+        }
+      ]
+    },
+    "views": {
+      "oceangram": [
+        { "type": "webview", "id": "oceangram.comms", "name": "Comms" },
+        { "type": "webview", "id": "oceangram.kanban", "name": "Kanban" },
+        { "type": "webview", "id": "oceangram.resources", "name": "Resources" },
+        { "type": "webview", "id": "oceangram.agentStatus", "name": "Agent Status" }
+      ]
+    },
+    "commands": [
+      { "command": "oceangram.refreshAll", "title": "Oceangram: Refresh All Panels" }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.1.6",
-    "tailwindcss": "^4",
-    "typescript": "^5"
-  }
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  },
+  "packageManager": "pnpm@9.15.4"
 }

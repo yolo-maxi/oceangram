@@ -1,0 +1,42 @@
+{
+  "name": "Oceangram Cockpit",
+  "settings": {
+    "editor.minimap.enabled": false,
+    "editor.breadcrumbs.enabled": false,
+    "editor.guides.indentation": false,
+    "editor.guides.bracketPairs": false,
+    "editor.tabSize": 2,
+    "editor.renderWhitespace": "none",
+    "editor.overviewRulerBorder": false,
+    "editor.hideCursorInOverviewRuler": true,
+    "editor.glyphMargin": false,
+    "editor.renderLineHighlight": "none",
+    "editor.occurrencesHighlight": "off",
+    "editor.tabDecoration": false,
+
+    "workbench.colorTheme": "Default Dark Modern",
+    "workbench.iconTheme": null,
+    "workbench.startupEditor": "none",
+    "workbench.tips.enabled": false,
+    "workbench.activityBar.location": "top",
+    "workbench.editor.tabCloseButton": "off",
+    "workbench.editor.tabSizing": "shrink",
+    "workbench.panel.defaultLocation": "bottom",
+    "workbench.layoutControl.enabled": false,
+
+    "explorer.openEditors.visible": 0,
+
+    "breadcrumbs.enabled": false,
+
+    "telemetry.telemetryLevel": "off",
+    "update.showReleaseNotes": false,
+    "extensions.ignoreRecommendations": true,
+
+    "terminal.integrated.defaultLocation": "view",
+
+    "window.commandCenter": false,
+    "window.title": "Oceangram — ${activeEditorShort}",
+
+    "files.autoSave": "onFocusChange"
+  }
+}
