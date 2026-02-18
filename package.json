@@ -7,7 +7,9 @@
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Other"],
+  "categories": [
+    "Other"
+  ],
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
@@ -22,14 +24,33 @@
     },
     "views": {
       "oceangram": [
-        { "type": "webview", "id": "oceangram.comms", "name": "Comms" },
-        { "type": "webview", "id": "oceangram.kanban", "name": "Kanban" },
-        { "type": "webview", "id": "oceangram.resources", "name": "Resources" },
-        { "type": "webview", "id": "oceangram.agentStatus", "name": "Agent Status" }
+        {
+          "type": "webview",
+          "id": "oceangram.comms",
+          "name": "Comms"
+        },
+        {
+          "type": "webview",
+          "id": "oceangram.kanban",
+          "name": "Kanban"
+        },
+        {
+          "type": "webview",
+          "id": "oceangram.resources",
+          "name": "Resources"
+        },
+        {
+          "type": "webview",
+          "id": "oceangram.agentStatus",
+          "name": "Agent Status"
+        }
       ]
     },
     "commands": [
-      { "command": "oceangram.refreshAll", "title": "Oceangram: Refresh All Panels" }
+      {
+        "command": "oceangram.refreshAll",
+        "title": "Oceangram: Refresh All Panels"
+      }
     ]
   },
   "scripts": {
@@ -38,9 +59,12 @@
     "lint": "eslint src --ext ts"
   },
   "devDependencies": {
-    "@types/vscode": "^1.85.0",
     "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
     "typescript": "^5.3.0"
   },
-  "packageManager": "pnpm@9.15.4"
+  "packageManager": "pnpm@9.15.4",
+  "dependencies": {
+    "telegram": "^2.26.22"
+  }
 }
