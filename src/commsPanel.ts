@@ -314,72 +314,223 @@ export class ChatTab {
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
-  font-family: var(--vscode-font-family, system-ui);
+  font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, system-ui, sans-serif);
   color: var(--vscode-foreground, #ccc);
   background: var(--vscode-editor-background, #1e1e1e);
   font-size: 13px;
   height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
-.messages-list { flex: 1; overflow-y: auto; padding: 12px 16px; }
-.msg { margin-bottom: 10px; max-width: 70%; }
-.msg.outgoing { margin-left: auto; }
-.msg-sender { font-size: 11px; font-weight: 600; color: var(--vscode-textLink-foreground, #3794ff); margin-bottom: 3px; }
-.msg-bubble {
-  background: var(--vscode-editor-background, #252526);
-  border: 1px solid var(--vscode-panel-border, #333);
-  padding: 8px 12px;
-  border-radius: 12px;
-  font-size: 13px;
-  line-height: 1.5;
-  word-wrap: break-word;
-}
-.msg.outgoing .msg-bubble {
-  background: var(--vscode-button-background, #0e639c);
-  color: var(--vscode-button-foreground, #fff);
-  border-color: transparent;
-}
-.msg-time { font-size: 10px; opacity: 0.4; margin-top: 3px; }
-.composer {
-  display: flex;
-  gap: 8px;
-  padding: 12px 16px;
-  border-top: 1px solid var(--vscode-panel-border, #333);
-  flex-shrink: 0;
-}
-.composer input {
+
+/* Scrollable message area */
+.messages-list {
   flex: 1;
-  padding: 10px 14px;
-  background: var(--vscode-input-background, #2a2a2a);
-  color: var(--vscode-input-foreground, #ccc);
-  border: 1px solid var(--vscode-input-border, #444);
-  border-radius: 8px;
-  font-size: 13px;
-  outline: none;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px 16px 8px;
+  scroll-behavior: smooth;
 }
-.composer input:focus { border-color: var(--vscode-focusBorder, #007acc); }
-.composer button {
+.messages-list::-webkit-scrollbar { width: 6px; }
+.messages-list::-webkit-scrollbar-track { background: transparent; }
+.messages-list::-webkit-scrollbar-thumb {
+  background: var(--vscode-scrollbarSlider-background, rgba(255,255,255,0.1));
+  border-radius: 3px;
+}
+.messages-list::-webkit-scrollbar-thumb:hover {
+  background: var(--vscode-scrollbarSlider-hoverBackground, rgba(255,255,255,0.2));
+}
+
+/* Empty state */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  opacity: 0.4;
+  user-select: none;
+}
+.empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+.empty-state .label { font-size: 14px; }
+
+/* Message groups */
+.msg-group { margin-bottom: 12px; display: flex; flex-direction: column; }
+.msg-group.outgoing { align-items: flex-end; }
+.msg-group.incoming { align-items: flex-start; }
+
+.msg-group .group-sender {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--vscode-textLink-foreground, #3794ff);
+  margin-bottom: 3px;
+  margin-left: 8px;
+}
+
+/* Individual message row */
+.msg {
+  max-width: 75%;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.msg-group.outgoing .msg { align-items: flex-end; }
+.msg-group.incoming .msg { align-items: flex-start; }
+
+/* Bubble */
+.msg-bubble {
+  padding: 7px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+  position: relative;
+}
+.msg-bubble a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.msg-bubble a:hover { opacity: 0.8; }
+
+/* Incoming bubbles */
+.msg-group.incoming .msg-bubble {
+  background: var(--vscode-input-background, #2a2d2e);
+  border: 1px solid var(--vscode-panel-border, rgba(255,255,255,0.06));
+  color: var(--vscode-foreground, #ccc);
+}
+
+/* Outgoing bubbles */
+.msg-group.outgoing .msg-bubble {
   background: var(--vscode-button-background, #0e639c);
   color: var(--vscode-button-foreground, #fff);
   border: none;
-  padding: 10px 18px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 13px;
 }
-.composer button:hover { background: var(--vscode-button-hoverBackground, #1177bb); }
-.loading { text-align: center; padding: 24px; opacity: 0.5; }
-.error { color: var(--vscode-errorForeground, #f44); padding: 12px 16px; font-size: 12px; }
+
+/* Border radius — Telegram-style grouped bubbles */
+/* Incoming: solo */
+.msg-group.incoming .msg.solo .msg-bubble { border-radius: 4px 16px 16px 4px; }
+/* Incoming: first of group */
+.msg-group.incoming .msg.first .msg-bubble { border-radius: 16px 16px 16px 4px; }
+/* Incoming: middle of group */
+.msg-group.incoming .msg.middle .msg-bubble { border-radius: 4px 16px 16px 4px; }
+/* Incoming: last of group */
+.msg-group.incoming .msg.last .msg-bubble { border-radius: 4px 16px 16px 16px; }
+
+/* Outgoing: solo */
+.msg-group.outgoing .msg.solo .msg-bubble { border-radius: 16px 4px 4px 16px; }
+/* Outgoing: first of group */
+.msg-group.outgoing .msg.first .msg-bubble { border-radius: 16px 16px 4px 16px; }
+/* Outgoing: middle of group */
+.msg-group.outgoing .msg.middle .msg-bubble { border-radius: 16px 4px 4px 16px; }
+/* Outgoing: last of group */
+.msg-group.outgoing .msg.last .msg-bubble { border-radius: 16px 4px 16px 16px; }
+
+/* Spacing between messages in a group */
+.msg + .msg { margin-top: 2px; }
+
+/* Timestamp — shown on last msg of group or on hover */
+.msg-time {
+  font-size: 10px;
+  opacity: 0;
+  margin-top: 2px;
+  padding: 0 4px;
+  color: var(--vscode-descriptionForeground, #888);
+  transition: opacity 0.15s;
+  user-select: none;
+  white-space: nowrap;
+}
+.msg-time.visible { opacity: 0.5; }
+.msg:hover .msg-time { opacity: 0.5; }
+
+/* Emoji-only messages */
+.msg-bubble.emoji-only {
+  background: transparent !important;
+  border: none !important;
+  padding: 2px 4px;
+  font-size: 32px;
+  line-height: 1.2;
+}
+
+/* Composer */
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 16px 12px;
+  border-top: 1px solid var(--vscode-panel-border, rgba(255,255,255,0.08));
+  flex-shrink: 0;
+  background: var(--vscode-editor-background, #1e1e1e);
+}
+.composer textarea {
+  flex: 1;
+  padding: 8px 14px;
+  background: var(--vscode-input-background, #2a2a2a);
+  color: var(--vscode-input-foreground, #ccc);
+  border: 1px solid var(--vscode-input-border, rgba(255,255,255,0.1));
+  border-radius: 18px;
+  font-size: 13px;
+  font-family: inherit;
+  line-height: 1.4;
+  outline: none;
+  resize: none;
+  max-height: 120px;
+  overflow-y: auto;
+  rows: 1;
+}
+.composer textarea:focus {
+  border-color: var(--vscode-focusBorder, #007acc);
+}
+.composer textarea::placeholder {
+  color: var(--vscode-input-placeholderForeground, #666);
+}
+.send-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: none;
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s, transform 0.1s;
+}
+.send-btn:hover { background: var(--vscode-button-hoverBackground, #1177bb); }
+.send-btn:active { transform: scale(0.92); }
+.send-btn svg { width: 16px; height: 16px; fill: currentColor; }
+
+/* Loading & error */
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  opacity: 0.4;
+}
+.error {
+  color: var(--vscode-errorForeground, #f44);
+  padding: 8px 16px;
+  font-size: 12px;
+  background: var(--vscode-inputValidation-errorBackground, rgba(255,0,0,0.1));
+  border-top: 1px solid var(--vscode-inputValidation-errorBorder, rgba(255,0,0,0.3));
+  flex-shrink: 0;
+}
 </style>
 </head>
 <body>
 <div class="messages-list" id="messagesList">
-  <div class="loading">Loading...</div>
+  <div class="loading">Loading…</div>
 </div>
 <div class="composer">
-  <input type="text" id="msgInput" placeholder="Message ${name}..." autofocus />
-  <button id="sendBtn">Send</button>
+  <textarea id="msgInput" rows="1" placeholder="Message ${name}…" autofocus></textarea>
+  <button class="send-btn" id="sendBtn" title="Send">
+    <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+  </button>
 </div>
 <div id="errorBox" class="error" style="display:none"></div>
 
@@ -402,25 +553,100 @@ function formatTime(ts) {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+function formatDate(ts) {
+  if (!ts) return '';
+  const d = new Date(ts * 1000);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const msgDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const diff = (today - msgDay) / 86400000;
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
+function linkify(text) {
+  return text.replace(/(https?:\\/\\/[^\\s<]+)/g, '<a href="$1" title="$1">$1</a>');
+}
+
+function isEmojiOnly(text) {
+  if (!text) return false;
+  const stripped = text.replace(/[\\s]/g, '');
+  const emojiRe = /^(?:[\\u{1F600}-\\u{1F64F}\\u{1F300}-\\u{1F5FF}\\u{1F680}-\\u{1F6FF}\\u{1F1E0}-\\u{1F1FF}\\u{2600}-\\u{26FF}\\u{2700}-\\u{27BF}\\u{FE00}-\\u{FE0F}\\u{1F900}-\\u{1F9FF}\\u{1FA00}-\\u{1FA6F}\\u{1FA70}-\\u{1FAFF}\\u{200D}\\u{20E3}\\u{E0020}-\\u{E007F}])+$/u;
+  return stripped.length <= 10 && emojiRe.test(stripped);
+}
+
 function renderMessages(msgs) {
-  messagesList.innerHTML = msgs.map(m => {
-    const cls = m.isOutgoing ? 'msg outgoing' : 'msg';
-    return '<div class="' + cls + '">' +
-      (!m.isOutgoing ? '<div class="msg-sender">' + esc(m.senderName) + '</div>' : '') +
-      '<div class="msg-bubble">' + esc(m.text) + '</div>' +
-      '<div class="msg-time">' + formatTime(m.timestamp) + '</div></div>';
-  }).join('');
+  if (!msgs || msgs.length === 0) {
+    messagesList.innerHTML =
+      '<div class="empty-state">' +
+        '<div class="icon">💬</div>' +
+        '<div class="label">No messages yet</div>' +
+      '</div>';
+    return;
+  }
+
+  // Group consecutive messages from same sender
+  const groups = [];
+  for (const m of msgs) {
+    const key = (m.isOutgoing ? '__out__' : (m.senderName || ''));
+    const last = groups[groups.length - 1];
+    if (last && last.key === key && m.timestamp - last.msgs[last.msgs.length - 1].timestamp < 300) {
+      last.msgs.push(m);
+    } else {
+      groups.push({ key, isOutgoing: m.isOutgoing, senderName: m.senderName, msgs: [m] });
+    }
+  }
+
+  let html = '';
+  for (const g of groups) {
+    const dir = g.isOutgoing ? 'outgoing' : 'incoming';
+    html += '<div class="msg-group ' + dir + '">';
+    if (!g.isOutgoing && g.senderName) {
+      html += '<div class="group-sender">' + esc(g.senderName) + '</div>';
+    }
+    const len = g.msgs.length;
+    for (let i = 0; i < len; i++) {
+      const m = g.msgs[i];
+      let pos = 'solo';
+      if (len > 1) { pos = i === 0 ? 'first' : i === len - 1 ? 'last' : 'middle'; }
+      const isLast = i === len - 1;
+      const emoji = isEmojiOnly(m.text);
+      const bubbleCls = 'msg-bubble' + (emoji ? ' emoji-only' : '');
+      const content = emoji ? esc(m.text) : linkify(esc(m.text));
+      html += '<div class="msg ' + pos + '">' +
+        '<div class="' + bubbleCls + '">' + content + '</div>' +
+        '<div class="msg-time' + (isLast ? ' visible' : '') + '">' + formatTime(m.timestamp) + '</div>' +
+        '</div>';
+    }
+    html += '</div>';
+  }
+
+  messagesList.innerHTML = html;
   messagesList.scrollTop = messagesList.scrollHeight;
 }
+
+// Auto-grow textarea
+function autoGrow() {
+  msgInput.style.height = 'auto';
+  msgInput.style.height = Math.min(msgInput.scrollHeight, 120) + 'px';
+}
+msgInput.addEventListener('input', autoGrow);
 
 function doSend() {
   const text = msgInput.value.trim();
   if (!text) return;
   msgInput.value = '';
+  msgInput.style.height = 'auto';
   vscode.postMessage({ type: 'sendMessage', text });
 }
 sendBtn.addEventListener('click', doSend);
-msgInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSend(); });
+msgInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    doSend();
+  }
+});
 
 window.addEventListener('message', (event) => {
   const msg = event.data;
