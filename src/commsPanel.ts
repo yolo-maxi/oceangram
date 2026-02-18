@@ -322,6 +322,16 @@ export class ChatTab {
             const updated = await tg.getMessages(this.chatId, 50);
             this.panel.webview.postMessage({ type: 'messages', messages: updated });
             break;
+          case 'poll':
+            await tg.connect();
+            const polled = await tg.getMessages(this.chatId, 50);
+            // Only send update if there are new messages
+            const lastKnown = msg.afterId || 0;
+            const hasNew = polled.some((m: any) => m.id > lastKnown);
+            if (hasNew) {
+              this.panel.webview.postMessage({ type: 'messages', messages: polled });
+            }
+            break;
         }
       } catch (err: any) {
         this.panel.webview.postMessage({ type: 'error', message: err.message || 'Unknown error' });
@@ -513,6 +523,47 @@ body {
   font-size: 12px;
   padding: 4px 0;
   opacity: 0.8;
+}
+
+/* Reactions */
+.msg-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.reaction-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.08);
+  cursor: default;
+  user-select: none;
+}
+.reaction-chip.selected {
+  border-color: var(--vscode-textLink-foreground, #3794ff);
+  background: rgba(55,148,255,0.12);
+}
+.reaction-emoji { font-size: 14px; }
+.reaction-count { font-size: 11px; opacity: 0.7; }
+
+/* Date separator */
+.date-separator {
+  text-align: center;
+  padding: 12px 0 8px;
+  user-select: none;
+}
+.date-separator span {
+  font-size: 11px;
+  opacity: 0.45;
+  background: var(--vscode-editor-background, #1e1e1e);
+  padding: 2px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.06);
 }
 
 /* Edited label */
@@ -773,7 +824,16 @@ function renderMessages(msgs) {
   }
 
   let html = '';
+  let lastDateStr = '';
   for (const g of groups) {
+    // Date separator
+    const firstTs = g.msgs[0].timestamp;
+    const dateStr = formatDate(firstTs);
+    if (dateStr && dateStr !== lastDateStr) {
+      html += '<div class="date-separator"><span>' + dateStr + '</span></div>';
+      lastDateStr = dateStr;
+    }
+
     const dir = g.isOutgoing ? 'outgoing' : 'incoming';
     html += '<div class="msg-group ' + dir + '">';
     if (!g.isOutgoing && g.senderName) {
@@ -838,8 +898,22 @@ function renderMessages(msgs) {
         bubbleInner += '</div>';
       }
 
+      // Reactions
+      var reactionsHtml = '';
+      if (m.reactions && m.reactions.length) {
+        reactionsHtml = '<div class="msg-reactions">';
+        for (var ri = 0; ri < m.reactions.length; ri++) {
+          var r = m.reactions[ri];
+          reactionsHtml += '<span class="reaction-chip' + (r.isSelected ? ' selected' : '') + '">' +
+            '<span class="reaction-emoji">' + esc(r.emoji) + '</span>' +
+            '<span class="reaction-count">' + r.count + '</span></span>';
+        }
+        reactionsHtml += '</div>';
+      }
+
       html += '<div class="msg ' + pos + '">' +
         '<div class="' + bubbleCls + '">' + bubbleInner + '</div>' +
+        reactionsHtml +
         '<div class="msg-time' + (isLast ? ' visible' : '') + '">' + timeStr + '</div>' +
         '</div>';
     }
@@ -848,6 +922,12 @@ function renderMessages(msgs) {
 
   messagesList.innerHTML = html;
   messagesList.scrollTop = messagesList.scrollHeight;
+
+  // Track last message ID for polling
+  if (msgs.length > 0) {
+    lastMsgId = msgs[msgs.length - 1].id || 0;
+  }
+  startPolling();
 }
 
 // Auto-grow textarea
@@ -891,6 +971,22 @@ function showLightbox(src) {
   overlay.addEventListener('click', function() { overlay.remove(); });
   document.body.appendChild(overlay);
 }
+
+// Real-time polling for new messages
+let pollInterval;
+let lastMsgId = 0;
+function startPolling() {
+  if (pollInterval) return;
+  pollInterval = setInterval(() => {
+    vscode.postMessage({ type: 'poll', afterId: lastMsgId });
+  }, 4000);
+}
+function stopPolling() {
+  if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) stopPolling(); else startPolling();
+});
 
 vscode.postMessage({ type: 'init' });
 </script>

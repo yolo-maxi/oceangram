@@ -376,6 +376,7 @@ function renderMessageHtml(m: {
   isEdited?: boolean;
   entities?: Array<{type: string; offset: number; length: number; url?: string; language?: string}>;
   linkPreview?: { url: string; title?: string; description?: string; imageUrl?: string };
+  reactions?: Array<{ emoji: string; count: number; isSelected: boolean }>;
   timestamp: number;
 }): string {
   let html = '';
@@ -426,6 +427,17 @@ function renderMessageHtml(m: {
     if (m.linkPreview.title) html += '<div class="lp-title">' + esc(m.linkPreview.title) + '</div>';
     if (m.linkPreview.description) html += '<div class="lp-desc">' + esc(m.linkPreview.description) + '</div>';
     html += '<div class="lp-url">' + esc(m.linkPreview.url) + '</div>';
+    html += '</div>';
+  }
+
+  // Reactions
+  if (m.reactions && m.reactions.length) {
+    html += '<div class="msg-reactions">';
+    for (const r of m.reactions) {
+      html += '<span class="reaction-chip' + (r.isSelected ? ' selected' : '') + '">' +
+        '<span class="reaction-emoji">' + esc(r.emoji) + '</span>' +
+        '<span class="reaction-count">' + r.count + '</span></span>';
+    }
     html += '</div>';
   }
 
@@ -685,6 +697,49 @@ describe('link preview rendering', () => {
     });
     expect(html).not.toContain('<img onerror');
     expect(html).not.toContain('<script>');
+  });
+});
+
+describe('reactions rendering', () => {
+  it('renders reaction chips with emoji and count', () => {
+    const html = renderMessageHtml({
+      text: 'Nice!', timestamp: 1000, isOutgoing: false,
+      reactions: [
+        { emoji: '👍', count: 3, isSelected: false },
+        { emoji: '❤️', count: 1, isSelected: true },
+      ],
+    });
+    expect(html).toContain('class="msg-reactions"');
+    expect(html).toContain('👍');
+    expect(html).toContain('3');
+    expect(html).toContain('❤️');
+    expect(html).toContain('1');
+  });
+
+  it('marks selected reactions', () => {
+    const html = renderMessageHtml({
+      text: 'test', timestamp: 1000, isOutgoing: false,
+      reactions: [{ emoji: '🔥', count: 2, isSelected: true }],
+    });
+    expect(html).toContain('reaction-chip selected');
+  });
+
+  it('does not render reactions when empty', () => {
+    const html = renderMessageHtml({ text: 'no reactions', timestamp: 1000, isOutgoing: false, reactions: [] });
+    expect(html).not.toContain('msg-reactions');
+  });
+
+  it('does not render reactions when undefined', () => {
+    const html = renderMessageHtml({ text: 'plain', timestamp: 1000, isOutgoing: false });
+    expect(html).not.toContain('msg-reactions');
+  });
+
+  it('escapes reaction emoji for XSS', () => {
+    const html = renderMessageHtml({
+      text: '', timestamp: 1000, isOutgoing: false,
+      reactions: [{ emoji: '<img onerror=alert(1)>', count: 1, isSelected: false }],
+    });
+    expect(html).not.toContain('<img onerror');
   });
 });
 

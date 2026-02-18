@@ -38,6 +38,12 @@ export interface MessageEntity {
   language?: string;  // for pre (code blocks)
 }
 
+export interface ReactionInfo {
+  emoji: string;
+  count: number;
+  isSelected: boolean;
+}
+
 export interface MessageInfo {
   id: number;
   senderId: string;
@@ -51,6 +57,7 @@ export interface MessageInfo {
   thumbnailUrl?: string;
   fileName?: string;
   fileSize?: number;
+  duration?: number; // seconds, for voice/video/gif
   // Reply
   replyToId?: number;
   replyToText?: string;
@@ -63,6 +70,8 @@ export interface MessageInfo {
   entities?: MessageEntity[];
   // Link preview
   linkPreview?: LinkPreview;
+  // Reactions
+  reactions?: ReactionInfo[];
 }
 
 export class TelegramService {
@@ -371,15 +380,21 @@ export class TelegramService {
 
             if (isSticker) {
               info.mediaType = 'sticker';
-            } else if (isAnimated) {
+            } else if (isAnimated || (isVideo && doc.mimeType === 'video/mp4' && !filenameAttr && media.document?.mimeType === 'video/mp4')) {
               info.mediaType = 'gif';
             } else if (isVideo) {
               info.mediaType = 'video';
             } else if (isAudio) {
               const audioAttr = attrs.find((a: any) => a.className === 'DocumentAttributeAudio');
               info.mediaType = audioAttr?.voice ? 'voice' : 'file';
+              if (audioAttr?.duration) info.duration = audioAttr.duration;
             } else {
               info.mediaType = 'file';
+            }
+            // Extract duration from video/gif attributes
+            if (info.mediaType === 'video' || info.mediaType === 'gif') {
+              const videoAttr = attrs.find((a: any) => a.className === 'DocumentAttributeVideo');
+              if (videoAttr?.duration) info.duration = videoAttr.duration;
             }
             if (filenameAttr) info.fileName = filenameAttr.fileName;
             if (doc.size) info.fileSize = typeof doc.size === 'number' ? doc.size : Number(doc.size);
@@ -444,6 +459,17 @@ export class TelegramService {
           if (e.language) entity.language = e.language;
           return entity;
         }).filter((e: MessageEntity) => e.type !== undefined);
+      }
+
+      // --- Reactions ---
+      if (msg.reactions && msg.reactions.results) {
+        info.reactions = msg.reactions.results
+          .filter((r: any) => r.reaction && r.count)
+          .map((r: any) => ({
+            emoji: r.reaction.emoticon || r.reaction.documentId?.toString() || '❓',
+            count: r.count || 0,
+            isSelected: r.chosen || r.chosenOrder !== undefined || false,
+          }));
       }
 
       results.push(info);
