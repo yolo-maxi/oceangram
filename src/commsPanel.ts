@@ -2342,12 +2342,18 @@ window.addEventListener('message', (event) => {
       }
       break;
     case 'deleteMessages':
-      // Real-time: remove deleted messages
+      // Real-time: remove deleted messages with fade-out
       if (msg.messageIds && msg.messageIds.length > 0) {
         var delSet = new Set(msg.messageIds);
-        var before = allMessages.length;
-        allMessages = allMessages.filter(function(m) { return !delSet.has(m.id); });
-        if (allMessages.length !== before) renderMessages(allMessages);
+        msg.messageIds.forEach(function(id) {
+          var el = messagesList.querySelector('.msg[data-msg-id="' + id + '"]');
+          if (el) el.classList.add('fade-out');
+        });
+        setTimeout(function() {
+          var before = allMessages.length;
+          allMessages = allMessages.filter(function(m) { return !delSet.has(m.id); });
+          if (allMessages.length !== before) renderMessages(allMessages);
+        }, 300);
       }
       break;
     case 'olderMessages':
