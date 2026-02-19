@@ -786,6 +786,29 @@ export class ChatTab {
               this.panel.webview.postMessage({ type: 'fileSendFailed', tempId: msg.tempId, error: fileErr.message || 'File send failed' });
             }
             break;
+          case 'downloadFile':
+            await tg.connect();
+            try {
+              this.panel.webview.postMessage({ type: 'downloadProgress', messageId: msg.messageId, progress: 0 });
+              const fileResult = await tg.downloadFile(this.chatId, msg.messageId, (downloaded, total) => {
+                const pct = total > 0 ? Math.round((downloaded / total) * 100) : 0;
+                this.panel.webview.postMessage({ type: 'downloadProgress', messageId: msg.messageId, progress: pct });
+              });
+              // Save file using VS Code save dialog
+              const uri = await vscode.window.showSaveDialog({
+                defaultUri: vscode.Uri.file(fileResult.fileName),
+                filters: { 'All Files': ['*'] }
+              });
+              if (uri) {
+                await vscode.workspace.fs.writeFile(uri, fileResult.buffer);
+                this.panel.webview.postMessage({ type: 'downloadComplete', messageId: msg.messageId });
+              } else {
+                this.panel.webview.postMessage({ type: 'downloadComplete', messageId: msg.messageId });
+              }
+            } catch (dlErr: any) {
+              this.panel.webview.postMessage({ type: 'downloadError', messageId: msg.messageId, error: dlErr.message || 'Download failed' });
+            }
+            break;
           case 'editMessage':
             await tg.connect();
             try {
@@ -816,6 +839,15 @@ export class ChatTab {
               this.panel.webview.postMessage({ type: 'deleteMessages', messageIds: msg.messageIds });
             } catch (delErr: any) {
               this.panel.webview.postMessage({ type: 'deleteError', error: delErr.message || 'Delete failed' });
+            }
+            break;
+          case 'downloadVideo':
+            await tg.connect();
+            try {
+              const videoDataUrl = await tg.downloadVideo(this.chatId, msg.messageId);
+              this.panel.webview.postMessage({ type: 'videoData', messageId: msg.messageId, dataUrl: videoDataUrl });
+            } catch (vErr: any) {
+              this.panel.webview.postMessage({ type: 'videoData', messageId: msg.messageId, error: vErr.message || 'Download failed' });
             }
             break;
           case 'loadOlder':
@@ -1130,11 +1162,123 @@ body {
   cursor: pointer;
 }
 .msg-photo:hover { opacity: 0.92; }
-.msg-file, .msg-voice, .msg-video, .msg-sticker, .msg-gif {
+.msg-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+.msg-file:hover { background: rgba(255,255,255,0.05); }
+.msg-file-icon {
+  width: 40px; height: 40px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; flex-shrink: 0;
+  background: rgba(106,178,242,0.15);
+  color: var(--tg-accent);
+}
+.msg-file-icon.pdf { background: rgba(224,93,93,0.15); color: #e05d5d; }
+.msg-file-icon.img { background: rgba(152,195,121,0.15); color: #98c379; }
+.msg-file-icon.archive { background: rgba(229,192,123,0.15); color: #e5c07b; }
+.msg-file-icon.code { background: rgba(198,120,221,0.15); color: #c678dd; }
+.msg-file-icon.audio { background: rgba(86,182,194,0.15); color: #56b6c2; }
+.msg-file-info { flex: 1; min-width: 0; }
+.msg-file-name {
+  font-size: 14px; font-weight: 500; color: var(--tg-accent);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.msg-file-meta {
+  font-size: 12px; color: var(--tg-text-secondary); margin-top: 1px;
+}
+.msg-file-progress {
+  width: 100%; height: 3px; border-radius: 2px;
+  background: rgba(255,255,255,0.08); margin-top: 4px; overflow: hidden;
+  display: none;
+}
+.msg-file-progress.active { display: block; }
+.msg-file-progress-bar {
+  height: 100%; background: var(--tg-accent); border-radius: 2px;
+  transition: width 0.2s; width: 0%;
+}
+.msg-video, .msg-sticker, .msg-gif {
   font-size: 13px;
   padding: 4px 0;
   color: var(--tg-text-secondary);
 }
+
+/* Voice message player */
+.voice-player {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  min-width: 220px;
+  max-width: 300px;
+}
+.voice-play-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: var(--tg-accent, #3390ec);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 14px;
+  transition: background 0.15s;
+}
+.voice-play-btn:hover { background: var(--tg-accent-hover, #2b7fd4); }
+.voice-waveform-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.voice-waveform {
+  display: flex;
+  align-items: flex-end;
+  height: 28px;
+  gap: 1px;
+  cursor: pointer;
+  position: relative;
+}
+.voice-waveform .vw-bar {
+  flex: 1;
+  min-width: 2px;
+  max-width: 4px;
+  border-radius: 1px;
+  background: var(--tg-text-secondary);
+  opacity: 0.35;
+  transition: opacity 0.1s;
+}
+.voice-waveform .vw-bar.vw-played {
+  opacity: 1;
+  background: var(--tg-accent, #3390ec);
+}
+.voice-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--tg-text-secondary);
+}
+.voice-speed-btn {
+  background: none;
+  border: 1px solid var(--tg-text-secondary);
+  border-radius: 8px;
+  color: var(--tg-text-secondary);
+  font-size: 10px;
+  padding: 0 5px;
+  cursor: pointer;
+  line-height: 16px;
+}
+.voice-speed-btn:hover { color: var(--tg-accent, #3390ec); border-color: var(--tg-accent, #3390ec); }
 
 /* Reactions */
 .msg-reactions {
@@ -2376,6 +2520,43 @@ function formatTime(ts) {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+function formatFileSize(bytes) {
+  if (!bytes || bytes <= 0) return '';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
+}
+
+function getFileIcon(name, mime) {
+  var ext = (name || '').split('.').pop().toLowerCase();
+  if (mime === 'application/pdf' || ext === 'pdf') return '📄';
+  if (/^image\//.test(mime)) return '🖼️';
+  if (/^audio\//.test(mime)) return '🎵';
+  if (/^video\//.test(mime)) return '🎬';
+  if (/zip|rar|7z|tar|gz|bz2/.test(ext)) return '📦';
+  if (/js|ts|py|rb|go|rs|c|cpp|h|java|kt|swift|sh|json|xml|yaml|yml|toml|css|html|sql/.test(ext)) return '💻';
+  if (/txt|md|rst|log|csv/.test(ext)) return '📝';
+  if (/doc|docx|odt|rtf/.test(ext)) return '📃';
+  if (/xls|xlsx|ods/.test(ext)) return '📊';
+  if (/ppt|pptx|odp/.test(ext)) return '📊';
+  return '📎';
+}
+
+function getFileIconClass(name, mime) {
+  var ext = (name || '').split('.').pop().toLowerCase();
+  if (mime === 'application/pdf' || ext === 'pdf') return 'pdf';
+  if (/^image\//.test(mime)) return 'img';
+  if (/^audio\//.test(mime)) return 'audio';
+  if (/zip|rar|7z|tar|gz|bz2/.test(ext)) return 'archive';
+  if (/js|ts|py|rb|go|rs|c|cpp|h|java|kt|swift|sh|json|xml|yaml|yml|toml|css|html|sql/.test(ext)) return 'code';
+  return '';
+}
+
+function downloadFile(msgId) {
+  vscode.postMessage({ type: 'downloadFile', messageId: msgId });
+}
+
 function formatDate(ts) {
   if (!ts) return '';
   const d = new Date(ts * 1000);
@@ -2519,10 +2700,46 @@ function renderMessages(msgs) {
       // Media
       if (m.mediaType === 'photo' && m.mediaUrl) {
         bubbleInner += '<img class="msg-photo" src="' + esc(m.mediaUrl) + '" onclick="showLightbox(this.src)" />';
-      } else if (m.mediaType === 'file' && m.fileName) {
-        bubbleInner += '<div class="msg-file">📎 ' + esc(m.fileName) + (m.fileSize ? ' (' + Math.round(m.fileSize / 1024) + ' KB)' : '') + '</div>';
+      } else if (m.mediaType === 'file') {
+        var fName = m.fileName || 'File';
+        var fSize = m.fileSize ? formatFileSize(m.fileSize) : '';
+        var fMime = m.fileMimeType || '';
+        var fIcon = getFileIcon(fName, fMime);
+        var fIconClass = getFileIconClass(fName, fMime);
+        bubbleInner += '<div class="msg-file" onclick="downloadFile(' + m.id + ')" data-msg-file-id="' + m.id + '">' +
+          '<div class="msg-file-icon ' + fIconClass + '">' + fIcon + '</div>' +
+          '<div class="msg-file-info">' +
+            '<div class="msg-file-name">' + esc(fName) + '</div>' +
+            '<div class="msg-file-meta">' + esc(fSize) + (fSize && fMime ? ' · ' : '') + esc(fMime.split('/').pop() || '') + '</div>' +
+            '<div class="msg-file-progress" id="file-progress-' + m.id + '"><div class="msg-file-progress-bar"></div></div>' +
+          '</div></div>';
       } else if (m.mediaType === 'voice') {
-        bubbleInner += '<div class="msg-voice">🎤 Voice message</div>';
+        var voiceDur = m.duration || 0;
+        var voiceDurStr = Math.floor(voiceDur / 60) + ':' + ('0' + (voiceDur % 60)).slice(-2);
+        var waveformBars = '';
+        var waveData = m.waveform && m.waveform.length > 0 ? m.waveform : null;
+        var barCount = 40;
+        if (waveData) {
+          // Resample waveform to barCount bars
+          for (var bi = 0; bi < barCount; bi++) {
+            var si = Math.floor(bi * waveData.length / barCount);
+            var h = Math.max(3, Math.round((waveData[si] / 31) * 28));
+            waveformBars += '<div class="vw-bar" style="height:' + h + 'px" data-idx="' + bi + '"></div>';
+          }
+        } else {
+          for (var bi = 0; bi < barCount; bi++) {
+            var h = Math.max(3, Math.round(Math.random() * 20 + 4));
+            waveformBars += '<div class="vw-bar" style="height:' + h + 'px" data-idx="' + bi + '"></div>';
+          }
+        }
+        var audioSrc = m.mediaUrl ? ' data-src="' + esc(m.mediaUrl) + '"' : '';
+        bubbleInner += '<div class="voice-player" data-duration="' + voiceDur + '"' + audioSrc + '>'
+          + '<button class="voice-play-btn" onclick="toggleVoice(this)">▶</button>'
+          + '<div class="voice-waveform-wrap">'
+          + '<div class="voice-waveform" onclick="scrubVoice(event, this)">' + waveformBars + '</div>'
+          + '<div class="voice-meta"><span class="voice-time">' + voiceDurStr + '</span>'
+          + '<button class="voice-speed-btn" onclick="cycleVoiceSpeed(this)">1×</button></div>'
+          + '</div></div>';
       } else if (m.mediaType === 'video') {
         bubbleInner += '<div class="msg-video">🎬 Video</div>';
       } else if (m.mediaType === 'sticker') {
@@ -3127,6 +3344,30 @@ window.addEventListener('message', (event) => {
         });
       }
       break;
+    case 'downloadProgress': {
+      var progEl = document.getElementById('file-progress-' + msg.messageId);
+      if (progEl) {
+        progEl.classList.add('active');
+        var bar = progEl.querySelector('.msg-file-progress-bar');
+        if (bar) bar.style.width = msg.progress + '%';
+      }
+      break;
+    }
+    case 'downloadComplete': {
+      var progEl2 = document.getElementById('file-progress-' + msg.messageId);
+      if (progEl2) {
+        progEl2.classList.remove('active');
+        var bar2 = progEl2.querySelector('.msg-file-progress-bar');
+        if (bar2) bar2.style.width = '0%';
+      }
+      break;
+    }
+    case 'downloadError': {
+      var progEl3 = document.getElementById('file-progress-' + msg.messageId);
+      if (progEl3) progEl3.classList.remove('active');
+      console.error('Download failed:', msg.error);
+      break;
+    }
     case 'agentInfo':
       updateAgentBanner(msg.info);
       break;
@@ -3509,6 +3750,105 @@ function copyCodeBlock(btn) {
       btn.classList.remove('copied');
     }, 2000);
   });
+}
+
+/* Voice player */
+var _voiceAudios = {};
+var _voiceCurrentId = null;
+
+function _getVoicePlayer(btn) {
+  return btn.closest('.voice-player');
+}
+
+function toggleVoice(btn) {
+  var player = _getVoicePlayer(btn);
+  if (!player) return;
+  var src = player.getAttribute('data-src');
+  if (!src) return;
+
+  // Create or get audio element
+  var id = src.substring(0, 60); // use as key
+  if (!_voiceAudios[id]) {
+    var audio = new Audio(src);
+    audio._player = player;
+    audio._btn = btn;
+    audio.addEventListener('timeupdate', function() { _updateVoiceProgress(audio); });
+    audio.addEventListener('ended', function() {
+      btn.textContent = '▶';
+      _voiceCurrentId = null;
+      _resetVoiceBars(player);
+    });
+    _voiceAudios[id] = audio;
+  }
+  var audio = _voiceAudios[id];
+
+  // Stop any other playing voice
+  if (_voiceCurrentId && _voiceCurrentId !== id && _voiceAudios[_voiceCurrentId]) {
+    _voiceAudios[_voiceCurrentId].pause();
+    _voiceAudios[_voiceCurrentId]._btn.textContent = '▶';
+    _resetVoiceBars(_voiceAudios[_voiceCurrentId]._player);
+  }
+
+  if (audio.paused) {
+    audio.play();
+    btn.textContent = '⏸';
+    _voiceCurrentId = id;
+  } else {
+    audio.pause();
+    btn.textContent = '▶';
+    _voiceCurrentId = null;
+  }
+}
+
+function _updateVoiceProgress(audio) {
+  var player = audio._player;
+  if (!player || !audio.duration) return;
+  var pct = audio.currentTime / audio.duration;
+  var bars = player.querySelectorAll('.vw-bar');
+  var playedCount = Math.floor(pct * bars.length);
+  for (var i = 0; i < bars.length; i++) {
+    if (i < playedCount) bars[i].classList.add('vw-played');
+    else bars[i].classList.remove('vw-played');
+  }
+  var t = Math.floor(audio.currentTime);
+  var timeEl = player.querySelector('.voice-time');
+  if (timeEl) timeEl.textContent = Math.floor(t / 60) + ':' + ('0' + (t % 60)).slice(-2);
+}
+
+function _resetVoiceBars(player) {
+  var bars = player.querySelectorAll('.vw-bar');
+  for (var i = 0; i < bars.length; i++) bars[i].classList.remove('vw-played');
+  var dur = parseInt(player.getAttribute('data-duration') || '0');
+  var timeEl = player.querySelector('.voice-time');
+  if (timeEl) timeEl.textContent = Math.floor(dur / 60) + ':' + ('0' + (dur % 60)).slice(-2);
+}
+
+function scrubVoice(event, waveformEl) {
+  var player = waveformEl.closest('.voice-player');
+  if (!player) return;
+  var src = player.getAttribute('data-src');
+  if (!src) return;
+  var id = src.substring(0, 60);
+  var audio = _voiceAudios[id];
+  if (!audio || !audio.duration) return;
+  var rect = waveformEl.getBoundingClientRect();
+  var pct = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+  audio.currentTime = pct * audio.duration;
+}
+
+function cycleVoiceSpeed(btn) {
+  var player = btn.closest('.voice-player');
+  if (!player) return;
+  var src = player.getAttribute('data-src');
+  if (!src) return;
+  var id = src.substring(0, 60);
+  var audio = _voiceAudios[id];
+  var speeds = [1, 1.5, 2];
+  var labels = ['1×', '1.5×', '2×'];
+  var current = speeds.indexOf(audio ? audio.playbackRate : 1);
+  var next = (current + 1) % speeds.length;
+  if (audio) audio.playbackRate = speeds[next];
+  btn.textContent = labels[next];
 }
 
 function showLightbox(src) {

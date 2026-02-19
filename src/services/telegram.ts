@@ -87,7 +87,10 @@ export interface MessageInfo {
   thumbnailUrl?: string;
   fileName?: string;
   fileSize?: number;
+  fileMimeType?: string;
   duration?: number; // seconds, for voice/video/gif
+  isVideoNote?: boolean; // round video message
+  waveform?: number[]; // 0-31 amplitude values for voice waveform
   // Reply
   replyToId?: number;
   replyToText?: string;
@@ -975,10 +978,49 @@ input.addEventListener('keydown', (e) => {
               info.mediaType = 'gif';
             } else if (isVideo) {
               info.mediaType = 'video';
+              const videoAttrCheck = attrs.find((a: any) => a.className === 'DocumentAttributeVideo');
+              if (videoAttrCheck?.roundMessage) info.isVideoNote = true;
+              // Download thumbnail for video preview
+              if (doc.thumbs && doc.thumbs.length > 0) {
+                try {
+                  const thumb = doc.thumbs[doc.thumbs.length - 1]; // largest thumb
+                  const thumbBuffer = await this.client!.downloadMedia(msg, { thumb });
+                  if (thumbBuffer && Buffer.isBuffer(thumbBuffer)) {
+                    info.thumbnailUrl = `data:image/jpeg;base64,${thumbBuffer.toString('base64')}`;
+                  }
+                } catch { /* ignore thumb download errors */ }
+              }
             } else if (isAudio) {
               const audioAttr = attrs.find((a: any) => a.className === 'DocumentAttributeAudio');
               info.mediaType = audioAttr?.voice ? 'voice' : 'file';
               if (audioAttr?.duration) info.duration = audioAttr.duration;
+              if (audioAttr?.voice) {
+                // Extract waveform data (5-bit packed values from Telegram)
+                if (audioAttr.waveform) {
+                  try {
+                    const raw = Buffer.isBuffer(audioAttr.waveform) ? audioAttr.waveform : Buffer.from(audioAttr.waveform);
+                    const samples: number[] = [];
+                    for (let i = 0; i < raw.length * 8 / 5 && samples.length < 64; i++) {
+                      const byteIdx = Math.floor(i * 5 / 8);
+                      const bitIdx = (i * 5) % 8;
+                      let val = (raw[byteIdx] >> bitIdx) & 0x1f;
+                      if (bitIdx > 3 && byteIdx + 1 < raw.length) {
+                        val |= (raw[byteIdx + 1] << (8 - bitIdx)) & 0x1f;
+                      }
+                      samples.push(val);
+                    }
+                    info.waveform = samples;
+                  } catch { /* ignore waveform parse errors */ }
+                }
+                // Download voice audio as base64
+                try {
+                  const buffer = await this.client!.downloadMedia(msg, {});
+                  if (buffer && Buffer.isBuffer(buffer)) {
+                    const mime = doc.mimeType || 'audio/ogg';
+                    info.mediaUrl = `data:${mime};base64,${buffer.toString('base64')}`;
+                  }
+                } catch { /* ignore voice download errors */ }
+              }
             } else {
               info.mediaType = 'file';
             }
@@ -989,6 +1031,7 @@ input.addEventListener('keydown', (e) => {
             }
             if (filenameAttr) info.fileName = filenameAttr.fileName;
             if (doc.size) info.fileSize = typeof doc.size === 'number' ? doc.size : Number(doc.size);
+            if (doc.mimeType) info.fileMimeType = doc.mimeType;
           }
         } else if (className === 'MessageMediaWebPage') {
           // Link preview
@@ -1083,6 +1126,27 @@ input.addEventListener('keydown', (e) => {
     return map[className] as MessageEntity['type'];
   }
 
+  /**
+   * Download full video media for a message by ID.
+   * Returns base64 data URL or undefined.
+   */
+  async downloadVideo(dialogId: string, messageId: number): Promise<string | undefined> {
+    if (!this.client) throw new Error('Not connected');
+    const { chatId, topicId: _topicId } = TelegramService.parseDialogId(dialogId);
+    const entity = await this.client.getEntity(chatId);
+    const result = await this.client.getMessages(entity, { ids: [messageId] });
+    const msg = result?.[0];
+    if (!msg?.media) return undefined;
+    const buffer = await this.client.downloadMedia(msg, {});
+    if (buffer && Buffer.isBuffer(buffer)) {
+      const media = msg.media as any;
+      const doc = media?.document;
+      const mime = doc?.mimeType || 'video/mp4';
+      return `data:${mime};base64,${buffer.toString('base64')}`;
+    }
+    return undefined;
+  }
+
   async sendMessage(dialogId: string, text: string, replyToMsgId?: number): Promise<void> {
     if (!this.client) throw new Error('Not connected');
     const { chatId, topicId } = TelegramService.parseDialogId(dialogId);
@@ -1107,6 +1171,41 @@ input.addEventListener('keydown', (e) => {
       forceDocument: !(mimeType && mimeType.startsWith('image/')),
       replyTo: topicId,
     });
+  }
+
+  /**
+   * Download a file/document from a message. Returns buffer and metadata.
+   * Supports progress callback for download progress indication.
+   */
+  async downloadFile(dialogId: string, messageId: number, progressCb?: (downloaded: number, total: number) => void): Promise<{ buffer: Buffer; fileName: string; mimeType: string }> {
+    if (!this.client) throw new Error('Not connected');
+    const { chatId } = TelegramService.parseDialogId(dialogId);
+    const entity = await this.client.getEntity(chatId);
+    const msgs = await this.client.getMessages(entity, { ids: [messageId] });
+    if (!msgs || msgs.length === 0) throw new Error('Message not found');
+    const msg = msgs[0];
+    if (!msg.media) throw new Error('No media in message');
+
+    const media = msg.media as any;
+    let fileName = 'file';
+    let mimeType = 'application/octet-stream';
+
+    if (media.document) {
+      const doc = media.document;
+      const attrs = doc.attributes || [];
+      const filenameAttr = attrs.find((a: any) => a.className === 'DocumentAttributeFilename');
+      if (filenameAttr) fileName = filenameAttr.fileName;
+      if (doc.mimeType) mimeType = doc.mimeType;
+    }
+
+    const buffer = await this.client.downloadMedia(msg, {
+      progressCallback: progressCb ? (downloaded: any, total: any) => {
+        progressCb(Number(downloaded), Number(total));
+      } : undefined,
+    });
+
+    if (!buffer || !Buffer.isBuffer(buffer)) throw new Error('Download failed');
+    return { buffer, fileName, mimeType };
   }
 
   async editMessage(dialogId: string, messageId: number, text: string): Promise<void> {
@@ -1327,10 +1426,54 @@ input.addEventListener('keydown', (e) => {
           const isAudio = attrs.some((a: any) => a.className === 'DocumentAttributeAudio');
           const isSticker = attrs.some((a: any) => a.className === 'DocumentAttributeSticker');
           if (isSticker) info.mediaType = 'sticker';
-          else if (isVideo) info.mediaType = 'video';
+          else if (isVideo) {
+            info.mediaType = 'video';
+            const videoAttr = attrs.find((a: any) => a.className === 'DocumentAttributeVideo');
+            if (videoAttr?.duration) info.duration = videoAttr.duration;
+            if (videoAttr?.roundMessage) info.isVideoNote = true;
+            if (doc.size) info.fileSize = typeof doc.size === 'number' ? doc.size : Number(doc.size);
+            const filenameAttr = attrs.find((a: any) => a.className === 'DocumentAttributeFilename');
+            if (filenameAttr) info.fileName = filenameAttr.fileName;
+            // Download thumbnail
+            if (doc.thumbs && doc.thumbs.length > 0 && this.client) {
+              try {
+                const thumb = doc.thumbs[doc.thumbs.length - 1];
+                const thumbBuffer = await this.client.downloadMedia(msg, { thumb });
+                if (thumbBuffer && Buffer.isBuffer(thumbBuffer)) {
+                  info.thumbnailUrl = `data:image/jpeg;base64,${thumbBuffer.toString('base64')}`;
+                }
+              } catch { /* ignore */ }
+            }
+          }
           else if (isAudio) {
             const audioAttr = attrs.find((a: any) => a.className === 'DocumentAttributeAudio');
             info.mediaType = audioAttr?.voice ? 'voice' : 'file';
+            if (audioAttr?.duration) info.duration = audioAttr.duration;
+            if (audioAttr?.voice) {
+              if (audioAttr.waveform) {
+                try {
+                  const raw = Buffer.isBuffer(audioAttr.waveform) ? audioAttr.waveform : Buffer.from(audioAttr.waveform);
+                  const samples: number[] = [];
+                  for (let i = 0; i < raw.length * 8 / 5 && samples.length < 64; i++) {
+                    const byteIdx = Math.floor(i * 5 / 8);
+                    const bitIdx = (i * 5) % 8;
+                    let val = (raw[byteIdx] >> bitIdx) & 0x1f;
+                    if (bitIdx > 3 && byteIdx + 1 < raw.length) {
+                      val |= (raw[byteIdx + 1] << (8 - bitIdx)) & 0x1f;
+                    }
+                    samples.push(val);
+                  }
+                  info.waveform = samples;
+                } catch { /* ignore */ }
+              }
+              try {
+                const buffer = await this.client!.downloadMedia(msg, {});
+                if (buffer && Buffer.isBuffer(buffer)) {
+                  const mime = doc.mimeType || 'audio/ogg';
+                  info.mediaUrl = `data:${mime};base64,${buffer.toString('base64')}`;
+                }
+              } catch { /* ignore */ }
+            }
           } else info.mediaType = 'file';
           const filenameAttr = attrs.find((a: any) => a.className === 'DocumentAttributeFilename');
           if (filenameAttr) info.fileName = filenameAttr.fileName;
