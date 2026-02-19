@@ -2020,8 +2020,8 @@ function renderMessages(msgs) {
         bubbleInner += '<div class="forward-header">Forwarded from <strong>' + esc(m.forwardFrom) + '</strong></div>';
       }
 
-      // Reply quote
-      if (m.replyToId) {
+      // Reply quote (skip empty replies — e.g. forum topic root)
+      if (m.replyToId && (m.replyToSender || m.replyToText)) {
         bubbleInner += '<div class="reply-quote">';
         if (m.replyToSender) bubbleInner += '<div class="reply-sender">' + esc(m.replyToSender) + '</div>';
         bubbleInner += '<div class="reply-text">' + esc(m.replyToText || '') + '</div>';
@@ -2358,6 +2358,9 @@ window.addEventListener('message', (event) => {
       break;
     case 'agentInfo':
       updateAgentBanner(msg.info);
+      break;
+    case 'agentDetails':
+      renderAgentDetails(msg.data);
       break;
     case 'error':
       errorBox.textContent = msg.message;
@@ -2846,8 +2849,12 @@ document.addEventListener('keydown', function(e) {
     e.preventDefault();
     openSearch();
   }
-  if (e.key === 'Escape' && searchBar.classList.contains('visible')) {
-    closeSearch();
+  if (e.key === 'Escape') {
+    if (searchBar.classList.contains('visible')) {
+      closeSearch();
+    } else if (agentPanelExpanded) {
+      closeAgentPanel();
+    }
   }
 });
 

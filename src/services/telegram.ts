@@ -989,7 +989,8 @@ input.addEventListener('keydown', (e) => {
       }
 
       // --- Reply-to ---
-      if (msg.replyTo && msg.replyTo.replyToMsgId) {
+      // Skip if replyToMsgId matches topicId (forum topic root, not a real reply)
+      if (msg.replyTo && msg.replyTo.replyToMsgId && msg.replyTo.replyToMsgId !== topicId) {
         info.replyToId = msg.replyTo.replyToMsgId;
         const repliedMsg = msgMap.get(msg.replyTo.replyToMsgId);
         if (repliedMsg) {
@@ -1235,7 +1236,7 @@ input.addEventListener('keydown', (e) => {
   }
 
   /** Convert a gramJS message to MessageInfo (single message, lightweight) */
-  private async messageToInfo(msg: Api.Message): Promise<MessageInfo> {
+  private async messageToInfo(msg: Api.Message, forumTopicId?: number): Promise<MessageInfo> {
     let senderName = 'Unknown';
     if (msg.senderId && this.client) {
       try {
@@ -1292,8 +1293,8 @@ input.addEventListener('keydown', (e) => {
       }
     }
 
-    // Reply-to
-    if (msg.replyTo && msg.replyTo.replyToMsgId) {
+    // Reply-to (skip forum topic root replies)
+    if (msg.replyTo && msg.replyTo.replyToMsgId && msg.replyTo.replyToMsgId !== forumTopicId) {
       info.replyToId = msg.replyTo.replyToMsgId;
     }
 
@@ -1372,7 +1373,11 @@ input.addEventListener('keydown', (e) => {
       const hasListener = dialogIds.some(id => this.chatListeners.has(id));
       if (!hasListener) return;
 
-      const info = await this.messageToInfo(msg);
+      // Extract forum topic ID from message for filtering reply-to
+      const evtTopicId = msg.replyTo && (msg.replyTo as any).forumTopic
+        ? (msg.replyTo.replyToTopId || msg.replyTo.replyToMsgId)
+        : undefined;
+      const info = await this.messageToInfo(msg, evtTopicId);
       for (const dialogId of dialogIds) {
         this.appendMessageToCache(dialogId, info);
         this.emit(dialogId, { type: 'newMessage', message: info });
@@ -1389,7 +1394,10 @@ input.addEventListener('keydown', (e) => {
       const hasListener = dialogIds.some(id => this.chatListeners.has(id));
       if (!hasListener) return;
 
-      const info = await this.messageToInfo(msg);
+      const editTopicId = msg.replyTo && (msg.replyTo as any).forumTopic
+        ? (msg.replyTo.replyToTopId || msg.replyTo.replyToMsgId)
+        : undefined;
+      const info = await this.messageToInfo(msg, editTopicId);
       for (const dialogId of dialogIds) {
         this.emit(dialogId, { type: 'editMessage', message: info });
       }
