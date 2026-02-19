@@ -177,34 +177,20 @@ export class TelegramService {
       connectionRetries: 5,
     });
 
+    // Use a webview panel for login — showInputBox is broken in Cursor
+    const result = await this.webviewLogin();
+    if (!result) throw new Error('Login cancelled');
+
     await this.client.start({
-      phoneNumber: async () => {
-        const phone = await vscode.window.showInputBox({
-          title: 'Telegram Login',
-          prompt: 'Enter your phone number (with country code)',
-          placeHolder: '+1234567890',
-          ignoreFocusOut: true,
-        });
-        if (!phone) throw new Error('Login cancelled');
-        return phone;
-      },
+      phoneNumber: async () => result.phone,
       phoneCode: async () => {
-        const code = await vscode.window.showInputBox({
-          title: 'Telegram Verification Code',
-          prompt: 'Enter the code Telegram sent you',
-          placeHolder: '12345',
-          ignoreFocusOut: true,
-        });
+        // After phone is sent, we need the code — show step 2 in webview
+        const code = await this.webviewPrompt('Telegram sent you a code', 'Enter verification code', 'code');
         if (!code) throw new Error('Login cancelled');
         return code;
       },
       password: async () => {
-        const pw = await vscode.window.showInputBox({
-          title: 'Two-Factor Authentication',
-          prompt: 'Enter your 2FA password',
-          password: true,
-          ignoreFocusOut: true,
-        });
+        const pw = await this.webviewPrompt('Two-factor authentication', 'Enter your 2FA password', 'password');
         if (!pw) throw new Error('Login cancelled');
         return pw;
       },
@@ -214,6 +200,9 @@ export class TelegramService {
       },
     });
 
+    // Close login panel if still open
+    if (this.loginPanel) { this.loginPanel.dispose(); this.loginPanel = undefined; }
+
     // Save session string for next time
     const sessionStr = this.client.session.save() as unknown as string;
     const config = this.loadConfig();
@@ -221,6 +210,145 @@ export class TelegramService {
     this.saveConfig(config);
 
     vscode.window.showInformationMessage('✅ Telegram logged in successfully!');
+  }
+
+  private loginPanel: vscode.WebviewPanel | undefined;
+  private loginResolve: ((value: string | null) => void) | undefined;
+
+  private getLoginHtml(title: string, subtitle: string, inputType: string, placeholder: string): string {
+    return `<!DOCTYPE html>
+<html><head><style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #0e1621;
+  color: #f5f5f5;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.login-card {
+  background: #17212b;
+  border-radius: 16px;
+  padding: 40px;
+  width: 380px;
+  text-align: center;
+}
+.logo { font-size: 48px; margin-bottom: 16px; }
+h1 { font-size: 22px; font-weight: 500; margin-bottom: 8px; }
+.subtitle { color: #6d7f8f; font-size: 14px; margin-bottom: 24px; }
+input {
+  width: 100%;
+  padding: 14px 16px;
+  background: #242f3d;
+  border: 2px solid transparent;
+  border-radius: 12px;
+  color: #f5f5f5;
+  font-size: 18px;
+  text-align: center;
+  letter-spacing: 2px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+input:focus { border-color: #6ab2f2; }
+input::placeholder { color: #5a6e7e; letter-spacing: 0; font-size: 14px; }
+button {
+  width: 100%;
+  padding: 14px;
+  margin-top: 16px;
+  background: #6ab2f2;
+  color: #0e1621;
+  border: none;
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+button:hover { background: #7dc0f7; }
+.cancel {
+  background: transparent;
+  color: #6d7f8f;
+  margin-top: 8px;
+  font-size: 13px;
+}
+.cancel:hover { color: #f5f5f5; background: transparent; }
+</style></head>
+<body>
+<div class="login-card">
+  <div class="logo">🦞</div>
+  <h1>${title}</h1>
+  <p class="subtitle">${subtitle}</p>
+  <input id="input" type="${inputType}" placeholder="${placeholder}" autofocus />
+  <button id="submit" onclick="submit()">Continue</button>
+  <button class="cancel" onclick="cancel()">Cancel</button>
+</div>
+<script>
+const vscode = acquireVsCodeApi();
+const input = document.getElementById('input');
+function submit() {
+  const val = input.value.trim();
+  if (val) vscode.postMessage({ type: 'submit', value: val });
+}
+function cancel() { vscode.postMessage({ type: 'cancel' }); }
+input.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') submit();
+  if (e.key === 'Escape') cancel();
+});
+</script>
+</body></html>`;
+  }
+
+  private async webviewLogin(): Promise<{ phone: string } | null> {
+    const phone = await this.webviewPrompt(
+      'Log in to Telegram',
+      'Enter your phone number with country code',
+      'tel',
+      '+1 234 567 8900'
+    );
+    if (!phone) return null;
+    return { phone };
+  }
+
+  private webviewPrompt(title: string, subtitle: string, inputType: string, placeholder?: string): Promise<string | null> {
+    return new Promise((resolve) => {
+      if (this.loginResolve) {
+        // Reuse existing panel, update content
+        this.loginResolve = resolve;
+        if (this.loginPanel) {
+          this.loginPanel.webview.html = this.getLoginHtml(title, subtitle, inputType === 'code' ? 'text' : inputType, placeholder || '');
+        }
+        return;
+      }
+
+      this.loginResolve = resolve;
+
+      if (!this.loginPanel) {
+        this.loginPanel = vscode.window.createWebviewPanel(
+          'oceangram.login', '🦞 Telegram Login', vscode.ViewColumn.One,
+          { enableScripts: true, retainContextWhenHidden: true }
+        );
+        this.loginPanel.onDidDispose(() => {
+          this.loginPanel = undefined;
+          if (this.loginResolve) { this.loginResolve(null); this.loginResolve = undefined; }
+        });
+        this.loginPanel.webview.onDidReceiveMessage((msg) => {
+          if (msg.type === 'submit' && this.loginResolve) {
+            const r = this.loginResolve;
+            this.loginResolve = undefined;
+            r(msg.value);
+          } else if (msg.type === 'cancel' && this.loginResolve) {
+            const r = this.loginResolve;
+            this.loginResolve = undefined;
+            r(null);
+          }
+        });
+      }
+
+      this.loginPanel.webview.html = this.getLoginHtml(title, subtitle, inputType === 'code' ? 'text' : inputType, placeholder || '');
+      this.loginPanel.reveal(vscode.ViewColumn.One);
+    });
   }
 
   async disconnect(): Promise<void> {
