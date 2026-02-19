@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { TelegramService, ChatEvent, DialogInfo, ConnectionState } from './services/telegram';
+import { TelegramService, ChatEvent, DialogInfo, ConnectionState, UserStatus } from './services/telegram';
 import { OpenClawService, AgentSessionInfo, AgentDetailedInfo } from './services/openclaw';
 import { highlightMessageCodeBlocks, disposeHighlighter } from './services/highlighter';
 
@@ -713,10 +713,16 @@ export class ChatTab {
       this.panel.webview.postMessage({ type: 'connectionState', state, attempt });
     });
 
+    // Subscribe to user status changes (online/offline)
+    const unsubUserStatus = tgForState.onUserStatusChange((userId, status) => {
+      this.panel.webview.postMessage({ type: 'userStatus', userId, status });
+    });
+
     this.panel.onDidDispose(() => {
       ChatTab.tabs.delete(this.chatId);
       if (this.unsubscribeEvents) this.unsubscribeEvents();
       unsubConnState();
+      unsubUserStatus();
       const { chatId: rawChatId, topicId } = TelegramService.parseDialogId(this.chatId);
       getOpenClaw().stopPolling(rawChatId, topicId);
       this.disposables.forEach(d => d.dispose());
@@ -736,6 +742,15 @@ export class ChatTab {
             }
             // Fetch profile photos for senders
             this.fetchAndSendProfilePhotos(tg, messages);
+            // Fetch user status for DM chats (non-negative chatId = user)
+            {
+              const { chatId: rawChatId } = TelegramService.parseDialogId(this.chatId);
+              if (!rawChatId.startsWith('-')) {
+                tg.fetchUserStatus(rawChatId).then(status => {
+                  this.panel.webview.postMessage({ type: 'userStatus', userId: rawChatId, status });
+                }).catch(() => {});
+              }
+            }
             // Fetch pinned messages
             tg.getPinnedMessages(this.chatId).then(pinned => {
               if (pinned.length > 0) {
@@ -995,6 +1010,43 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* Chat header bar */
+.chat-header-bar {
+  display: flex;
+  align-items: center;
+  padding: 8px 16px;
+  background: var(--tg-bg-secondary);
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  gap: 10px;
+  flex-shrink: 0;
+}
+.chat-header-name {
+  font-weight: 500;
+  font-size: 15px;
+  color: var(--tg-text);
+}
+.chat-header-status {
+  font-size: 13px;
+  color: var(--tg-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.status-dot.online {
+  background: #4dcd5e;
+  box-shadow: 0 0 4px rgba(77,205,94,0.5);
+}
+.status-dot.offline {
+  background: #6d7f8f;
 }
 
 /* Scrollable message area */
@@ -2565,6 +2617,13 @@ body {
 </style>
 </head>
 <body>
+<!-- Chat header bar -->
+<div class="chat-header-bar" id="chatHeaderBar">
+  <div>
+    <div class="chat-header-name" id="chatHeaderName">${name}</div>
+    <div class="chat-header-status" id="chatHeaderStatus"></div>
+  </div>
+</div>
 <!-- Reconnecting banner -->
 <div class="reconnect-banner" id="reconnectBanner">
   <span class="spinner"></span>
@@ -3492,6 +3551,11 @@ window.addEventListener('message', (event) => {
     case 'typing':
       if (msg.userId && msg.userName) {
         handleTypingEvent(msg.userId, msg.userName);
+      }
+      break;
+    case 'userStatus':
+      if (msg.userId && msg.status) {
+        updateUserStatus(msg.userId, msg.status);
       }
       break;
     case 'reactionUpdate':
@@ -4446,6 +4510,38 @@ function updateTypingDisplay() {
     : names.slice(0, 2).join(' and ') + (names.length > 2 ? ' and others' : '') + ' are typing';
   typingIndicator.innerHTML = esc(text) + ' <span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>';
   typingIndicator.classList.add('visible');
+}
+
+// --- User Status (online/offline) ---
+function formatLastSeen(status) {
+  if (!status) return '';
+  if (status.online) return 'online';
+  if (status.lastSeen) {
+    var now = Math.floor(Date.now() / 1000);
+    var diff = now - status.lastSeen;
+    if (diff < 60) return 'last seen just now';
+    if (diff < 3600) return 'last seen ' + Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return 'last seen ' + Math.floor(diff / 3600) + 'h ago';
+    var d = new Date(status.lastSeen * 1000);
+    return 'last seen ' + d.toLocaleDateString();
+  }
+  if (status.approximate === 'recently') return 'last seen recently';
+  if (status.approximate === 'lastWeek') return 'last seen within a week';
+  if (status.approximate === 'lastMonth') return 'last seen within a month';
+  if (status.hidden) return '';
+  return '';
+}
+
+function updateUserStatus(userId, status) {
+  var headerStatus = document.getElementById('chatHeaderStatus');
+  if (!headerStatus) return;
+  var text = formatLastSeen(status);
+  if (!text) {
+    headerStatus.innerHTML = '';
+    return;
+  }
+  var dotClass = status.online ? 'online' : 'offline';
+  headerStatus.innerHTML = '<span class="status-dot ' + dotClass + '"></span>' + esc(text);
 }
 
 function handleTypingEvent(userId, userName) {

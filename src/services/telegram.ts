@@ -1911,6 +1911,19 @@ input.addEventListener('keydown', (e) => {
       }
     });
 
+    // User status changes (online/offline)
+    this.client.addEventHandler(async (update: Api.TypeUpdate) => {
+      try {
+        if (update instanceof Api.UpdateUserStatus) {
+          const userId = update.userId.toString();
+          const status = this.parseUserStatus(update.status);
+          this.emitUserStatus(userId, status);
+        }
+      } catch (err) {
+        console.error('[Oceangram] User status handler error:', err);
+      }
+    });
+
     console.log('[Oceangram] Real-time event handlers registered');
   }
 
@@ -1993,6 +2006,7 @@ export type ChatEvent =
   | { type: 'typing'; userId: string; userName: string }
   | { type: 'readOutbox'; maxId: number }
   | { type: 'reactionUpdate'; messageId: number; reactions: ReactionInfo[] }
-  | { type: 'reconnected' };
+  | { type: 'reconnected' }
+  | { type: 'userStatus'; userId: string; status: UserStatus };
 
 export type ChatEventListener = (event: ChatEvent) => void;
