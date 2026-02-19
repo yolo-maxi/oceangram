@@ -738,6 +738,71 @@ input.addEventListener('keydown', (e) => {
     await this.client.sendMessage(entity, opts);
   }
 
+  // --- User Info ---
+
+  async getUserInfo(userId: string): Promise<{
+    name: string;
+    username?: string;
+    phone?: string;
+    bio?: string;
+    photo?: string;
+    lastSeen?: string;
+    isBot: boolean;
+    id: string;
+  }> {
+    if (!this.client) throw new Error('Not connected');
+
+    const entity = await this.client.getEntity(userId);
+    const user = entity as Api.User;
+
+    const name = [user.firstName, user.lastName].filter(Boolean).join(' ') || 'Unknown';
+    const result: any = {
+      name,
+      username: user.username,
+      phone: user.phone,
+      isBot: user.bot || false,
+      id: userId,
+    };
+
+    // Last seen
+    if (user.status) {
+      const statusName = user.status.className;
+      if (statusName === 'UserStatusOnline') {
+        result.lastSeen = 'online';
+      } else if (statusName === 'UserStatusOffline') {
+        const offStatus = user.status as Api.UserStatusOffline;
+        const d = new Date(offStatus.wasOnline * 1000);
+        result.lastSeen = 'last seen ' + d.toLocaleString();
+      } else if (statusName === 'UserStatusRecently') {
+        result.lastSeen = 'last seen recently';
+      } else if (statusName === 'UserStatusLastWeek') {
+        result.lastSeen = 'last seen within a week';
+      } else if (statusName === 'UserStatusLastMonth') {
+        result.lastSeen = 'last seen within a month';
+      }
+    }
+
+    // Full user info (bio)
+    try {
+      const fullUser = await this.client.invoke(
+        new Api.users.GetFullUser({ id: user })
+      );
+      if (fullUser.fullUser?.about) {
+        result.bio = fullUser.fullUser.about;
+      }
+    } catch { /* ignore - may not have permission */ }
+
+    // Profile photo
+    try {
+      const photoBuffer = await this.client.downloadProfilePhoto(user, { isBig: true });
+      if (photoBuffer && Buffer.isBuffer(photoBuffer) && photoBuffer.length > 0) {
+        result.photo = `data:image/jpeg;base64,${photoBuffer.toString('base64')}`;
+      }
+    } catch { /* ignore */ }
+
+    return result;
+  }
+
   // --- Real-time Event Handlers ---
 
   private eventHandlersRegistered = false;
