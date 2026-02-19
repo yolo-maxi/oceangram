@@ -3470,6 +3470,38 @@ window.addEventListener('message', (event) => {
         });
       }
       break;
+    case 'videoData': {
+      var vidMsgId = String(msg.messageId);
+      var vidContainer = window._videoPending && window._videoPending[vidMsgId];
+      if (vidContainer) {
+        var vidLoader = vidContainer.querySelector('.msg-video-loading');
+        if (vidLoader) vidLoader.remove();
+        if (msg.error || !msg.dataUrl) {
+          // Show error, restore play button
+          var vidPlayBtn = vidContainer.querySelector('.msg-video-play');
+          if (vidPlayBtn) vidPlayBtn.style.display = '';
+          console.warn('Video download failed:', msg.error);
+        } else {
+          // Remove thumbnail and meta, insert video player
+          var vidThumb = vidContainer.querySelector('.msg-video-thumb, .msg-video-no-thumb');
+          if (vidThumb) vidThumb.remove();
+          var vidMeta = vidContainer.querySelector('.msg-video-meta');
+          if (vidMeta) vidMeta.remove();
+          var video = document.createElement('video');
+          video.src = msg.dataUrl;
+          video.controls = true;
+          video.autoplay = true;
+          video.style.width = '100%';
+          if (vidContainer.classList.contains('video-note')) {
+            video.style.borderRadius = '50%';
+            video.style.objectFit = 'cover';
+          }
+          vidContainer.insertBefore(video, vidContainer.firstChild);
+        }
+        delete window._videoPending[vidMsgId];
+      }
+      break;
+    }
     case 'downloadProgress': {
       var progEl = document.getElementById('file-progress-' + msg.messageId);
       if (progEl) {
@@ -3975,6 +4007,30 @@ function cycleVoiceSpeed(btn) {
   var next = (current + 1) % speeds.length;
   if (audio) audio.playbackRate = speeds[next];
   btn.textContent = labels[next];
+}
+
+function playVideo(container) {
+  var msgId = container.dataset.msgId;
+  if (!msgId) return;
+  // If already has a video element, toggle play/pause
+  var existingVideo = container.querySelector('video');
+  if (existingVideo) {
+    if (existingVideo.paused) existingVideo.play();
+    else existingVideo.pause();
+    return;
+  }
+  // Show loading indicator
+  var playBtn = container.querySelector('.msg-video-play');
+  if (playBtn) playBtn.style.display = 'none';
+  var loader = document.createElement('div');
+  loader.className = 'msg-video-loading';
+  loader.textContent = 'Loading…';
+  container.appendChild(loader);
+  // Request video download from extension
+  vscode.postMessage({ type: 'downloadVideo', messageId: parseInt(msgId) });
+  // Store container ref for callback
+  if (!window._videoPending) window._videoPending = {};
+  window._videoPending[msgId] = container;
 }
 
 function showLightbox(src) {

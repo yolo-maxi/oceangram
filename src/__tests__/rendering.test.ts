@@ -367,6 +367,7 @@ function renderMessageHtml(m: {
   senderName?: string;
   mediaType?: string;
   mediaUrl?: string;
+  thumbnailUrl?: string;
   fileName?: string;
   fileSize?: number;
   replyToId?: number;
@@ -402,7 +403,14 @@ function renderMessageHtml(m: {
   } else if (m.mediaType === 'voice') {
     html += '<div class="msg-voice">🎤 Voice message</div>';
   } else if (m.mediaType === 'video') {
-    html += '<div class="msg-video">🎬 Video</div>';
+    const vidNoteClass = (m as any).isVideoNote ? ' video-note' : '';
+    html += '<div class="msg-video-container' + vidNoteClass + '">';
+    if (m.thumbnailUrl) {
+      html += '<img class="msg-video-thumb" src="' + esc(m.thumbnailUrl) + '" />';
+    } else {
+      html += '<div class="msg-video-no-thumb">🎬 Video</div>';
+    }
+    html += '<div class="msg-video-play"></div></div>';
   } else if (m.mediaType === 'sticker') {
     html += '<div class="msg-sticker">🏷️ Sticker</div>';
   } else if (m.mediaType === 'gif') {
