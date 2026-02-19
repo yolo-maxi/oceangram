@@ -56,4 +56,7 @@ export function activate(context: vscode.ExtensionContext) {
   console.log('Oceangram activated — Cmd+Shift+1-4');
 }
 
-export function deactivate() {}
+export function deactivate() {
+  const { disposeHighlighter } = require('./services/highlighter');
+  disposeHighlighter();
+}

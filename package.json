@@ -1,7 +1,7 @@
 {
   "name": "oceangram",
   "displayName": "Oceangram",
-  "description": "Developer cockpit — Comms, Kanban, Resources, and Agent Status in one sidebar",
+  "description": "Telegram + AI agent cockpit for OpenClaw users. Chat, kanban, and agent status — all in your editor.",
   "version": "0.1.0",
   "publisher": "oceangram",
   "engines": {
@@ -82,6 +82,21 @@
   },
   "packageManager": "pnpm@9.15.4",
   "dependencies": {
+    "shiki": "^3.22.0",
     "telegram": "^2.26.22"
-  }
+  },
+  "icon": "icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/oceangram/oceangram"
+  },
+  "license": "MIT",
+  "keywords": [
+    "telegram",
+    "openclaw",
+    "ai",
+    "agent",
+    "kanban",
+    "chat"
+  ]
 }

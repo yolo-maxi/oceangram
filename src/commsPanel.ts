@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { TelegramService, ChatEvent } from './services/telegram';
 import { OpenClawService, AgentSessionInfo } from './services/openclaw';
+import { highlightMessageCodeBlocks, disposeHighlighter } from './services/highlighter';
 
 // Shared telegram service across all panels
 let sharedTelegram: TelegramService | undefined;
@@ -98,79 +99,99 @@ export class CommsPicker {
 <head>
 <meta charset="UTF-8">
 <style>
+:root {
+  --tg-bg: #0e1621;
+  --tg-bg-secondary: #17212b;
+  --tg-surface: #202b36;
+  --tg-accent: #6ab2f2;
+  --tg-text: #f5f5f5;
+  --tg-text-secondary: #6d7f8f;
+  --tg-border: #101921;
+  --tg-hover: #1e2c3a;
+  --tg-selected: #2b5278;
+  --tg-unread: #6ab2f2;
+  --tg-badge-text: #fff;
+  --tg-danger: #e05d5d;
+  --tg-green: #8bc34a;
+}
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
-  font-family: var(--vscode-font-family, system-ui);
-  color: var(--vscode-foreground, #ccc);
-  background: var(--vscode-editor-background, #1e1e1e);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  color: var(--tg-text);
+  background: var(--tg-bg);
   font-size: 13px;
   height: 100vh;
   display: flex;
   flex-direction: column;
 }
-.search-bar { padding: 12px 16px; flex-shrink: 0; }
+.search-bar { padding: 8px 10px; flex-shrink: 0; background: var(--tg-bg-secondary); }
 input[type="text"] {
   width: 100%;
-  padding: 10px 14px;
-  background: var(--vscode-input-background, #2a2a2a);
-  color: var(--vscode-input-foreground, #ccc);
-  border: 1px solid var(--vscode-input-border, #444);
-  border-radius: 8px;
+  padding: 8px 12px;
+  background: var(--tg-surface);
+  color: var(--tg-text);
+  border: none;
+  border-radius: 20px;
   font-size: 14px;
   outline: none;
 }
-input[type="text"]:focus { border-color: var(--vscode-focusBorder, #007acc); }
+input[type="text"]::placeholder { color: var(--tg-text-secondary); }
+input[type="text"]:focus { background: var(--tg-hover); }
 .content { flex: 1; overflow-y: auto; }
+.content::-webkit-scrollbar { width: 5px; }
+.content::-webkit-scrollbar-thumb { background: var(--tg-surface); border-radius: 3px; }
 .chat-item {
   display: flex;
   align-items: center;
-  padding: 10px 16px;
-  gap: 12px;
+  padding: 8px 10px;
+  gap: 10px;
   cursor: pointer;
-  border-bottom: 1px solid var(--vscode-panel-border, #2a2a2a);
+  border-radius: 0;
 }
-.chat-item:hover { background: var(--vscode-list-hoverBackground, #2a2a2a); }
+.chat-item:hover { background: var(--tg-hover); }
+.chat-item.selected { background: var(--tg-selected); }
 .avatar {
-  width: 40px; height: 40px;
+  position: relative;
+  width: 48px; height: 48px;
   border-radius: 50%;
-  background: var(--vscode-badge-background, #4a4a4a);
-  color: var(--vscode-badge-foreground, #fff);
   display: flex; align-items: center; justify-content: center;
-  font-size: 14px; font-weight: 600;
+  font-size: 16px; font-weight: 600;
   flex-shrink: 0;
+  color: #fff;
 }
 .chat-info { flex: 1; min-width: 0; }
-.chat-name { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.chat-preview { font-size: 12px; opacity: 0.6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 3px; }
-.chat-group-name { font-size: 11px; opacity: 0.55; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; }
-.chat-topic-name { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.avatar { position: relative; }
+.chat-name-row { display: flex; align-items: center; gap: 4px; }
+.chat-name { font-weight: 500; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--tg-text); flex: 1; min-width: 0; }
+.chat-time { font-size: 12px; color: var(--tg-text-secondary); flex-shrink: 0; }
+.chat-time.has-unread { color: var(--tg-accent); }
+.chat-preview-row { display: flex; align-items: center; gap: 4px; margin-top: 2px; }
+.chat-preview { font-size: 13px; color: var(--tg-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+.chat-group-name { font-size: 11px; color: var(--tg-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 1px; }
+.chat-topic-name { font-weight: 500; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--tg-text); }
 .topic-badge {
-  position: absolute; bottom: -2px; right: -2px;
-  width: 16px; height: 16px; border-radius: 50%;
-  background: var(--vscode-badge-background, #007acc);
-  color: var(--vscode-badge-foreground, #fff);
+  position: absolute; bottom: -1px; right: -1px;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: var(--tg-accent);
+  color: #fff;
   font-size: 10px; font-weight: 700;
   display: flex; align-items: center; justify-content: center;
-  border: 2px solid var(--vscode-editor-background, #1e1e1e);
+  border: 2px solid var(--tg-bg);
 }
-.chat-meta { text-align: right; flex-shrink: 0; }
-.chat-time { font-size: 11px; opacity: 0.5; }
-.chat-unread {
-  background: var(--vscode-badge-background, #007acc);
-  color: var(--vscode-badge-foreground, #fff);
-  font-size: 11px; border-radius: 10px;
-  padding: 2px 6px; margin-top: 4px;
-  display: inline-block;
+.unread-badge {
+  background: var(--tg-unread);
+  color: var(--tg-badge-text);
+  font-size: 11px; font-weight: 600; border-radius: 12px;
+  padding: 1px 7px; min-width: 20px; text-align: center;
+  flex-shrink: 0;
 }
 .pin-btn, .unpin-btn {
   cursor: pointer; padding: 4px 6px; border-radius: 4px;
-  flex-shrink: 0; font-size: 16px; opacity: 0.6;
+  flex-shrink: 0; font-size: 14px; color: var(--tg-text-secondary);
 }
-.pin-btn:hover, .unpin-btn:hover { background: var(--vscode-list-hoverBackground, #333); opacity: 1; }
-.empty { text-align: center; padding: 40px 20px; opacity: 0.5; font-size: 14px; line-height: 1.6; }
-.error { color: var(--vscode-errorForeground, #f44); padding: 12px 16px; font-size: 12px; }
-.loading { text-align: center; padding: 24px; opacity: 0.5; }
+.pin-btn:hover, .unpin-btn:hover { background: var(--tg-surface); color: var(--tg-text); }
+.empty { text-align: center; padding: 40px 20px; color: var(--tg-text-secondary); font-size: 14px; line-height: 1.6; }
+.error { color: var(--tg-danger); padding: 12px 16px; font-size: 12px; background: var(--tg-bg-secondary); }
+.loading { text-align: center; padding: 24px; color: var(--tg-text-secondary); }
 </style>
 </head>
 <body>
@@ -190,21 +211,46 @@ const searchResults = document.getElementById('searchResults');
 const searchInput = document.getElementById('searchInput');
 const errorBox = document.getElementById('errorBox');
 
+const avatarColors = ['#e17076','#eda86c','#a695e7','#7bc862','#6ec9cb','#65aadd','#ee7aae','#6bb2f2'];
+function pickColor(id) { return avatarColors[Math.abs(parseInt(id || '0', 10)) % avatarColors.length]; }
+
+let selectedIndex = -1;
+
 function esc(s) {
   const d = document.createElement('div');
   d.textContent = s || '';
   return d.innerHTML;
 }
 
-function formatTime(ts) {
+function relativeTime(ts) {
   if (!ts) return '';
+  const now = Math.floor(Date.now() / 1000);
+  const diff = now - ts;
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h';
   const d = new Date(ts * 1000);
-  const now = new Date();
-  if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const today = new Date();
+  const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  if (diff < 604800) return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
   return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
+function updateSelection(container) {
+  const items = container.querySelectorAll('.chat-item');
+  items.forEach((el, i) => el.classList.toggle('selected', i === selectedIndex));
+  if (selectedIndex >= 0 && items[selectedIndex]) {
+    items[selectedIndex].scrollIntoView({ block: 'nearest' });
+  }
+}
+
+function getActiveContainer() {
+  return searchResults.style.display !== 'none' ? searchResults : chatList;
+}
+
 function renderDialogs(dialogs, container, showPinBtn) {
+  selectedIndex = -1;
   if (!dialogs.length) {
     container.innerHTML = '<div class="empty">No pinned chats yet.<br>Search to find and pin chats.</div>';
     return;
@@ -214,24 +260,31 @@ function renderDialogs(dialogs, container, showPinBtn) {
       ? (d.isPinned ? '' : '<span class="pin-btn" data-id="' + d.id + '">📌</span>')
       : '<span class="unpin-btn" data-id="' + d.id + '" title="Unpin">✕</span>';
 
+    const hasUnread = d.unreadCount > 0;
     const isTopic = d.groupName && d.topicName;
+    const color = pickColor(d.id);
     const avatarHtml = isTopic
-      ? '<div class="avatar">' + esc(d.initials) + '<span class="topic-badge">#</span></div>'
-      : '<div class="avatar">' + esc(d.initials) + '</div>';
+      ? '<div class="avatar" style="background:' + color + '">' + esc(d.initials) + '<span class="topic-badge">#</span></div>'
+      : '<div class="avatar" style="background:' + color + '">' + esc(d.initials) + '</div>';
+
+    const preview = d.lastMessage ? esc(d.lastMessage.slice(0, 80)) : '';
+    const timeStr = relativeTime(d.lastMessageTime);
+    const timeClass = 'chat-time' + (hasUnread ? ' has-unread' : '');
+    const unreadHtml = hasUnread ? '<span class="unread-badge">' + d.unreadCount + '</span>' : '';
 
     const infoHtml = isTopic
       ? '<div class="chat-info">' +
-          '<div class="chat-group-name">⌗ ' + esc(d.groupName) + '</div>' +
-          '<div class="chat-topic-name">' + esc(d.topicEmoji || '') + ' ' + esc(d.topicName) + '</div>' +
+          '<div class="chat-name-row"><div class="chat-group-name">⌗ ' + esc(d.groupName) + '</div><span class="' + timeClass + '">' + timeStr + '</span></div>' +
+          '<div class="chat-name-row"><div class="chat-topic-name">' + esc(d.topicEmoji || '') + ' ' + esc(d.topicName) + '</div></div>' +
+          '<div class="chat-preview-row"><span class="chat-preview">' + preview + '</span>' + unreadHtml + '</div>' +
         '</div>'
-      : '<div class="chat-info"><div class="chat-name">' + esc(d.name) + '</div>' +
-        '<div class="chat-preview">' + esc(d.lastMessage.slice(0, 80)) + '</div></div>';
+      : '<div class="chat-info">' +
+          '<div class="chat-name-row"><span class="chat-name">' + esc(d.name) + '</span><span class="' + timeClass + '">' + timeStr + '</span></div>' +
+          '<div class="chat-preview-row"><span class="chat-preview">' + preview + '</span>' + unreadHtml + '</div>' +
+        '</div>';
 
     return '<div class="chat-item" data-id="' + d.id + '" data-name="' + esc(d.name) + '">' +
-      avatarHtml + infoHtml +
-      '<div class="chat-meta"><div class="chat-time">' + formatTime(d.lastMessageTime) + '</div>' +
-      (d.unreadCount > 0 ? '<div class="chat-unread">' + d.unreadCount + '</div>' : '') + '</div>' +
-      actionBtn + '</div>';
+      avatarHtml + infoHtml + actionBtn + '</div>';
   }).join('');
 
   container.querySelectorAll('.chat-item').forEach(el => {
@@ -251,9 +304,37 @@ function renderDialogs(dialogs, container, showPinBtn) {
 let searchTimeout;
 searchInput.addEventListener('input', () => {
   const q = searchInput.value.trim();
-  if (!q) { searchResults.style.display = 'none'; chatList.style.display = 'block'; return; }
+  if (!q) { searchResults.style.display = 'none'; chatList.style.display = 'block'; selectedIndex = -1; return; }
   clearTimeout(searchTimeout);
   searchTimeout = setTimeout(() => vscode.postMessage({ type: 'search', query: q }), 300);
+});
+
+document.addEventListener('keydown', (e) => {
+  const container = getActiveContainer();
+  const items = container.querySelectorAll('.chat-item');
+  const count = items.length;
+  if (!count) return;
+
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    selectedIndex = selectedIndex < count - 1 ? selectedIndex + 1 : 0;
+    updateSelection(container);
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    selectedIndex = selectedIndex > 0 ? selectedIndex - 1 : count - 1;
+    updateSelection(container);
+  } else if (e.key === 'Enter' && selectedIndex >= 0 && items[selectedIndex]) {
+    e.preventDefault();
+    const el = items[selectedIndex];
+    vscode.postMessage({ type: 'openChat', chatId: el.dataset.id, chatName: el.dataset.name });
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    searchInput.value = '';
+    searchResults.style.display = 'none';
+    chatList.style.display = 'block';
+    selectedIndex = -1;
+    searchInput.focus();
+  }
 });
 
 window.addEventListener('message', (event) => {
@@ -278,6 +359,34 @@ vscode.postMessage({ type: 'init' });
 </body>
 </html>`;
   }
+}
+
+/**
+ * Process messages to include syntax-highlighted code blocks.
+ * Adds `highlightedCodeBlocks` map to each message that has code entities.
+ */
+async function addSyntaxHighlighting(messages: any[]): Promise<any[]> {
+  const results = await Promise.all(messages.map(async (m: any) => {
+    if (!m.text || !m.entities) { return m; }
+    const hasCode = m.entities.some((e: any) => e.type === 'pre');
+    if (!hasCode) { return m; }
+    try {
+      const highlighted = await highlightMessageCodeBlocks(m.text, m.entities);
+      if (highlighted.size === 0) { return m; }
+      // Convert Map to plain object for JSON serialization
+      const codeBlocksHtml: Record<number, string> = {};
+      highlighted.forEach((html, idx) => { codeBlocksHtml[idx] = html; });
+      return { ...m, highlightedCodeBlocks: codeBlocksHtml };
+    } catch {
+      return m;
+    }
+  }));
+  return results;
+}
+
+async function addSyntaxHighlightingSingle(m: any): Promise<any> {
+  const result = await addSyntaxHighlighting([m]);
+  return result[0];
 }
 
 /**
@@ -334,17 +443,17 @@ export class ChatTab {
         switch (msg.type) {
           case 'init':
             await tg.connect();
-            const messages = await tg.getMessages(this.chatId, 50);
+            const messages = await addSyntaxHighlighting(await tg.getMessages(this.chatId, 50));
             this.panel.webview.postMessage({ type: 'messages', messages });
             // Subscribe to real-time events
             if (!this.unsubscribeEvents) {
-              this.unsubscribeEvents = tg.onChatEvent(this.chatId, (event: ChatEvent) => {
+              this.unsubscribeEvents = tg.onChatEvent(this.chatId, async (event: ChatEvent) => {
                 switch (event.type) {
                   case 'newMessage':
-                    this.panel.webview.postMessage({ type: 'newMessage', message: event.message });
+                    this.panel.webview.postMessage({ type: 'newMessage', message: await addSyntaxHighlightingSingle(event.message) });
                     break;
                   case 'editMessage':
-                    this.panel.webview.postMessage({ type: 'editMessage', message: event.message });
+                    this.panel.webview.postMessage({ type: 'editMessage', message: await addSyntaxHighlightingSingle(event.message) });
                     break;
                   case 'deleteMessages':
                     this.panel.webview.postMessage({ type: 'deleteMessages', messageIds: event.messageIds });
@@ -356,12 +465,12 @@ export class ChatTab {
           case 'sendMessage':
             await tg.connect();
             await tg.sendMessage(this.chatId, msg.text, msg.replyToId);
-            const updated = await tg.getMessages(this.chatId, 50);
+            const updated = await addSyntaxHighlighting(await tg.getMessages(this.chatId, 50));
             this.panel.webview.postMessage({ type: 'messages', messages: updated });
             break;
           case 'loadOlder':
             await tg.connect();
-            const older = await tg.getMessages(this.chatId, 30, msg.beforeId);
+            const older = await addSyntaxHighlighting(await tg.getMessages(this.chatId, 30, msg.beforeId));
             this.panel.webview.postMessage({ type: 'olderMessages', messages: older });
             break;
           case 'poll':
@@ -371,7 +480,7 @@ export class ChatTab {
             const lastKnown = msg.afterId || 0;
             const hasNew = polled.some((m: any) => m.id > lastKnown);
             if (hasNew) {
-              this.panel.webview.postMessage({ type: 'messages', messages: polled });
+              this.panel.webview.postMessage({ type: 'messages', messages: await addSyntaxHighlighting(polled) });
             }
             break;
         }
@@ -709,12 +818,63 @@ body {
   padding: 10px 12px;
   border-radius: 6px;
   overflow-x: auto;
-  margin: 6px 0;
+  margin: 0;
   font-size: 13px;
 }
 .msg-bubble pre code {
   background: transparent;
   padding: 0;
+}
+/* Shiki pre overrides */
+.code-block-wrapper pre.shiki {
+  background: rgba(0,0,0,0.25) !important;
+  padding: 10px 12px;
+  border-radius: 0 0 6px 6px;
+  overflow-x: auto;
+  margin: 0;
+  font-size: 13px;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+}
+.code-block-wrapper pre.shiki code {
+  background: transparent;
+  padding: 0;
+  font-family: inherit;
+}
+.code-block-wrapper {
+  position: relative;
+  margin: 6px 0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.code-block-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(0,0,0,0.35);
+  padding: 4px 10px;
+  font-size: 11px;
+}
+.code-lang {
+  color: rgba(255,255,255,0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.copy-code-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255,255,255,0.5);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  transition: all 0.15s;
+}
+.copy-code-btn:hover {
+  background: rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.9);
+}
+.copy-code-btn.copied {
+  color: #4ec9b0;
 }
 
 /* Image lightbox overlay */
@@ -989,7 +1149,7 @@ function linkify(text) {
   return text.replace(/(https?:\\/\\/[^\\s<]+)/g, '<a href="$1" title="$1">$1</a>');
 }
 
-function applyEntities(text, entities) {
+function applyEntities(text, entities, msg) {
   if (!entities || entities.length === 0) return linkify(esc(text));
   var sorted = entities.slice().sort(function(a, b) { return b.offset - a.offset; });
   var chars = Array.from(text);
@@ -1002,7 +1162,21 @@ function applyEntities(text, entities) {
       case 'bold': replacement = '<strong>' + slice + '</strong>'; break;
       case 'italic': replacement = '<em>' + slice + '</em>'; break;
       case 'code': replacement = '<code>' + slice + '</code>'; break;
-      case 'pre': replacement = '<pre><code' + (e.language ? ' class="language-' + esc(e.language) + '"' : '') + '>' + slice + '</code></pre>'; break;
+      case 'pre': {
+        var hlKey = String(i);
+        if (msg && msg.highlightedCodeBlocks && msg.highlightedCodeBlocks[hlKey]) {
+          replacement = '<div class="code-block-wrapper">' +
+            '<div class="code-block-header"><span class="code-lang">' + esc(e.language || '') + '</span><button class="copy-code-btn" onclick="copyCodeBlock(this)" title="Copy code">📋</button></div>' +
+            msg.highlightedCodeBlocks[hlKey] +
+            '</div>';
+        } else {
+          replacement = '<div class="code-block-wrapper">' +
+            '<div class="code-block-header"><span class="code-lang">' + esc(e.language || '') + '</span><button class="copy-code-btn" onclick="copyCodeBlock(this)" title="Copy code">📋</button></div>' +
+            '<pre><code' + (e.language ? ' class="language-' + esc(e.language) + '"' : '') + '>' + slice + '</code></pre>' +
+            '</div>';
+        }
+        break;
+      }
       case 'strikethrough': replacement = '<del>' + slice + '</del>'; break;
       case 'text_link': var safeUrl = (e.url || '').match(/^https?:\\/\\//) ? e.url : '#'; replacement = '<a href="' + esc(safeUrl || '#') + '">' + slice + '</a>'; break;
       case 'url': replacement = '<a href="' + slice + '">' + slice + '</a>'; break;
@@ -1066,7 +1240,7 @@ function renderMessages(msgs) {
       const isLast = i === len - 1;
       const emoji = isEmojiOnly(m.text);
       const bubbleCls = 'msg-bubble' + (emoji ? ' emoji-only' : '');
-      const textContent = emoji ? esc(m.text) : applyEntities(m.text, m.entities);
+      const textContent = emoji ? esc(m.text) : applyEntities(m.text, m.entities, m);
 
       var bubbleInner = '';
 
@@ -1369,6 +1543,22 @@ document.addEventListener('contextmenu', (e) => {
   document.body.appendChild(menu);
   activeCtxMenu = menu;
 });
+
+function copyCodeBlock(btn) {
+  var wrapper = btn.closest('.code-block-wrapper');
+  if (!wrapper) return;
+  var pre = wrapper.querySelector('pre');
+  if (!pre) return;
+  var code = pre.textContent || '';
+  navigator.clipboard.writeText(code).then(function() {
+    btn.textContent = '✅';
+    btn.classList.add('copied');
+    setTimeout(function() {
+      btn.textContent = '📋';
+      btn.classList.remove('copied');
+    }, 2000);
+  });
+}
 
 function showLightbox(src) {
   var overlay = document.createElement('div');
