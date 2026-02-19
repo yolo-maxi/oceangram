@@ -2443,6 +2443,158 @@ function doSend() {
   clearReply();
 }
 sendBtn.addEventListener('click', doSend);
+
+// ── Emoji Picker ──
+(function() {
+  const EMOJI_DATA = {
+    'recent': { icon: '🕐', label: 'Recently Used', emoji: [] },
+    'smileys': { icon: '😀', label: 'Smileys & People', emoji: [
+      ['😀','grinning'],['😃','smiley'],['😄','smile'],['😁','grin'],['😆','laughing'],['😅','sweat smile'],['🤣','rofl'],['😂','joy'],['🙂','slightly smiling'],['🙃','upside down'],['😉','wink'],['😊','blush'],['😇','innocent'],['🥰','smiling hearts'],['😍','heart eyes'],['🤩','star struck'],['😘','kissing heart'],['😗','kissing'],['😚','kissing closed eyes'],['😙','kissing smiling'],['🥲','smiling tear'],['😋','yum'],['😛','stuck out tongue'],['😜','stuck out tongue winking'],['🤪','zany'],['😝','stuck out tongue closed eyes'],['🤑','money mouth'],['🤗','hugs'],['🤭','hand over mouth'],['🤫','shushing'],['🤔','thinking'],['🫡','salute'],['🤐','zipper mouth'],['🤨','raised eyebrow'],['😐','neutral'],['😑','expressionless'],['😶','no mouth'],['🫥','dotted line face'],['😏','smirk'],['😒','unamused'],['🙄','rolling eyes'],['😬','grimacing'],['🤥','lying'],['😌','relieved'],['😔','pensive'],['😪','sleepy'],['🤤','drooling'],['😴','sleeping'],['😷','mask'],['🤒','thermometer face'],['🤕','bandage face'],['🤢','nauseated'],['🤮','vomiting'],['🥵','hot face'],['🥶','cold face'],['🥴','woozy'],['😵','dizzy face'],['🤯','exploding head'],['🤠','cowboy'],['🥳','partying'],['🥸','disguised'],['😎','sunglasses'],['🤓','nerd'],['🧐','monocle'],['😕','confused'],['🫤','diagonal mouth'],['😟','worried'],['🙁','slightly frowning'],['☹️','frowning'],['😮','open mouth'],['😯','hushed'],['😲','astonished'],['😳','flushed'],['🥺','pleading'],['🥹','holding back tears'],['😦','frowning open mouth'],['😧','anguished'],['😨','fearful'],['😰','anxious sweat'],['😥','sad relieved'],['😢','crying'],['😭','sobbing'],['😱','screaming'],['😖','confounded'],['😣','persevering'],['😞','disappointed'],['😓','downcast sweat'],['😩','weary'],['😫','tired'],['🥱','yawning'],['😤','steam nose'],['😡','pouting'],['😠','angry'],['🤬','swearing'],['😈','smiling imp'],['👿','imp'],['💀','skull'],['☠️','skull crossbones'],['💩','poop'],['🤡','clown'],['👹','ogre'],['👺','goblin'],['👻','ghost'],['👽','alien'],['👾','alien monster'],['🤖','robot'],['👋','wave'],['🤚','raised back hand'],['🖐️','hand fingers splayed'],['✋','raised hand'],['🖖','vulcan'],['🫱','rightwards hand'],['🫲','leftwards hand'],['👌','ok hand'],['🤌','pinched fingers'],['🤏','pinching'],['✌️','victory'],['🤞','crossed fingers'],['🫰','hand with index and thumb crossed'],['🤟','love you gesture'],['🤘','rock on'],['🤙','call me'],['👈','point left'],['👉','point right'],['👆','point up'],['🖕','middle finger'],['👇','point down'],['☝️','point up 2'],['🫵','point at viewer'],['👍','thumbs up'],['👎','thumbs down'],['✊','fist'],['👊','punch'],['🤛','left fist'],['🤜','right fist'],['👏','clap'],['🙌','raised hands'],['🫶','heart hands'],['👐','open hands'],['🤲','palms up'],['🤝','handshake'],['🙏','pray'],['💪','muscle'],['🫂','hug people'],['👶','baby'],['👦','boy'],['👧','girl'],['👨','man'],['👩','woman'],['🧑','person'],['👴','old man'],['👵','old woman']
+    ]},
+    'animals': { icon: '🐱', label: 'Animals & Nature', emoji: [
+      ['🐶','dog'],['🐱','cat'],['🐭','mouse'],['🐹','hamster'],['🐰','rabbit'],['🦊','fox'],['🐻','bear'],['🐼','panda'],['🐻‍❄️','polar bear'],['🐨','koala'],['🐯','tiger'],['🦁','lion'],['🐮','cow'],['🐷','pig'],['🐸','frog'],['🐵','monkey'],['🙈','see no evil'],['🙉','hear no evil'],['🙊','speak no evil'],['🐒','monkey 2'],['🐔','chicken'],['🐧','penguin'],['🐦','bird'],['🐤','baby chick'],['🦆','duck'],['🦅','eagle'],['🦉','owl'],['🦇','bat'],['🐺','wolf'],['🐗','boar'],['🐴','horse'],['🦄','unicorn'],['🐝','bee'],['🪱','worm'],['🐛','bug'],['🦋','butterfly'],['🐌','snail'],['🐞','ladybug'],['🐜','ant'],['🪰','fly'],['🪲','beetle'],['🦟','mosquito'],['🪳','cockroach'],['🐢','turtle'],['🐍','snake'],['🦎','lizard'],['🦂','scorpion'],['🕷️','spider'],['🐙','octopus'],['🦑','squid'],['🦐','shrimp'],['🦀','crab'],['🐡','blowfish'],['🐠','tropical fish'],['🐟','fish'],['🐬','dolphin'],['🐳','whale'],['🐋','whale 2'],['🦈','shark'],['🐊','crocodile'],['🐅','tiger 2'],['🐆','leopard'],['🦓','zebra'],['🦍','gorilla'],['🐘','elephant'],['🦛','hippo'],['🦏','rhino'],['🐪','camel'],['🐫','two hump camel'],['🦒','giraffe'],['🐃','water buffalo'],['🐂','ox'],['🐄','cow 2'],['🌵','cactus'],['🎄','christmas tree'],['🌲','evergreen'],['🌳','deciduous tree'],['🌴','palm tree'],['🪵','wood'],['🌱','seedling'],['🌿','herb'],['☘️','shamrock'],['🍀','four leaf clover'],['🌸','cherry blossom'],['🌺','hibiscus'],['🌻','sunflower'],['🌹','rose'],['🌷','tulip'],['🌼','blossom'],['🪷','lotus'],['💐','bouquet'],['🍂','fallen leaf'],['🍁','maple leaf'],['🍃','leaves'],['🪺','nest eggs'],['🪹','empty nest']
+    ]},
+    'food': { icon: '🍕', label: 'Food & Drink', emoji: [
+      ['🍎','apple'],['🍊','orange'],['🍋','lemon'],['🍌','banana'],['🍉','watermelon'],['🍇','grapes'],['🍓','strawberry'],['🫐','blueberries'],['🍈','melon'],['🍒','cherries'],['🍑','peach'],['🥭','mango'],['🍍','pineapple'],['🥥','coconut'],['🥝','kiwi'],['🍅','tomato'],['🥑','avocado'],['🍆','eggplant'],['🥔','potato'],['🥕','carrot'],['🌽','corn'],['🌶️','hot pepper'],['🫑','bell pepper'],['🥒','cucumber'],['🥬','leafy green'],['🥦','broccoli'],['🧄','garlic'],['🧅','onion'],['🍄','mushroom'],['🥜','peanuts'],['🫘','beans'],['🌰','chestnut'],['🍞','bread'],['🥐','croissant'],['🥖','baguette'],['🫓','flatbread'],['🥨','pretzel'],['🧀','cheese'],['🥚','egg'],['🍳','cooking'],['🧈','butter'],['🥞','pancakes'],['🧇','waffle'],['🥓','bacon'],['🥩','cut of meat'],['🍗','poultry leg'],['🍖','meat on bone'],['🌭','hot dog'],['🍔','hamburger'],['🍟','fries'],['🍕','pizza'],['🫔','tamale'],['🥪','sandwich'],['🌮','taco'],['🌯','burrito'],['🫕','fondue'],['🥗','salad'],['🍝','spaghetti'],['🍜','ramen'],['🍲','stew'],['🍛','curry'],['🍣','sushi'],['🍱','bento'],['🥟','dumpling'],['🍤','fried shrimp'],['🍙','rice ball'],['🍚','rice'],['🍘','rice cracker'],['🍧','shaved ice'],['🍨','ice cream'],['🎂','birthday cake'],['🍰','shortcake'],['🧁','cupcake'],['🥧','pie'],['🍫','chocolate'],['🍬','candy'],['🍭','lollipop'],['🍮','custard'],['🍯','honey pot'],['🍼','baby bottle'],['🥛','milk'],['☕','coffee'],['🫖','teapot'],['🍵','tea'],['🧃','juice box'],['🥤','cup with straw'],['🧋','bubble tea'],['🍶','sake'],['🍺','beer'],['🍻','cheers'],['🥂','champagne'],['🍷','wine'],['🥃','whiskey'],['🍸','cocktail'],['🍹','tropical drink'],['🧉','mate'],['🍾','bottle with popping cork']
+    ]},
+    'activity': { icon: '⚽', label: 'Activity', emoji: [
+      ['⚽','soccer'],['🏀','basketball'],['🏈','football'],['⚾','baseball'],['🥎','softball'],['🎾','tennis'],['🏐','volleyball'],['🏉','rugby'],['🥏','flying disc'],['🎱','8ball'],['🏓','ping pong'],['🏸','badminton'],['🏒','hockey'],['🥅','goal net'],['⛳','golf'],['🏹','bow and arrow'],['🎣','fishing'],['🤿','diving mask'],['🥊','boxing glove'],['🥋','martial arts'],['🎽','running shirt'],['⛸️','ice skate'],['🛷','sled'],['🎿','ski'],['⛷️','skier'],['🏂','snowboarder'],['🏋️','weight lifter'],['🤼','wrestlers'],['🤸','cartwheeling'],['🤺','fencer'],['🏇','horse racing'],['🧘','yoga'],['🏄','surfing'],['🏊','swimming'],['🚣','rowing'],['🧗','climbing'],['🚴','biking'],['🏆','trophy'],['🥇','1st place'],['🥈','2nd place'],['🥉','3rd place'],['🏅','medal'],['🎖️','military medal'],['🎪','circus tent'],['🎭','performing arts'],['🎨','art'],['🎬','clapper board'],['🎤','microphone'],['🎧','headphones'],['🎼','musical score'],['🎹','piano'],['🥁','drum'],['🎷','saxophone'],['🎺','trumpet'],['🎸','guitar'],['🪕','banjo'],['🎻','violin'],['🎲','game die'],['♟️','chess pawn'],['🎯','dart'],['🎳','bowling'],['🎮','video game'],['🕹️','joystick'],['🎰','slot machine'],['🧩','puzzle piece']
+    ]},
+    'travel': { icon: '🌍', label: 'Travel & Places', emoji: [
+      ['🚗','car'],['🚕','taxi'],['🚙','suv'],['🚌','bus'],['🚎','trolleybus'],['🏎️','racing car'],['🚓','police car'],['🚑','ambulance'],['🚒','fire engine'],['🚐','minibus'],['🛻','pickup truck'],['🚚','truck'],['🚛','articulated lorry'],['🚜','tractor'],['🏍️','motorcycle'],['🛵','motor scooter'],['🚲','bicycle'],['🛴','kick scooter'],['🚂','locomotive'],['🚆','train'],['🚇','metro'],['🚈','light rail'],['🚊','tram'],['🚉','station'],['✈️','airplane'],['🛫','departure'],['🛬','arrival'],['🚀','rocket'],['🛸','flying saucer'],['🚁','helicopter'],['⛵','sailboat'],['🚤','speedboat'],['🛳️','cruise ship'],['⛴️','ferry'],['🚢','ship'],['⚓','anchor'],['🗼','tokyo tower'],['🗽','statue of liberty'],['🏰','castle'],['🏯','japanese castle'],['🎡','ferris wheel'],['🎢','roller coaster'],['🏠','house'],['🏡','garden house'],['🏢','office'],['🏥','hospital'],['🏦','bank'],['🏨','hotel'],['🏪','convenience store'],['🏫','school'],['🏬','department store'],['🏭','factory'],['⛪','church'],['🕌','mosque'],['🛕','hindu temple'],['🕍','synagogue'],['🗾','japan'],['🌍','earth africa'],['🌎','earth americas'],['🌏','earth asia'],['🌋','volcano'],['🗻','mount fuji'],['🏕','camping'],['🏖️','beach'],['🏜️','desert'],['🏝️','desert island'],['🌅','sunrise'],['🌄','sunrise mountains'],['🌠','shooting star'],['🎆','fireworks'],['🎇','sparkler'],['🌃','night stars'],['🌉','bridge night'],['🌌','milky way']
+    ]},
+    'objects': { icon: '💡', label: 'Objects', emoji: [
+      ['⌚','watch'],['📱','phone'],['💻','laptop'],['⌨️','keyboard'],['🖥️','desktop'],['🖨️','printer'],['🖱️','mouse'],['💾','floppy disk'],['💿','cd'],['📀','dvd'],['🎥','movie camera'],['📷','camera'],['📹','video camera'],['📺','television'],['📻','radio'],['🔋','battery'],['🔌','electric plug'],['💡','light bulb'],['🔦','flashlight'],['🕯️','candle'],['🪔','diya lamp'],['📔','notebook'],['📕','book'],['📖','open book'],['📗','green book'],['📘','blue book'],['📙','orange book'],['📚','books'],['📓','notebook 2'],['📒','ledger'],['📃','page curl'],['📜','scroll'],['📄','page'],['📰','newspaper'],['🗞️','rolled newspaper'],['📑','bookmark tabs'],['🔖','bookmark'],['🏷️','label'],['💰','money bag'],['🪙','coin'],['💴','yen'],['💵','dollar'],['💶','euro'],['💷','pound'],['💎','gem'],['🔧','wrench'],['🪛','screwdriver'],['🔩','nut bolt'],['🪜','ladder'],['🧲','magnet'],['🔬','microscope'],['🔭','telescope'],['📡','satellite dish'],['💉','syringe'],['🩸','drop of blood'],['💊','pill'],['🩹','bandage'],['🧬','dna'],['🔑','key'],['🗝️','old key'],['🔒','lock'],['🔓','unlock'],['🛡️','shield'],['⚔️','crossed swords'],['🪄','magic wand'],['📦','package'],['✉️','envelope'],['📧','email'],['📮','postbox'],['🗑️','wastebasket'],['🛒','shopping cart']
+    ]},
+    'symbols': { icon: '❤️', label: 'Symbols', emoji: [
+      ['❤️','red heart'],['🧡','orange heart'],['💛','yellow heart'],['💚','green heart'],['💙','blue heart'],['💜','purple heart'],['🖤','black heart'],['🤍','white heart'],['🤎','brown heart'],['💔','broken heart'],['❤️‍🔥','heart on fire'],['❤️‍🩹','mending heart'],['💕','two hearts'],['💞','revolving hearts'],['💓','heartbeat'],['💗','growing heart'],['💖','sparkling heart'],['💘','cupid'],['💝','gift heart'],['💟','heart decoration'],['☮️','peace'],['✝️','cross'],['☪️','star and crescent'],['🕉️','om'],['☸️','wheel of dharma'],['✡️','star of david'],['🔯','six pointed star'],['☯️','yin yang'],['♈','aries'],['♉','taurus'],['♊','gemini'],['♋','cancer'],['♌','leo'],['♍','virgo'],['♎','libra'],['♏','scorpio'],['♐','sagittarius'],['♑','capricorn'],['♒','aquarius'],['♓','pisces'],['⛎','ophiuchus'],['🆔','id'],['⚛️','atom'],['🉐','accept'],['☢️','radioactive'],['☣️','biohazard'],['📴','mobile phone off'],['📳','vibration mode'],['🈶','u6709'],['🈚','u7121'],['✅','check mark'],['❌','cross mark'],['❓','question'],['❗','exclamation'],['‼️','double exclamation'],['⁉️','exclamation question'],['💯','100'],['🔅','dim'],['🔆','bright'],['⚠️','warning'],['🚸','children crossing'],['🔱','trident'],['♻️','recycle'],['✳️','eight spoked asterisk'],['❇️','sparkle'],['🔰','beginner'],['💠','diamond shape dot'],['Ⓜ️','m circled'],['🔴','red circle'],['🟠','orange circle'],['🟡','yellow circle'],['🟢','green circle'],['🔵','blue circle'],['🟣','purple circle'],['⚫','black circle'],['⚪','white circle'],['🟤','brown circle'],['🔺','red triangle up'],['🔻','red triangle down'],['🔸','small orange diamond'],['🔹','small blue diamond'],['🔶','large orange diamond'],['🔷','large blue diamond'],['💬','speech bubble'],['💭','thought bubble'],['🗯️','anger bubble'],['🏁','checkered flag'],['🚩','red flag'],['🏴','black flag'],['🏳️','white flag']
+    ]},
+    'flags': { icon: '🚩', label: 'Flags', emoji: [
+      ['🇺🇸','us flag'],['🇬🇧','gb flag'],['🇫🇷','france flag'],['🇩🇪','germany flag'],['🇮🇹','italy flag'],['🇪🇸','spain flag'],['🇵🇹','portugal flag'],['🇧🇷','brazil flag'],['🇦🇷','argentina flag'],['🇲🇽','mexico flag'],['🇨🇦','canada flag'],['🇦🇺','australia flag'],['🇯🇵','japan flag'],['🇰🇷','korea flag'],['🇨🇳','china flag'],['🇮🇳','india flag'],['🇷🇺','russia flag'],['🇹🇷','turkey flag'],['🇸🇦','saudi arabia flag'],['🇦🇪','uae flag'],['🇹🇭','thailand flag'],['🇻🇳','vietnam flag'],['🇮🇩','indonesia flag'],['🇵🇭','philippines flag'],['🇳🇬','nigeria flag'],['🇿🇦','south africa flag'],['🇪🇬','egypt flag'],['🇰🇪','kenya flag'],['🇨🇴','colombia flag'],['🇨🇱','chile flag'],['🇵🇪','peru flag'],['🇳🇱','netherlands flag'],['🇧🇪','belgium flag'],['🇨🇭','switzerland flag'],['🇦🇹','austria flag'],['🇸🇪','sweden flag'],['🇳🇴','norway flag'],['🇩🇰','denmark flag'],['🇫🇮','finland flag'],['🇵🇱','poland flag'],['🇬🇷','greece flag'],['🇮🇪','ireland flag'],['🇮🇱','israel flag'],['🇺🇦','ukraine flag'],['🇷🇴','romania flag'],['🇭🇺','hungary flag'],['🇨🇿','czech flag'],['🇸🇬','singapore flag'],['🇲🇾','malaysia flag'],['🇳🇿','new zealand flag'],['🏳️‍🌈','rainbow flag'],['🏴‍☠️','pirate flag']
+    ]}
+  };
+
+  const picker = document.getElementById('emojiPicker');
+  const emojiBtn = document.getElementById('emojiBtn');
+  const emojiSearch = document.getElementById('emojiSearch');
+  const emojiTabs = document.getElementById('emojiTabs');
+  const emojiGridWrap = document.getElementById('emojiGridWrap');
+  let pickerOpen = false;
+  let activeCategory = 'smileys';
+
+  // Recently used (localStorage)
+  const RECENT_KEY = 'oceangram-recent-emoji';
+  function getRecent() {
+    try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); } catch { return []; }
+  }
+  function addRecent(em) {
+    let r = getRecent().filter(e => e !== em);
+    r.unshift(em);
+    if (r.length > 24) r = r.slice(0, 24);
+    localStorage.setItem(RECENT_KEY, JSON.stringify(r));
+    EMOJI_DATA.recent.emoji = r.map(e => [e, '']);
+  }
+
+  // Init recent
+  EMOJI_DATA.recent.emoji = getRecent().map(e => [e, '']);
+
+  // Build tabs
+  function buildTabs() {
+    emojiTabs.innerHTML = '';
+    for (const [key, cat] of Object.entries(EMOJI_DATA)) {
+      if (key === 'recent' && cat.emoji.length === 0) continue;
+      const btn = document.createElement('button');
+      btn.className = 'emoji-tab' + (key === activeCategory ? ' active' : '');
+      btn.textContent = cat.icon;
+      btn.title = cat.label;
+      btn.onclick = () => { activeCategory = key; buildTabs(); renderGrid(); };
+      emojiTabs.appendChild(btn);
+    }
+  }
+
+  // Render grid
+  function renderGrid(filter) {
+    emojiGridWrap.innerHTML = '';
+    const cats = filter ? Object.entries(EMOJI_DATA) : [[activeCategory, EMOJI_DATA[activeCategory]]];
+    for (const [key, cat] of cats) {
+      if (key === 'recent' && cat.emoji.length === 0) continue;
+      let emojis = cat.emoji;
+      if (filter) {
+        emojis = emojis.filter(e => e[1] && e[1].includes(filter));
+        if (emojis.length === 0) continue;
+      }
+      const label = document.createElement('div');
+      label.className = 'emoji-cat-label';
+      label.textContent = cat.label;
+      emojiGridWrap.appendChild(label);
+      const grid = document.createElement('div');
+      grid.className = 'emoji-grid';
+      for (const [em] of emojis) {
+        const span = document.createElement('span');
+        span.textContent = em;
+        span.title = emojis.find(e => e[0] === em)?.[1] || '';
+        span.onclick = () => insertEmoji(em);
+        grid.appendChild(span);
+      }
+      emojiGridWrap.appendChild(grid);
+    }
+  }
+
+  function insertEmoji(em) {
+    addRecent(em);
+    const ta = document.getElementById('msgInput');
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const val = ta.value;
+    ta.value = val.slice(0, start) + em + val.slice(end);
+    const pos = start + em.length;
+    ta.selectionStart = ta.selectionEnd = pos;
+    ta.focus();
+    ta.dispatchEvent(new Event('input'));
+    closePicker();
+  }
+
+  function openPicker() {
+    pickerOpen = true;
+    picker.style.display = 'flex';
+    emojiBtn.classList.add('active');
+    emojiSearch.value = '';
+    activeCategory = getRecent().length > 0 ? 'recent' : 'smileys';
+    EMOJI_DATA.recent.emoji = getRecent().map(e => [e, '']);
+    buildTabs();
+    renderGrid();
+    emojiSearch.focus();
+  }
+
+  function closePicker() {
+    pickerOpen = false;
+    picker.style.display = 'none';
+    emojiBtn.classList.remove('active');
+  }
+
+  emojiBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    pickerOpen ? closePicker() : openPicker();
+  });
+
+  emojiSearch.addEventListener('input', () => {
+    const q = emojiSearch.value.trim().toLowerCase();
+    if (q) {
+      renderGrid(q);
+    } else {
+      renderGrid();
+    }
+  });
+
+  document.addEventListener('click', (e) => {
+    if (pickerOpen && !picker.contains(e.target) && e.target !== emojiBtn) closePicker();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && pickerOpen) { closePicker(); e.stopPropagation(); }
+  });
+})();
+
 msgInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
