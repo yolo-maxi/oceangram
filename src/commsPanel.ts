@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { TelegramService } from './services/telegram';
+import { TelegramService, ChatEvent } from './services/telegram';
 import { OpenClawService, AgentSessionInfo } from './services/openclaw';
 
 // Shared telegram service across all panels
@@ -290,6 +290,7 @@ export class ChatTab {
   private chatId: string;
   private chatName: string;
   private disposables: vscode.Disposable[] = [];
+  private unsubscribeEvents?: () => void;
 
   static createOrShow(chatId: string, chatName: string, context: vscode.ExtensionContext) {
     const existing = ChatTab.tabs.get(chatId);
@@ -321,6 +322,7 @@ export class ChatTab {
 
     this.panel.onDidDispose(() => {
       ChatTab.tabs.delete(this.chatId);
+      if (this.unsubscribeEvents) this.unsubscribeEvents();
       const { chatId: rawChatId, topicId } = TelegramService.parseDialogId(this.chatId);
       getOpenClaw().stopPolling(rawChatId, topicId);
       this.disposables.forEach(d => d.dispose());
@@ -334,6 +336,22 @@ export class ChatTab {
             await tg.connect();
             const messages = await tg.getMessages(this.chatId, 50);
             this.panel.webview.postMessage({ type: 'messages', messages });
+            // Subscribe to real-time events
+            if (!this.unsubscribeEvents) {
+              this.unsubscribeEvents = tg.onChatEvent(this.chatId, (event: ChatEvent) => {
+                switch (event.type) {
+                  case 'newMessage':
+                    this.panel.webview.postMessage({ type: 'newMessage', message: event.message });
+                    break;
+                  case 'editMessage':
+                    this.panel.webview.postMessage({ type: 'editMessage', message: event.message });
+                    break;
+                  case 'deleteMessages':
+                    this.panel.webview.postMessage({ type: 'deleteMessages', messageIds: event.messageIds });
+                    break;
+                }
+              });
+            }
             break;
           case 'sendMessage':
             await tg.connect();
@@ -1217,6 +1235,40 @@ window.addEventListener('message', (event) => {
         newMsgsBtn.style.display = 'block';
       }
       break;
+    case 'newMessage':
+      // Real-time: append single new message
+      if (msg.message && !allMessages.some(function(m) { return m.id === msg.message.id; })) {
+        var atBottom = isScrolledToBottom();
+        allMessages.push(msg.message);
+        if (allMessages.length > 0) lastMsgId = allMessages[allMessages.length - 1].id || 0;
+        renderMessages(allMessages);
+        if (atBottom) { messagesList.scrollTop = messagesList.scrollHeight; }
+        else {
+          newMsgCount++;
+          newMsgsBtn.textContent = '↓ ' + newMsgCount + ' new message' + (newMsgCount > 1 ? 's' : '');
+          newMsgsBtn.style.display = 'block';
+        }
+      }
+      break;
+    case 'editMessage':
+      // Real-time: update edited message in place
+      if (msg.message) {
+        var idx = allMessages.findIndex(function(m) { return m.id === msg.message.id; });
+        if (idx !== -1) {
+          allMessages[idx] = msg.message;
+          renderMessages(allMessages);
+        }
+      }
+      break;
+    case 'deleteMessages':
+      // Real-time: remove deleted messages
+      if (msg.messageIds && msg.messageIds.length > 0) {
+        var delSet = new Set(msg.messageIds);
+        var before = allMessages.length;
+        allMessages = allMessages.filter(function(m) { return !delSet.has(m.id); });
+        if (allMessages.length !== before) renderMessages(allMessages);
+      }
+      break;
     case 'olderMessages':
       loadingOlder = false;
       if (msg.messages && msg.messages.length > 0) {
@@ -1333,7 +1385,7 @@ function startPolling() {
   if (pollInterval) return;
   pollInterval = setInterval(() => {
     vscode.postMessage({ type: 'poll', afterId: lastMsgId });
-  }, 4000);
+  }, 30000); // Fallback polling — real-time events handle most updates
 }
 function stopPolling() {
   if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }

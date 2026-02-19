@@ -1,6 +1,9 @@
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
 import { Api } from 'telegram';
+import { NewMessage, NewMessageEvent } from 'telegram/events';
+import { EditedMessage, EditedMessageEvent } from 'telegram/events/EditedMessage';
+import { DeletedMessage, DeletedMessageEvent } from 'telegram/events/DeletedMessage';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
@@ -606,4 +609,240 @@ export class TelegramService {
 
     await this.client.sendMessage(entity, opts);
   }
+
+  // --- Real-time Event Handlers ---
+
+  private eventHandlersRegistered = false;
+  private chatListeners: Map<string, Set<ChatEventListener>> = new Map();
+
+  /**
+   * Subscribe to real-time events for a specific dialog.
+   * Returns an unsubscribe function.
+   */
+  onChatEvent(dialogId: string, listener: ChatEventListener): () => void {
+    if (!this.chatListeners.has(dialogId)) {
+      this.chatListeners.set(dialogId, new Set());
+    }
+    this.chatListeners.get(dialogId)!.add(listener);
+    this.ensureEventHandlers();
+
+    return () => {
+      const listeners = this.chatListeners.get(dialogId);
+      if (listeners) {
+        listeners.delete(listener);
+        if (listeners.size === 0) {
+          this.chatListeners.delete(dialogId);
+        }
+      }
+    };
+  }
+
+  private emit(dialogId: string, event: ChatEvent) {
+    const listeners = this.chatListeners.get(dialogId);
+    if (listeners) {
+      for (const listener of listeners) {
+        try { listener(event); } catch (e) { console.error('[Oceangram] Event listener error:', e); }
+      }
+    }
+  }
+
+  /** Convert a gramJS message to MessageInfo (single message, lightweight) */
+  private async messageToInfo(msg: Api.Message): Promise<MessageInfo> {
+    let senderName = 'Unknown';
+    if (msg.senderId && this.client) {
+      try {
+        const sender = await this.client.getEntity(msg.senderId);
+        senderName = this.getEntityName(sender);
+      } catch { /* ignore */ }
+    }
+
+    const info: MessageInfo = {
+      id: msg.id,
+      senderId: msg.senderId?.toString() || '',
+      senderName,
+      text: msg.message || '',
+      timestamp: msg.date || 0,
+      isOutgoing: msg.out || false,
+    };
+
+    // Media detection (simplified for real-time — skip downloading photos)
+    if (msg.photo || (msg.media as any)?.className === 'MessageMediaPhoto') {
+      info.mediaType = 'photo';
+      // Download in background for real-time events
+      if (this.client) {
+        try {
+          const buffer = await this.client.downloadMedia(msg, {});
+          if (buffer && Buffer.isBuffer(buffer)) {
+            info.mediaUrl = `data:image/jpeg;base64,${buffer.toString('base64')}`;
+          }
+        } catch { /* ignore */ }
+      }
+    } else if (msg.media) {
+      const media = msg.media as any;
+      const className = media.className || '';
+      if (className === 'MessageMediaDocument') {
+        const doc = media.document;
+        if (doc) {
+          const attrs = doc.attributes || [];
+          const isVideo = attrs.some((a: any) => a.className === 'DocumentAttributeVideo');
+          const isAudio = attrs.some((a: any) => a.className === 'DocumentAttributeAudio');
+          const isSticker = attrs.some((a: any) => a.className === 'DocumentAttributeSticker');
+          if (isSticker) info.mediaType = 'sticker';
+          else if (isVideo) info.mediaType = 'video';
+          else if (isAudio) {
+            const audioAttr = attrs.find((a: any) => a.className === 'DocumentAttributeAudio');
+            info.mediaType = audioAttr?.voice ? 'voice' : 'file';
+          } else info.mediaType = 'file';
+          const filenameAttr = attrs.find((a: any) => a.className === 'DocumentAttributeFilename');
+          if (filenameAttr) info.fileName = filenameAttr.fileName;
+        }
+      } else if (className === 'MessageMediaWebPage') {
+        const webpage = media.webpage;
+        if (webpage && webpage.className === 'WebPage') {
+          info.linkPreview = { url: webpage.url || '', title: webpage.title, description: webpage.description };
+        }
+      }
+    }
+
+    // Reply-to
+    if (msg.replyTo && msg.replyTo.replyToMsgId) {
+      info.replyToId = msg.replyTo.replyToMsgId;
+    }
+
+    // Forward
+    if (msg.fwdFrom) {
+      if (msg.fwdFrom.fromName) info.forwardFrom = msg.fwdFrom.fromName;
+      else if (msg.fwdFrom.fromId && this.client) {
+        try { info.forwardFrom = this.getEntityName(await this.client.getEntity(msg.fwdFrom.fromId)); } catch { info.forwardFrom = 'Unknown'; }
+      }
+    }
+
+    // Edited
+    if (msg.editDate) info.isEdited = true;
+
+    // Entities
+    if (msg.entities && msg.entities.length > 0) {
+      info.entities = msg.entities.map((e: any) => {
+        const entity: MessageEntity = { type: this.mapEntityType(e.className), offset: e.offset, length: e.length };
+        if (e.url) entity.url = e.url;
+        if (e.language) entity.language = e.language;
+        return entity;
+      }).filter((e: MessageEntity) => e.type !== undefined);
+    }
+
+    // Reactions
+    if (msg.reactions && (msg.reactions as any).results) {
+      info.reactions = (msg.reactions as any).results
+        .filter((r: any) => r.reaction && r.count)
+        .map((r: any) => ({
+          emoji: r.reaction.emoticon || r.reaction.documentId?.toString() || '❓',
+          count: r.count || 0,
+          isSelected: r.chosen || r.chosenOrder !== undefined || false,
+        }));
+    }
+
+    return info;
+  }
+
+  /** Determine dialog ID for a message (chatId or chatId:topicId for forums) */
+  private getDialogIdFromMessage(msg: Api.Message): string[] {
+    const chatId = msg.peerId ? this.peerToId(msg.peerId) : '';
+    if (!chatId) return [];
+
+    const ids: string[] = [chatId];
+
+    // For forum topics, also emit on chatId:topicId
+    if (msg.replyTo && (msg.replyTo as any).forumTopic) {
+      const topicId = msg.replyTo.replyToTopId || msg.replyTo.replyToMsgId;
+      if (topicId) {
+        ids.push(TelegramService.makeDialogId(chatId, topicId));
+      }
+    }
+
+    return ids;
+  }
+
+  private peerToId(peer: Api.TypePeer): string {
+    if (peer instanceof Api.PeerUser) return peer.userId.toString();
+    if (peer instanceof Api.PeerChat) return `-${peer.chatId.toString()}`;
+    if (peer instanceof Api.PeerChannel) return `-100${peer.channelId.toString()}`;
+    return '';
+  }
+
+  private ensureEventHandlers() {
+    if (this.eventHandlersRegistered || !this.client) return;
+    this.eventHandlersRegistered = true;
+
+    // New messages
+    this.client.addEventHandler(async (event: NewMessageEvent) => {
+      const msg = event.message as Api.Message;
+      if (!msg) return;
+      const dialogIds = this.getDialogIdFromMessage(msg);
+      if (dialogIds.length === 0) return;
+
+      // Only process if someone is listening
+      const hasListener = dialogIds.some(id => this.chatListeners.has(id));
+      if (!hasListener) return;
+
+      const info = await this.messageToInfo(msg);
+      for (const dialogId of dialogIds) {
+        this.emit(dialogId, { type: 'newMessage', message: info });
+      }
+    }, new NewMessage({}));
+
+    // Edited messages
+    this.client.addEventHandler(async (event: EditedMessageEvent) => {
+      const msg = event.message as Api.Message;
+      if (!msg) return;
+      const dialogIds = this.getDialogIdFromMessage(msg);
+      if (dialogIds.length === 0) return;
+
+      const hasListener = dialogIds.some(id => this.chatListeners.has(id));
+      if (!hasListener) return;
+
+      const info = await this.messageToInfo(msg);
+      for (const dialogId of dialogIds) {
+        this.emit(dialogId, { type: 'editMessage', message: info });
+      }
+    }, new EditedMessage({}));
+
+    // Deleted messages
+    this.client.addEventHandler(async (event: DeletedMessageEvent) => {
+      const deletedIds = event.deletedIds;
+      const peer = event.peer;
+      // For channels/supergroups we can determine the chat
+      // For private chats, broadcast to all listeners
+      if (peer && this.client) {
+        try {
+          const entity = await this.client.getEntity(peer);
+          const chatId = (entity as any).id?.toString() || '';
+          if (chatId) {
+            // Try all possible dialog IDs for this chat
+            for (const [dialogId, listeners] of this.chatListeners) {
+              const parsed = TelegramService.parseDialogId(dialogId);
+              if (parsed.chatId === chatId || parsed.chatId === `-100${chatId}`) {
+                this.emit(dialogId, { type: 'deleteMessages', messageIds: deletedIds });
+              }
+            }
+            return;
+          }
+        } catch { /* ignore */ }
+      }
+      // Broadcast to all listeners as fallback
+      for (const [dialogId] of this.chatListeners) {
+        this.emit(dialogId, { type: 'deleteMessages', messageIds: deletedIds });
+      }
+    }, new DeletedMessage({}));
+
+    console.log('[Oceangram] Real-time event handlers registered');
+  }
 }
+
+// --- Event types ---
+
+export type ChatEvent =
+  | { type: 'newMessage'; message: MessageInfo }
+  | { type: 'editMessage'; message: MessageInfo }
+  | { type: 'deleteMessages'; messageIds: number[] };
+
+export type ChatEventListener = (event: ChatEvent) => void;
