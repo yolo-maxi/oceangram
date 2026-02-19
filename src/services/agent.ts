@@ -1,214 +1,139 @@
-import { execSync } from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 
 // --- Types ---
 
-export interface ContextWindow {
-  used: number;
-  max: number;
-  percentage: number;
+export interface SessionEntry {
+  key: string;
+  model: string | null;
+  updatedAt: number;
+  contextTokens: number | null;
+  totalTokens: number | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
 }
 
-export interface SessionInfo {
-  label: string;
-  status: string;
-  model: string;
-  lastActive: string;
+export interface AgentPanelData {
+  sessions: SessionEntry[];
+  totalSessions: number;
+  activeSessions: number;   // updated < 5min ago
+  defaultModel: string;
+  updatedAtMs: number;
 }
 
-export interface CronJob {
-  id: string;
-  name: string;
-  schedule: string;
-  nextRun: string;
-  lastRun: string;
-  status: string;
+// --- Paths ---
+
+const SESSIONS_PATH = path.join(os.homedir(), '.openclaw/agents/main/sessions/sessions.json');
+const CONFIG_PATH = path.join(os.homedir(), '.openclaw/openclaw.json');
+
+export function getSessionsPath(): string {
+  return SESSIONS_PATH;
 }
 
-export interface PM2Process {
-  name: string;
-  status: string;
-  memory: number;
-  cpu: number;
-  uptime: number;
-  restarts: number;
-}
+// --- Data fetching ---
 
-export interface AgentData {
-  model: string;
-  context: ContextWindow;
-  sessions: { total: number; active: number };
-  crons: CronJob[];
-  pm2: PM2Process[];
-  gateway: string;
-  channels: { name: string; state: string }[];
-}
+export function fetchAgentPanelData(): AgentPanelData {
+  const now = Date.now();
+  const fiveMinAgo = now - 5 * 60 * 1000;
 
-// --- Parsers (exported for testing) ---
-
-export function parseContextWindow(statusText: string): ContextWindow {
-  // Extract from "default claude-opus-4-6 (200k ctx)" pattern
-  const ctxMatch = statusText.match(/\((\d+)k ctx\)/i);
-  const max = ctxMatch ? parseInt(ctxMatch[1], 10) * 1000 : 200000;
-
-  // Extract sessions count for rough usage estimate
-  // Real usage would come from session API; for now use sessions as proxy
-  const sessionsMatch = statusText.match(/sessions\s+(\d+)/);
-  const sessionCount = sessionsMatch ? parseInt(sessionsMatch[1], 10) : 0;
-
-  // Estimate ~1k tokens per active session as a rough proxy
-  // In practice, the current session's token count would come from the API
-  const used = Math.min(sessionCount * 1000, max);
-  const percentage = Math.round((used / max) * 100);
-
-  return { used, max, percentage };
-}
-
-export function parseSessionsInfo(statusText: string): { total: number; active: number; model: string } {
-  const sessMatch = statusText.match(/sessions\s+(\d+)/);
-  const total = sessMatch ? parseInt(sessMatch[1], 10) : 0;
-
-  const modelMatch = statusText.match(/default\s+([\w-]+)\s+\(/);
-  const model = modelMatch ? modelMatch[1] : 'unknown';
-
-  return { total, active: total, model };
-}
-
-export function parseGatewayStatus(statusText: string): string {
-  const gwMatch = statusText.match(/Gateway\s*│\s*(.*?)│/);
-  if (!gwMatch) return 'unknown';
-  const text = gwMatch[1].trim();
-  if (text.includes('reachable')) return 'connected';
-  return 'disconnected';
-}
-
-export function parseChannels(statusText: string): { name: string; state: string }[] {
-  const channels: { name: string; state: string }[] = [];
-  const lines = statusText.split('\n');
-  for (const line of lines) {
-    const match = line.match(/│\s*(Telegram|WhatsApp|Discord)\s*│\s*(ON|OFF)\s*│\s*([\w]+)/);
-    if (match) {
-      channels.push({ name: match[1], state: `${match[2]} (${match[3]})` });
-    }
-  }
-  return channels;
-}
-
-export function parseCronList(cronText: string): CronJob[] {
-  const lines = cronText.trim().split('\n');
-  if (lines.length < 2) return [];
-
-  // Parse column positions from header
-  const header = lines[0];
-  const cols = ['ID', 'Name', 'Schedule', 'Next', 'Last', 'Status'];
-  const positions: number[] = [];
-  for (const col of cols) {
-    const idx = header.indexOf(col);
-    if (idx >= 0) positions.push(idx);
-  }
-  if (positions.length < 6) {
-    // Fallback: split by 2+ spaces
-    return lines.slice(1).map(line => {
-      const parts = line.split(/\s{2,}/);
-      if (parts.length < 6) return null;
-      return { id: parts[0]?.trim() || '', name: parts[1]?.trim() || '', schedule: parts[2]?.trim() || '', nextRun: parts[3]?.trim() || '', lastRun: parts[4]?.trim() || '', status: parts[5]?.trim() || '' };
-    }).filter((c): c is CronJob => c !== null);
-  }
-
-  return lines.slice(1).filter(l => l.trim()).map(line => {
-    const extract = (i: number) => line.substring(positions[i], positions[i + 1] ?? line.length).trim();
-    return {
-      id: extract(0),
-      name: extract(1),
-      schedule: extract(2),
-      nextRun: extract(3),
-      lastRun: extract(4),
-      status: extract(5).split(/\s+/)[0] || '', // status is first word after position
-    };
-  }).filter(c => c.id.length > 0);
-}
-
-export function parsePM2List(jsonStr: string): PM2Process[] {
+  // Read sessions
+  let sessions: SessionEntry[] = [];
   try {
-    const list = JSON.parse(jsonStr);
-    return list.map((proc: any) => ({
-      name: proc.name || 'unknown',
-      status: proc.pm2_env?.status || 'unknown',
-      memory: proc.monit?.memory || 0,
-      cpu: proc.monit?.cpu || 0,
-      uptime: proc.pm2_env?.pm_uptime || 0,
-      restarts: proc.pm2_env?.restart_time || 0,
+    const raw = JSON.parse(fs.readFileSync(SESSIONS_PATH, 'utf8'));
+    sessions = Object.entries(raw).map(([key, val]: [string, any]) => ({
+      key,
+      model: val.model || null,
+      updatedAt: val.updatedAt || 0,
+      contextTokens: val.contextTokens || null,
+      totalTokens: val.totalTokens || null,
+      inputTokens: val.inputTokens || null,
+      outputTokens: val.outputTokens || null,
     }));
-  } catch {
-    return [];
-  }
+    sessions.sort((a, b) => b.updatedAt - a.updatedAt);
+  } catch { /* empty */ }
+
+  // Read default model from config
+  let defaultModel = 'unknown';
+  try {
+    const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+    defaultModel = config?.agents?.defaults?.model?.primary || 'unknown';
+  } catch { /* empty */ }
+
+  const activeSessions = sessions.filter(s => s.updatedAt > fiveMinAgo).length;
+
+  return {
+    sessions,
+    totalSessions: sessions.length,
+    activeSessions,
+    defaultModel,
+    updatedAtMs: now,
+  };
 }
 
 // --- Formatting helpers ---
-
-export function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}
 
 export function formatTokens(tokens: number): string {
   if (tokens >= 1000) return `${Math.round(tokens / 1000)}K`;
   return `${tokens}`;
 }
 
-export function formatRelativeTime(text: string): string {
-  // Already relative from openclaw output: "in 35m", "25m ago", "1d ago"
-  return text;
-}
-
-export function formatUptime(startMs: number): string {
-  const now = Date.now();
-  const diff = now - startMs;
-  if (diff < 0) return 'just started';
-  const seconds = Math.floor(diff / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ${minutes % 60}m`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ${hours % 24}h`;
-}
-
 export function contextBarColor(percentage: number): string {
-  if (percentage < 50) return '#4caf50'; // green
-  if (percentage < 75) return '#ff9800'; // orange
-  if (percentage < 90) return '#f44336'; // red
-  return '#d32f2f'; // dark red
+  if (percentage < 60) return '#6ab2f2';  // blue
+  if (percentage < 80) return '#e5c07b';  // yellow
+  return '#e06c75';                        // red
 }
 
-// --- Data fetching ---
-
-function execCommand(cmd: string): string {
-  try {
-    return execSync(cmd, { timeout: 10000, encoding: 'utf8' });
-  } catch {
-    return '';
-  }
+export function formatRelativeTime(timestampMs: number): string {
+  const diff = Date.now() - timestampMs;
+  if (diff < 0) return 'just now';
+  const seconds = Math.floor(diff / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
 }
 
+export function truncateKey(key: string, maxLen = 40): string {
+  if (key.length <= maxLen) return key;
+  return key.substring(0, maxLen - 3) + '...';
+}
+
+// Keep old exports for backward compat (used by existing panel)
+export interface ContextWindow { used: number; max: number; percentage: number; }
+export interface CronJob { id: string; name: string; schedule: string; nextRun: string; lastRun: string; status: string; }
+export interface PM2Process { name: string; status: string; memory: number; cpu: number; uptime: number; restarts: number; }
+export interface AgentData {
+  model: string; context: ContextWindow; sessions: { total: number; active: number };
+  crons: CronJob[]; pm2: PM2Process[]; gateway: string; channels: { name: string; state: string }[];
+}
+export function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+export function formatUptime(startMs: number): string {
+  const diff = Date.now() - startMs;
+  if (diff < 0) return 'just started';
+  const s = Math.floor(diff / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ${m % 60}m`;
+  const d = Math.floor(h / 24);
+  return `${d}d ${h % 24}h`;
+}
 export async function fetchAgentData(): Promise<AgentData> {
-  const statusText = execCommand('openclaw status');
-  const cronText = execCommand('openclaw cron list');
-  const pm2Text = execCommand('pm2 jlist');
-
-  const sessInfo = parseSessionsInfo(statusText);
-  const context = parseContextWindow(statusText);
-
+  const data = fetchAgentPanelData();
   return {
-    model: sessInfo.model,
-    context,
-    sessions: { total: sessInfo.total, active: sessInfo.active },
-    crons: parseCronList(cronText),
-    pm2: parsePM2List(pm2Text),
-    gateway: parseGatewayStatus(statusText),
-    channels: parseChannels(statusText),
+    model: data.defaultModel,
+    context: { used: 0, max: 200000, percentage: 0 },
+    sessions: { total: data.totalSessions, active: data.activeSessions },
+    crons: [], pm2: [], gateway: 'unknown', channels: [],
   };
 }
