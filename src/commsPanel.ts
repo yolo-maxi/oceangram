@@ -471,6 +471,15 @@ export class ChatTab {
               this.panel.webview.postMessage({ type: 'sendFailed', tempId: msg.tempId, error: sendErr.message || 'Send failed' });
             }
             break;
+          case 'getUserInfo':
+            await tg.connect();
+            try {
+              const userInfo = await tg.getUserInfo(msg.userId);
+              this.panel.webview.postMessage({ type: 'userInfo', info: userInfo });
+            } catch (uErr: any) {
+              this.panel.webview.postMessage({ type: 'userInfoError', error: uErr.message || 'Failed to fetch user info' });
+            }
+            break;
           case 'loadOlder':
             await tg.connect();
             const older = await addSyntaxHighlighting(await tg.getMessages(this.chatId, 30, msg.beforeId));
@@ -1088,6 +1097,49 @@ body {
   min-width: 36px;
   text-align: right;
 }
+
+/* User profile popup */
+.group-sender { cursor: pointer; }
+.group-sender:hover { text-decoration: underline; }
+
+.user-profile-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 500;
+}
+.user-profile-popup {
+  position: fixed;
+  z-index: 501;
+  background: var(--tg-bg-secondary);
+  border-radius: 12px;
+  padding: 20px;
+  width: 280px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  animation: popupFadeIn 0.15s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+@keyframes popupFadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+.profile-avatar {
+  width: 64px; height: 64px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.profile-avatar-placeholder {
+  width: 64px; height: 64px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 24px; font-weight: 600; color: #fff;
+}
+.profile-name { font-size: 16px; font-weight: 600; color: var(--tg-text); text-align: center; }
+.profile-username { font-size: 14px; color: var(--tg-accent); }
+.profile-bio { font-size: 13px; color: var(--tg-text-secondary); text-align: center; max-width: 240px; word-break: break-word; }
+.profile-detail { font-size: 12px; color: var(--tg-text-secondary); }
+.profile-status { font-size: 12px; color: var(--tg-text-secondary); }
+.profile-status.online { color: #98c379; }
+.profile-loading { color: var(--tg-text-secondary); font-size: 13px; padding: 20px 0; }
 </style>
 </head>
 <body>
@@ -1222,7 +1274,7 @@ function renderMessages(msgs) {
     if (last && last.key === key && m.timestamp - last.msgs[last.msgs.length - 1].timestamp < 300) {
       last.msgs.push(m);
     } else {
-      groups.push({ key, isOutgoing: m.isOutgoing, senderName: m.senderName, msgs: [m] });
+      groups.push({ key, isOutgoing: m.isOutgoing, senderName: m.senderName, senderId: m.senderId, msgs: [m] });
     }
   }
 
@@ -1240,7 +1292,7 @@ function renderMessages(msgs) {
     const dir = g.isOutgoing ? 'outgoing' : 'incoming';
     html += '<div class="msg-group ' + dir + '">';
     if (!g.isOutgoing && g.senderName) {
-      html += '<div class="group-sender">' + esc(g.senderName) + '</div>';
+      html += '<div class="group-sender" data-sender-id="' + esc(g.senderId || '') + '" onclick="showUserProfile(this, \\'' + esc(g.senderId || '') + '\\')">' + esc(g.senderName) + '</div>';
     }
     const len = g.msgs.length;
     for (let i = 0; i < len; i++) {
@@ -1680,6 +1732,80 @@ function stopPolling() {
 }
 document.addEventListener('visibilitychange', () => {
   startPolling(); // restart with appropriate interval
+});
+
+// User profile popup
+let activeProfilePopup = null;
+let activeProfileOverlay = null;
+const profileColors = ['#e17076','#eda86c','#a695e7','#7bc862','#6ec9cb','#65aadd','#ee7aae','#6bb2f2'];
+function pickProfileColor(id) { return profileColors[Math.abs(parseInt(id || '0', 10)) % profileColors.length]; }
+
+function closeProfilePopup() {
+  if (activeProfileOverlay) { activeProfileOverlay.remove(); activeProfileOverlay = null; }
+  if (activeProfilePopup) { activeProfilePopup.remove(); activeProfilePopup = null; }
+}
+
+function showUserProfile(el, userId) {
+  if (!userId) return;
+  closeProfilePopup();
+
+  var rect = el.getBoundingClientRect();
+
+  var overlay = document.createElement('div');
+  overlay.className = 'user-profile-overlay';
+  overlay.addEventListener('click', closeProfilePopup);
+  document.body.appendChild(overlay);
+  activeProfileOverlay = overlay;
+
+  var popup = document.createElement('div');
+  popup.className = 'user-profile-popup';
+  popup.innerHTML = '<div class="profile-loading">Loading…</div>';
+
+  var top = rect.bottom + 6;
+  var left = rect.left;
+  if (top + 300 > window.innerHeight) top = rect.top - 306;
+  if (left + 280 > window.innerWidth) left = window.innerWidth - 290;
+  if (left < 10) left = 10;
+  popup.style.top = top + 'px';
+  popup.style.left = left + 'px';
+
+  document.body.appendChild(popup);
+  activeProfilePopup = popup;
+
+  vscode.postMessage({ type: 'getUserInfo', userId: userId });
+}
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape' && activeProfilePopup) { closeProfilePopup(); }
+});
+
+// Handle userInfo responses in the existing message handler
+var origOnMessage = window.onmessage;
+window.addEventListener('message', function(event) {
+  var msg = event.data;
+  if (msg.type === 'userInfo' && activeProfilePopup) {
+    var info = msg.info;
+    var html = '';
+    if (info.photo) {
+      html += '<img class="profile-avatar" src="' + info.photo + '" />';
+    } else {
+      var initials = info.name.split(' ').map(function(w) { return w[0]; }).filter(Boolean).slice(0, 2).join('').toUpperCase();
+      html += '<div class="profile-avatar-placeholder" style="background:' + pickProfileColor(info.id) + '">' + esc(initials) + '</div>';
+    }
+    html += '<div class="profile-name">' + esc(info.name) + '</div>';
+    if (info.username) html += '<div class="profile-username">@' + esc(info.username) + '</div>';
+    if (info.lastSeen) {
+      var isOnline = info.lastSeen === 'online';
+      html += '<div class="profile-status' + (isOnline ? ' online' : '') + '">' + esc(info.lastSeen) + '</div>';
+    }
+    if (info.bio) html += '<div class="profile-bio">' + esc(info.bio) + '</div>';
+    if (info.phone) html += '<div class="profile-detail">📱 +' + esc(info.phone) + '</div>';
+    html += '<div class="profile-detail">ID: ' + esc(info.id) + '</div>';
+    if (info.isBot) html += '<div class="profile-detail">🤖 Bot</div>';
+    activeProfilePopup.innerHTML = html;
+  } else if (msg.type === 'userInfoError' && activeProfilePopup) {
+    activeProfilePopup.innerHTML = '<div class="profile-loading">Failed to load profile</div>';
+  }
 });
 
 vscode.postMessage({ type: 'init' });
