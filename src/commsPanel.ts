@@ -767,6 +767,9 @@ export class ChatTab {
                   case 'typing':
                     this.panel.webview.postMessage({ type: 'typing', userId: event.userId, userName: event.userName });
                     break;
+                  case 'reactionUpdate':
+                    this.panel.webview.postMessage({ type: 'reactionUpdate', messageId: event.messageId, reactions: event.reactions });
+                    break;
                   case 'readOutbox':
                     this.panel.webview.postMessage({ type: 'readOutbox', maxId: event.maxId });
                     break;
@@ -3489,6 +3492,40 @@ window.addEventListener('message', (event) => {
     case 'typing':
       if (msg.userId && msg.userName) {
         handleTypingEvent(msg.userId, msg.userName);
+      }
+      break;
+    case 'reactionUpdate':
+      // Real-time: update reactions on a specific message
+      if (msg.messageId && msg.reactions !== undefined) {
+        var rIdx = allMessages.findIndex(function(m) { return m.id === msg.messageId; });
+        if (rIdx !== -1) {
+          allMessages[rIdx].reactions = msg.reactions;
+          var msgEl = messagesList.querySelector('.msg[data-msg-id="' + msg.messageId + '"]');
+          if (msgEl) {
+            // Update reactions in-place
+            var oldReactionsEl = msgEl.querySelector('.msg-reactions');
+            var newReactionsHtml = '';
+            if (msg.reactions && msg.reactions.length) {
+              newReactionsHtml = '<div class="msg-reactions">';
+              for (var rri = 0; rri < msg.reactions.length; rri++) {
+                var rr = msg.reactions[rri];
+                newReactionsHtml += '<span class="reaction-chip' + (rr.isSelected ? ' selected' : '') + '">' +
+                  '<span class="reaction-emoji">' + esc(rr.emoji) + '</span>' +
+                  '<span class="reaction-count">' + rr.count + '</span></span>';
+              }
+              newReactionsHtml += '</div>';
+            }
+            var bubbleEl = msgEl.querySelector('.msg-bubble');
+            if (bubbleEl) {
+              if (oldReactionsEl) oldReactionsEl.remove();
+              if (newReactionsHtml) {
+                bubbleEl.insertAdjacentHTML('beforeend', newReactionsHtml);
+              }
+              msgEl.classList.add('reaction-flash');
+              setTimeout(function() { msgEl.classList.remove('reaction-flash'); }, 1000);
+            }
+          }
+        }
       }
       break;
     case 'readOutbox':

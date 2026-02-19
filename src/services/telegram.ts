@@ -114,10 +114,23 @@ export type DialogUpdateListener = (dialogs: DialogInfo[]) => void;
 export type ConnectionState = 'connected' | 'disconnected' | 'reconnecting';
 export type ConnectionStateListener = (state: ConnectionState, attempt?: number) => void;
 
+export interface UserStatus {
+  online: boolean;
+  lastSeen?: number;       // Unix timestamp (seconds)
+  approximate?: 'recently' | 'lastWeek' | 'lastMonth';
+  hidden?: boolean;        // Privacy-restricted
+}
+
+export type UserStatusListener = (userId: string, status: UserStatus) => void;
+
 export class TelegramService {
   private client: TelegramClient | null = null;
   private connected = false;
   private forumTopicsCache: Map<string, Api.ForumTopic[]> = new Map();
+
+  // User online status tracking
+  private userStatuses: Map<string, UserStatus> = new Map();
+  private userStatusListeners: Set<UserStatusListener> = new Set();
 
   // Reconnection state
   private connectionState: ConnectionState = 'disconnected';
@@ -1855,7 +1868,102 @@ input.addEventListener('keydown', (e) => {
       }
     });
 
+    // Reaction updates (UpdateMessageReactions)
+    this.client.addEventHandler(async (update: Api.TypeUpdate) => {
+      try {
+        if (update.className !== 'UpdateMessageReactions') return;
+        const u = update as any;
+        const peer = u.peer;
+        const msgId = u.msgId;
+        const reactions = u.reactions;
+        if (!peer || !msgId || !reactions) return;
+
+        const chatId = this.peerToId(peer);
+        if (!chatId) return;
+
+        // Parse reactions
+        const reactionInfos: ReactionInfo[] = (reactions.results || [])
+          .filter((r: any) => r.reaction && r.count)
+          .map((r: any) => ({
+            emoji: r.reaction.emoticon || r.reaction.documentId?.toString() || '❓',
+            count: r.count || 0,
+            isSelected: r.chosen || r.chosenOrder !== undefined || false,
+          }));
+
+        // Emit to all matching dialog IDs (including topics)
+        for (const [dialogId] of this.chatListeners) {
+          const parsed = TelegramService.parseDialogId(dialogId);
+          if (parsed.chatId === chatId) {
+            // Update message cache
+            const cached = this.messageCache.get(dialogId);
+            if (cached) {
+              const msg = cached.messages.find(m => m.id === msgId);
+              if (msg) {
+                msg.reactions = reactionInfos;
+                this.saveMessageCacheForChat(dialogId);
+              }
+            }
+            this.emit(dialogId, { type: 'reactionUpdate', messageId: msgId, reactions: reactionInfos });
+          }
+        }
+      } catch (err) {
+        console.error('[Oceangram] Reaction update handler error:', err);
+      }
+    });
+
     console.log('[Oceangram] Real-time event handlers registered');
+  }
+
+  // --- User Status ---
+
+  /** Get cached status for a user */
+  getUserStatus(userId: string): UserStatus | undefined {
+    return this.userStatuses.get(userId);
+  }
+
+  /** Subscribe to user status changes. Returns unsubscribe function. */
+  onUserStatusChange(listener: UserStatusListener): () => void {
+    this.userStatusListeners.add(listener);
+    return () => { this.userStatusListeners.delete(listener); };
+  }
+
+  /** Parse a gramJS UserStatus into our UserStatus type */
+  private parseUserStatus(status: any): UserStatus {
+    if (!status) return { online: false, hidden: true };
+    const className = status.className;
+    if (className === 'UserStatusOnline') {
+      return { online: true };
+    } else if (className === 'UserStatusOffline') {
+      return { online: false, lastSeen: (status as Api.UserStatusOffline).wasOnline };
+    } else if (className === 'UserStatusRecently') {
+      return { online: false, approximate: 'recently' };
+    } else if (className === 'UserStatusLastWeek') {
+      return { online: false, approximate: 'lastWeek' };
+    } else if (className === 'UserStatusLastMonth') {
+      return { online: false, approximate: 'lastMonth' };
+    }
+    return { online: false, hidden: true };
+  }
+
+  private emitUserStatus(userId: string, status: UserStatus) {
+    this.userStatuses.set(userId, status);
+    for (const listener of this.userStatusListeners) {
+      try { listener(userId, status); } catch (e) { console.error('[Oceangram] Status listener error:', e); }
+    }
+  }
+
+  /** Fetch current status for a user (from entity cache or API) */
+  async fetchUserStatus(userId: string): Promise<UserStatus> {
+    if (!this.client) return { online: false, hidden: true };
+    try {
+      const entity = await this.client.getEntity(userId);
+      const user = entity as Api.User;
+      const status = this.parseUserStatus(user.status);
+      this.userStatuses.set(userId, status);
+      return status;
+    } catch {
+      return { online: false, hidden: true };
+    }
   }
 
   /** Send typing indicator to a dialog */
@@ -1884,6 +1992,7 @@ export type ChatEvent =
   | { type: 'deleteMessages'; messageIds: number[] }
   | { type: 'typing'; userId: string; userName: string }
   | { type: 'readOutbox'; maxId: number }
+  | { type: 'reactionUpdate'; messageId: number; reactions: ReactionInfo[] }
   | { type: 'reconnected' };
 
 export type ChatEventListener = (event: ChatEvent) => void;
