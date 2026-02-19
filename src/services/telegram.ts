@@ -27,7 +27,7 @@ export function setStoragePath(storagePath: string): void {
   // Migrate from old location if needed
   const oldDir = DEFAULT_CONFIG_DIR;
   if (oldDir !== CONFIG_DIR && fs.existsSync(oldDir)) {
-    for (const file of ['config.json', 'pinned.json', 'dialogs-cache.json', 'messages.jsonl', 'recent.json']) {
+    for (const file of ['config.json', 'pinned.json', 'dialogs-cache.json', 'messages.jsonl', 'messages-cache.json', 'recent.json']) {
       const oldFile = path.join(oldDir, file);
       const newFile = path.join(CONFIG_DIR, file);
       if (fs.existsSync(oldFile) && !fs.existsSync(newFile)) {
@@ -168,8 +168,24 @@ export class TelegramService {
 
   private loadMessageCache(): void {
     try {
-      if (fs.existsSync(getPath('messages-cache.json'))) {
-        const data = JSON.parse(fs.readFileSync(getPath('messages-cache.json'), 'utf-8'));
+      // Try JSONL format first, fall back to legacy JSON
+      const jsonlPath = getPath('messages.jsonl');
+      const legacyPath = getPath('messages-cache.json');
+      
+      if (fs.existsSync(jsonlPath)) {
+        const content = fs.readFileSync(jsonlPath, 'utf-8');
+        for (const line of content.split('\n')) {
+          if (!line.trim()) continue;
+          try {
+            const entry = JSON.parse(line);
+            if (entry.chatId && Array.isArray(entry.messages)) {
+              this.messageCache.set(entry.chatId, { messages: entry.messages, timestamp: entry.timestamp || 0 });
+            }
+          } catch { /* skip malformed lines */ }
+        }
+      } else if (fs.existsSync(legacyPath)) {
+        // Migrate from legacy JSON format
+        const data = JSON.parse(fs.readFileSync(legacyPath, 'utf-8'));
         if (data && typeof data === 'object') {
           for (const [dialogId, entry] of Object.entries(data)) {
             const e = entry as any;
@@ -178,21 +194,79 @@ export class TelegramService {
             }
           }
         }
+        // Save in new format and remove legacy
+        this.saveMessageCache();
+        try { fs.unlinkSync(legacyPath); } catch { /* ignore */ }
       }
     } catch { /* ignore */ }
   }
 
+  /** Read a single chat's messages from JSONL without loading everything */
+  private loadMessageCacheForChat(dialogId: string): { messages: MessageInfo[]; timestamp: number } | null {
+    try {
+      const jsonlPath = getPath('messages.jsonl');
+      if (!fs.existsSync(jsonlPath)) return null;
+      const content = fs.readFileSync(jsonlPath, 'utf-8');
+      for (const line of content.split('\n')) {
+        if (!line.trim()) continue;
+        try {
+          const entry = JSON.parse(line);
+          if (entry.chatId === dialogId && Array.isArray(entry.messages)) {
+            return { messages: entry.messages, timestamp: entry.timestamp || 0 };
+          }
+        } catch { /* skip */ }
+      }
+    } catch { /* ignore */ }
+    return null;
+  }
+
   private saveMessageCache() {
     this.ensureConfigDir();
-    const data: Record<string, any> = {};
+    const lines: string[] = [];
     for (const [dialogId, entry] of this.messageCache) {
-      // Persist only last 20 per chat to keep file small
-      data[dialogId] = {
+      lines.push(JSON.stringify({
+        chatId: dialogId,
         messages: entry.messages.slice(-20),
         timestamp: entry.timestamp,
-      };
+      }));
     }
-    fs.writeFileSync(getPath('messages-cache.json'), JSON.stringify(data));
+    fs.writeFileSync(getPath('messages.jsonl'), lines.join('\n') + '\n');
+  }
+
+  /** Save only a single chat's cache entry (append/replace in JSONL) */
+  private saveMessageCacheForChat(dialogId: string) {
+    this.ensureConfigDir();
+    const jsonlPath = getPath('messages.jsonl');
+    const entry = this.messageCache.get(dialogId);
+    if (!entry) return;
+
+    const newLine = JSON.stringify({
+      chatId: dialogId,
+      messages: entry.messages.slice(-20),
+      timestamp: entry.timestamp,
+    });
+
+    // Read existing, replace the matching line or append
+    let lines: string[] = [];
+    try {
+      if (fs.existsSync(jsonlPath)) {
+        lines = fs.readFileSync(jsonlPath, 'utf-8').split('\n').filter(l => l.trim());
+      }
+    } catch { /* ignore */ }
+
+    let replaced = false;
+    for (let i = 0; i < lines.length; i++) {
+      try {
+        const parsed = JSON.parse(lines[i]);
+        if (parsed.chatId === dialogId) {
+          lines[i] = newLine;
+          replaced = true;
+          break;
+        }
+      } catch { /* skip */ }
+    }
+    if (!replaced) lines.push(newLine);
+    fs.writeFileSync(jsonlPath, lines.join('\n') + '\n');
   }
 
   // Recent chats
@@ -773,7 +847,7 @@ input.addEventListener('keydown', (e) => {
       merged = [...kept, ...messages].sort((a, b) => a.timestamp - b.timestamp || a.id - b.id).slice(-50);
     }
     this.messageCache.set(dialogId, { messages: merged, timestamp: Date.now() });
-    this.saveMessageCache();
+    this.saveMessageCacheForChat(dialogId);
   }
 
   /** Append a single message to cache (for real-time events) */
@@ -784,11 +858,11 @@ input.addEventListener('keydown', (e) => {
         entry.messages.push(message);
         if (entry.messages.length > 50) entry.messages.shift();
         entry.timestamp = Date.now();
-        this.saveMessageCache();
+        this.saveMessageCacheForChat(dialogId);
       }
     } else {
       this.messageCache.set(dialogId, { messages: [message], timestamp: Date.now() });
-      this.saveMessageCache();
+      this.saveMessageCacheForChat(dialogId);
     }
   }
 
