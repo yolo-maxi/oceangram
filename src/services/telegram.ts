@@ -122,6 +122,10 @@ export class TelegramService {
   private messageCache: Map<string, { messages: MessageInfo[]; timestamp: number }> = new Map();
   private messageCacheTTL = 30_000;
 
+  // Profile photo cache: senderId → base64 data URI (or null if no photo)
+  private profilePhotoCache: Map<string, string | null> = new Map();
+  private profilePhotoFetching: Set<string> = new Set();
+
   onDialogUpdate(listener: DialogUpdateListener): () => void {
     this.dialogUpdateListeners.add(listener);
     return () => { this.dialogUpdateListeners.delete(listener); };
@@ -1055,6 +1059,61 @@ input.addEventListener('keydown', (e) => {
     if (replyToMsgId) opts.replyTo = replyToMsgId;
 
     await this.client.sendMessage(entity, opts);
+  }
+
+  // --- Profile Photo Cache ---
+
+  /**
+   * Get cached profile photo for a user. Returns base64 data URI, null (no photo), or undefined (not cached).
+   */
+  getProfilePhoto(userId: string): string | null | undefined {
+    return this.profilePhotoCache.get(userId);
+  }
+
+  /**
+   * Fetch profile photos for multiple user IDs in the background.
+   * Skips already-cached or in-progress fetches.
+   */
+  async fetchProfilePhotos(userIds: string[]): Promise<Map<string, string | null>> {
+    if (!this.client) return new Map();
+
+    const toFetch = userIds.filter(id => !this.profilePhotoCache.has(id) && !this.profilePhotoFetching.has(id));
+    const result = new Map<string, string | null>();
+
+    // Return cached values for already-known ids
+    for (const id of userIds) {
+      if (this.profilePhotoCache.has(id)) {
+        result.set(id, this.profilePhotoCache.get(id)!);
+      }
+    }
+
+    // Fetch new ones (limit concurrency to avoid flooding)
+    const batch = toFetch.slice(0, 10);
+    for (const userId of batch) {
+      this.profilePhotoFetching.add(userId);
+    }
+
+    await Promise.allSettled(batch.map(async (userId) => {
+      try {
+        const entity = await this.client!.getEntity(userId);
+        const photoBuffer = await this.client!.downloadProfilePhoto(entity, { isBig: false });
+        if (photoBuffer && Buffer.isBuffer(photoBuffer) && photoBuffer.length > 0) {
+          const dataUri = `data:image/jpeg;base64,${photoBuffer.toString('base64')}`;
+          this.profilePhotoCache.set(userId, dataUri);
+          result.set(userId, dataUri);
+        } else {
+          this.profilePhotoCache.set(userId, null);
+          result.set(userId, null);
+        }
+      } catch {
+        this.profilePhotoCache.set(userId, null);
+        result.set(userId, null);
+      } finally {
+        this.profilePhotoFetching.delete(userId);
+      }
+    }));
+
+    return result;
   }
 
   // --- User Info ---

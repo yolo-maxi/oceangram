@@ -723,6 +723,8 @@ export class ChatTab {
             await tg.connect();
             const messages = await addSyntaxHighlighting(await tg.getMessages(this.chatId, 20));
             this.panel.webview.postMessage({ type: 'messages', messages });
+            // Fetch profile photos for senders
+            this.fetchAndSendProfilePhotos(tg, messages);
             // Subscribe to real-time events
             if (!this.unsubscribeEvents) {
               this.unsubscribeEvents = tg.onChatEvent(this.chatId, async (event: ChatEvent) => {
@@ -732,7 +734,12 @@ export class ChatTab {
                       this.unreadCount++;
                       this.updateTitle();
                     }
-                    this.panel.webview.postMessage({ type: 'newMessage', message: await addSyntaxHighlightingSingle(event.message) });
+                    const hlMsg = await addSyntaxHighlightingSingle(event.message);
+                    this.panel.webview.postMessage({ type: 'newMessage', message: hlMsg });
+                    // Fetch profile photo for new sender
+                    if (hlMsg.senderId && !hlMsg.isOutgoing) {
+                      this.fetchAndSendProfilePhotos(tg, [hlMsg]);
+                    }
                     break;
                   case 'editMessage':
                     this.panel.webview.postMessage({ type: 'editMessage', message: await addSyntaxHighlightingSingle(event.message) });
@@ -773,6 +780,7 @@ export class ChatTab {
             await tg.connect();
             const older = await addSyntaxHighlighting(await tg.getMessages(this.chatId, 30, msg.beforeId));
             this.panel.webview.postMessage({ type: 'olderMessages', messages: older });
+            this.fetchAndSendProfilePhotos(tg, older);
             break;
           case 'poll':
             await tg.connect();
@@ -789,6 +797,48 @@ export class ChatTab {
         this.panel.webview.postMessage({ type: 'error', message: err.message || 'Unknown error' });
       }
     }, null, this.disposables);
+  }
+
+  /**
+   * Fetch profile photos for unique senders in messages and send to webview.
+   */
+  private async fetchAndSendProfilePhotos(tg: TelegramService, messages: any[]): Promise<void> {
+    const senderIds = [...new Set(
+      messages
+        .filter((m: any) => m.senderId && !m.isOutgoing)
+        .map((m: any) => String(m.senderId))
+    )];
+    if (senderIds.length === 0) return;
+
+    // Only fetch those not already cached
+    const toFetch = senderIds.filter(id => tg.getProfilePhoto(id) === undefined);
+    if (toFetch.length === 0) {
+      // Send cached values
+      const photos: Record<string, string> = {};
+      for (const id of senderIds) {
+        const cached = tg.getProfilePhoto(id);
+        if (cached) photos[id] = cached;
+      }
+      if (Object.keys(photos).length > 0) {
+        this.panel.webview.postMessage({ type: 'profilePhotos', photos });
+      }
+      return;
+    }
+
+    try {
+      const result = await tg.fetchProfilePhotos(toFetch);
+      const photos: Record<string, string> = {};
+      for (const id of senderIds) {
+        const cached = tg.getProfilePhoto(id);
+        if (cached) photos[id] = cached;
+      }
+      result.forEach((val, key) => {
+        if (val) photos[key] = val;
+      });
+      if (Object.keys(photos).length > 0) {
+        this.panel.webview.postMessage({ type: 'profilePhotos', photos });
+      }
+    } catch { /* ignore photo fetch errors */ }
   }
 
   private getHtml(): string {
@@ -864,11 +914,33 @@ body {
 .msg-group.outgoing { align-items: flex-end; }
 .msg-group.incoming { align-items: flex-start; }
 
+/* Avatar + messages row layout */
+.msg-group-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.msg-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  cursor: pointer;
+  overflow: hidden;
+  margin-bottom: 2px;
+}
+.msg-group-content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  align-items: flex-start;
+}
+
 .msg-group .group-sender {
   font-size: 13px;
   font-weight: 500;
   margin-bottom: 2px;
-  margin-left: 12px;
+  margin-left: 0;
 }
 /* Rotate sender colors like Telegram */
 .msg-group:nth-child(7n+1) .group-sender { color: #e06c75; }
@@ -1486,6 +1558,8 @@ function esc(s) {
   return d.innerHTML;
 }
 
+const avatarColors = ['#e17076','#eda86c','#a695e7','#7bc862','#6ec9cb','#65aadd','#ee7aae','#6bb2f2'];
+
 function formatTime(ts) {
   if (!ts) return '';
   const d = new Date(ts * 1000);
@@ -1588,8 +1662,24 @@ function renderMessages(msgs) {
 
     const dir = g.isOutgoing ? 'outgoing' : 'incoming';
     html += '<div class="msg-group ' + dir + '">';
-    if (!g.isOutgoing && g.senderName) {
-      html += '<div class="group-sender" data-sender-id="' + esc(g.senderId || '') + '" onclick="showUserProfile(this, \\'' + esc(g.senderId || '') + '\\')">' + esc(g.senderName) + '</div>';
+    if (!g.isOutgoing) {
+      // Avatar + messages wrapper for incoming
+      var avatarContent = '';
+      var sid = g.senderId || '';
+      if (profilePhotos[sid]) {
+        avatarContent = '<img src="' + profilePhotos[sid] + '" style="width:100%;height:100%;border-radius:50%;object-fit:cover" />';
+      } else {
+        var initials = (g.senderName || '?').charAt(0).toUpperCase();
+        var avatarColor = avatarColors[Math.abs(parseInt(sid || '0', 10)) % avatarColors.length];
+        avatarContent = '<span style="color:#fff;font-size:13px;font-weight:600">' + esc(initials) + '</span>';
+        avatarContent = '<div style="width:100%;height:100%;border-radius:50%;background:' + avatarColor + ';display:flex;align-items:center;justify-content:center">' + avatarContent + '</div>';
+      }
+      html += '<div class="msg-group-row">';
+      html += '<div class="msg-avatar" data-sender-id="' + esc(sid) + '" onclick="showUserProfile(this, \\'' + esc(sid) + '\\')">' + avatarContent + '</div>';
+      html += '<div class="msg-group-content">';
+      if (g.senderName) {
+        html += '<div class="group-sender" data-sender-id="' + esc(sid) + '" onclick="showUserProfile(this, \\'' + esc(sid) + '\\')">' + esc(g.senderName) + '</div>';
+      }
     }
     const len = g.msgs.length;
     for (let i = 0; i < len; i++) {
@@ -1677,6 +1767,9 @@ function renderMessages(msgs) {
         '<div class="' + bubbleCls + '">' + bubbleInner + '<span class="msg-time' + timeClass + '">' + timeStr + '</span>' + retryHtml + '</div>' +
         reactionsHtml +
         '</div>';
+    }
+    if (!g.isOutgoing) {
+      html += '</div></div>'; // close .msg-group-content and .msg-group-row
     }
     html += '</div>';
   }
@@ -1775,6 +1868,7 @@ let allMessages = [];
 let loadingOlder = false;
 let oldestId = 0;
 let prevMsgIds = '';
+const profilePhotos = {}; // senderId -> base64 data URI
 const newMsgsBtn = document.getElementById('newMsgsBtn');
 let newMsgCount = 0;
 
@@ -1924,6 +2018,21 @@ window.addEventListener('message', (event) => {
         renderMessages(allMessages);
       }
       pendingOptimistic.delete(msg.tempId);
+      break;
+    case 'profilePhotos':
+      // Store profile photos and update existing avatars in DOM
+      if (msg.photos) {
+        for (var pid in msg.photos) {
+          profilePhotos[pid] = msg.photos[pid];
+        }
+        // Update all avatar elements with matching sender IDs
+        document.querySelectorAll('.msg-avatar[data-sender-id]').forEach(function(el) {
+          var sid = el.getAttribute('data-sender-id');
+          if (sid && profilePhotos[sid]) {
+            el.innerHTML = '<img src="' + profilePhotos[sid] + '" style="width:100%;height:100%;border-radius:50%;object-fit:cover" />';
+          }
+        });
+      }
       break;
     case 'agentInfo':
       updateAgentBanner(msg.info);
