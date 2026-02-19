@@ -3155,6 +3155,56 @@ const agentSubagentCount = document.getElementById('agentSubagentCount');
 const agentDetailsPanel = document.getElementById('agentDetailsPanel');
 const agentDetailsContent = document.getElementById('agentDetailsContent');
 
+// Pinned messages
+const pinnedBanner = document.getElementById('pinnedBanner');
+const pinnedText = document.getElementById('pinnedText');
+const pinnedCount = document.getElementById('pinnedCount');
+const pinnedClose = document.getElementById('pinnedClose');
+let pinnedMessages = [];
+let pinnedIndex = 0;
+
+function handlePinnedMessages(msgs) {
+  pinnedMessages = msgs || [];
+  pinnedIndex = 0;
+  if (pinnedMessages.length === 0) {
+    pinnedBanner.style.display = 'none';
+    return;
+  }
+  updatePinnedBanner();
+  pinnedBanner.style.display = 'flex';
+}
+
+function updatePinnedBanner() {
+  var m = pinnedMessages[pinnedIndex];
+  var text = (m.text || '').replace(/\\n/g, ' ');
+  if (text.length > 60) text = text.slice(0, 60) + '…';
+  pinnedText.textContent = text || '(media)';
+  pinnedCount.textContent = pinnedMessages.length > 1 ? (pinnedIndex + 1) + '/' + pinnedMessages.length : '';
+}
+
+pinnedBanner.addEventListener('click', function(e) {
+  if (e.target === pinnedClose || e.target.closest('.pin-close')) return;
+  var m = pinnedMessages[pinnedIndex];
+  if (!m) return;
+  // Cycle to next pinned message on next click
+  if (pinnedMessages.length > 1) {
+    pinnedIndex = (pinnedIndex + 1) % pinnedMessages.length;
+    updatePinnedBanner();
+  }
+  // Scroll to the pinned message
+  var el = document.querySelector('[data-msg-id="' + m.id + '"]');
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('msg-highlight');
+    setTimeout(function() { el.classList.remove('msg-highlight'); }, 1500);
+  }
+});
+
+pinnedClose.addEventListener('click', function(e) {
+  e.stopPropagation();
+  pinnedBanner.style.display = 'none';
+});
+
 let agentPanelExpanded = false;
 let currentAgentInfo = null;
 let currentAgentDetails = null;
