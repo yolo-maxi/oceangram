@@ -1348,6 +1348,32 @@ body {
 }
 .reply-bar-close:hover { opacity: 1; background: rgba(255,255,255,0.08); }
 
+/* Edit bar */
+.edit-bar {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px 8px 14px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  border-left: 3px solid #3a95d5;
+  background: var(--tg-composer-bg);
+  flex-shrink: 0;
+  animation: editBarSlideIn 0.15s ease-out;
+}
+.edit-bar.active { display: flex; }
+.edit-bar-content { flex: 1; min-width: 0; }
+.edit-bar-label { font-size: 13px; font-weight: 500; color: #3a95d5; }
+.edit-bar-text { font-size: 13px; color: var(--tg-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.edit-bar-close {
+  cursor: pointer; padding: 4px; border-radius: 50%; opacity: 0.5;
+  font-size: 14px; flex-shrink: 0; background: none; border: none;
+  color: var(--tg-text);
+  width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+}
+.edit-bar-close:hover { opacity: 1; background: rgba(255,255,255,0.08); }
+@keyframes editBarSlideIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
 /* Context menu */
 .ctx-menu {
   position: fixed;
@@ -1901,6 +1927,13 @@ body {
   </div>
   <button class="reply-bar-close" id="replyBarClose">✕</button>
 </div>
+<div class="edit-bar" id="editBar">
+  <div class="edit-bar-content">
+    <div class="edit-bar-label">✏️ Editing</div>
+    <div class="edit-bar-text" id="editBarText"></div>
+  </div>
+  <button class="edit-bar-close" id="editBarClose">✕</button>
+</div>
 <div class="composer">
   <textarea id="msgInput" rows="1" placeholder="Message ${name}…" autofocus></textarea>
   <button class="send-btn" id="sendBtn" title="Send">
@@ -2182,12 +2215,52 @@ function clearReply() {
 }
 replyBarClose.addEventListener('click', clearReply);
 
+// Edit state
+const editBar = document.getElementById('editBar');
+const editBarText = document.getElementById('editBarText');
+const editBarClose = document.getElementById('editBarClose');
+let editingMsgId = null;
+
+function setEdit(msgId, text) {
+  editingMsgId = msgId;
+  editBarText.textContent = (text || '').slice(0, 100);
+  editBar.classList.add('active');
+  msgInput.value = text || '';
+  autoGrow();
+  msgInput.focus();
+  // Clear reply if active
+  clearReply();
+}
+function clearEdit() {
+  editingMsgId = null;
+  editBar.classList.remove('active');
+  msgInput.value = '';
+  msgInput.style.height = 'auto';
+}
+editBarClose.addEventListener('click', clearEdit);
+
 let optimisticIdCounter = 0;
 const pendingOptimistic = new Map(); // tempId -> { text, timestamp }
 
 function doSend() {
   const text = msgInput.value.trim();
   if (!text) return;
+
+  // Handle edit mode
+  if (editingMsgId) {
+    const msgId = editingMsgId;
+    // Optimistic update in-place
+    var editIdx = allMessages.findIndex(function(m) { return m.id === msgId; });
+    if (editIdx !== -1) {
+      allMessages[editIdx].text = text;
+      allMessages[editIdx].isEdited = true;
+      renderMessages(allMessages);
+    }
+    vscode.postMessage({ type: 'editMessage', messageId: msgId, text: text });
+    clearEdit();
+    return;
+  }
+
   msgInput.value = '';
   msgInput.style.height = 'auto';
 
@@ -2222,8 +2295,9 @@ msgInput.addEventListener('keydown', (e) => {
     e.preventDefault();
     doSend();
   }
-  if (e.key === 'Escape' && replyToId) {
-    clearReply();
+  if (e.key === 'Escape') {
+    if (editingMsgId) { clearEdit(); }
+    else if (replyToId) { clearReply(); }
   }
 });
 
@@ -2388,6 +2462,10 @@ window.addEventListener('message', (event) => {
         renderMessages(allMessages);
       }
       pendingOptimistic.delete(msg.tempId);
+      break;
+    case 'editFailed':
+      // Edit failed — the real-time event will eventually correct, but show error
+      console.warn('Edit failed for message ' + msg.messageId + ': ' + msg.error);
       break;
     case 'profilePhotos':
       // Store profile photos and update existing avatars in DOM
@@ -2678,9 +2756,14 @@ document.addEventListener('contextmenu', (e) => {
   const isOutgoing = msgEl.dataset.outgoing === '1';
   const msgTimestamp = parseInt(msgEl.dataset.timestamp || '0') * 1000;
   const canDeleteForEveryone = isOutgoing && (Date.now() - msgTimestamp) < 48 * 60 * 60 * 1000;
+  const hasText = !!(msgEl.dataset.text);
   let menuHtml =
     '<div class="ctx-menu-item" data-action="reply">↩️ Reply</div>' +
-    '<div class="ctx-menu-item" data-action="copy">📋 Copy text</div>' +
+    '<div class="ctx-menu-item" data-action="copy">📋 Copy text</div>';
+  if (isOutgoing && hasText) {
+    menuHtml += '<div class="ctx-menu-item" data-action="edit">✏️ Edit message</div>';
+  }
+  menuHtml +=
     '<div class="ctx-menu-sep"></div>' +
     '<div class="ctx-menu-item danger" data-action="deleteForMe">🗑 Delete for me</div>';
   if (canDeleteForEveryone) {
@@ -2695,6 +2778,10 @@ document.addEventListener('contextmenu', (e) => {
         setReply(msgId, msgEl.dataset.sender, msgEl.dataset.text);
       } else if (action === 'copy') {
         navigator.clipboard.writeText(msgEl.dataset.text || '');
+      } else if (action === 'edit') {
+        // Find the full message text from allMessages (data-text is truncated to 100 chars)
+        var fullMsg = allMessages.find(function(m) { return m.id === msgId; });
+        setEdit(msgId, fullMsg ? fullMsg.text : msgEl.dataset.text);
       } else if (action === 'deleteForMe') {
         vscode.postMessage({ type: 'deleteMessage', messageIds: [msgId], revoke: false });
       } else if (action === 'deleteForAll') {
