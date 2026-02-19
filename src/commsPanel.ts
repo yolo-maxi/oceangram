@@ -725,6 +725,12 @@ export class ChatTab {
             this.panel.webview.postMessage({ type: 'messages', messages });
             // Fetch profile photos for senders
             this.fetchAndSendProfilePhotos(tg, messages);
+            // Fetch pinned messages
+            tg.getPinnedMessages(this.chatId).then(pinned => {
+              if (pinned.length > 0) {
+                this.panel.webview.postMessage({ type: 'pinnedMessages', messages: pinned });
+              }
+            }).catch(() => {});
             // Subscribe to real-time events
             if (!this.unsubscribeEvents) {
               this.unsubscribeEvents = tg.onChatEvent(this.chatId, async (event: ChatEvent) => {
@@ -768,6 +774,16 @@ export class ChatTab {
               this.panel.webview.postMessage({ type: 'sendSuccess', tempId: msg.tempId });
             } catch (sendErr: any) {
               this.panel.webview.postMessage({ type: 'sendFailed', tempId: msg.tempId, error: sendErr.message || 'Send failed' });
+            }
+            break;
+          case 'sendFile':
+            await tg.connect();
+            try {
+              const fileBuffer = Buffer.from(msg.data, 'base64');
+              await tg.sendFile(this.chatId, fileBuffer, msg.fileName, msg.mimeType, msg.caption);
+              this.panel.webview.postMessage({ type: 'fileSendSuccess', tempId: msg.tempId });
+            } catch (fileErr: any) {
+              this.panel.webview.postMessage({ type: 'fileSendFailed', tempId: msg.tempId, error: fileErr.message || 'File send failed' });
             }
             break;
           case 'editMessage':
@@ -1335,6 +1351,52 @@ body {
   line-height: 1.2;
 }
 
+/* Image paste preview bar */
+.image-paste-bar {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px 8px 14px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  border-left: 3px solid #98c379;
+  background: var(--tg-composer-bg);
+  flex-shrink: 0;
+  animation: editBarSlideIn 0.15s ease-out;
+}
+.image-paste-bar.active { display: flex; }
+.image-paste-thumb {
+  width: 56px;
+  height: 56px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: rgba(0,0,0,0.2);
+}
+.image-paste-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.image-paste-label { font-size: 13px; font-weight: 500; color: #98c379; }
+.image-paste-caption {
+  width: 100%;
+  padding: 5px 10px;
+  background: var(--tg-composer-input-bg);
+  color: var(--tg-text);
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+.image-paste-caption::placeholder { color: var(--tg-text-secondary); }
+.image-paste-caption:focus { background: var(--tg-composer-input-bg); }
+.image-paste-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.image-paste-send, .image-paste-cancel {
+  border: none; border-radius: 6px; padding: 6px 12px; font-size: 13px;
+  cursor: pointer; font-family: inherit; font-weight: 500;
+}
+.image-paste-send { background: #98c379; color: #000; }
+.image-paste-send:hover { background: #a9d48a; }
+.image-paste-cancel { background: rgba(255,255,255,0.08); color: var(--tg-text-secondary); }
+.image-paste-cancel:hover { background: rgba(255,255,255,0.12); color: var(--tg-text); }
+
 /* Reply bar */
 .reply-bar {
   display: none;
@@ -1458,6 +1520,124 @@ body {
 .send-btn:hover { background: rgba(106,178,242,0.1); }
 .send-btn:active { transform: scale(0.92); }
 .send-btn svg { width: 20px; height: 20px; fill: currentColor; }
+
+/* Drop zone overlay */
+.drop-zone-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+.drop-zone-overlay.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+.drop-zone-content {
+  border: 2px dashed var(--tg-accent);
+  border-radius: 16px;
+  padding: 48px 64px;
+  text-align: center;
+  background: rgba(23, 33, 43, 0.9);
+}
+.drop-zone-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+.drop-zone-text {
+  font-size: 16px;
+  color: var(--tg-text);
+  font-weight: 500;
+}
+
+/* File preview bar */
+.file-preview-bar {
+  background: var(--tg-bg-secondary);
+  border-top: 1px solid rgba(255,255,255,0.06);
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.file-preview-items {
+  flex: 1;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  min-width: 0;
+}
+.file-preview-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--tg-composer-input-bg);
+  border-radius: 8px;
+  padding: 6px 10px;
+  min-width: 0;
+  max-width: 200px;
+  flex-shrink: 0;
+}
+.file-preview-item img {
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.file-preview-item .file-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+.file-preview-item .file-name {
+  font-size: 12px;
+  color: var(--tg-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-preview-item .file-size {
+  font-size: 11px;
+  color: var(--tg-text-secondary);
+  white-space: nowrap;
+}
+.file-preview-item .file-remove {
+  background: none;
+  border: none;
+  color: var(--tg-text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+.file-preview-item .file-remove:hover { color: #e06c75; }
+.file-preview-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.file-preview-cancel, .file-preview-send {
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+}
+.file-preview-cancel {
+  background: transparent;
+  color: var(--tg-text-secondary);
+}
+.file-preview-cancel:hover { color: var(--tg-text); }
+.file-preview-send {
+  background: var(--tg-accent);
+  color: #fff;
+}
+.file-preview-send:hover { opacity: 0.85; }
 
 /* Emoji button */
 .emoji-btn {
@@ -1597,6 +1777,55 @@ body {
   gap: 12px;
 }
 .agent-banner:hover { background: #1e2c3a; }
+/* Pinned message banner */
+.pinned-banner {
+  display: none;
+  align-items: center;
+  padding: 4px 12px;
+  height: 28px;
+  background: var(--tg-bg-secondary);
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: background 0.15s;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--tg-text-secondary);
+  box-sizing: border-box;
+}
+.pinned-banner:hover { background: #1e2c3a; }
+.pinned-banner .pin-icon { flex-shrink: 0; }
+.pinned-banner .pin-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--tg-text-primary);
+}
+.pinned-banner .pin-count {
+  font-size: 10px;
+  color: var(--tg-accent);
+  flex-shrink: 0;
+}
+.pinned-banner .pin-close {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--tg-text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+  line-height: 1;
+}
+.pinned-banner .pin-close:hover { color: var(--tg-text-primary); }
+.msg-highlight {
+  animation: msgFlash 1.5s ease-out;
+}
+@keyframes msgFlash {
+  0%, 15% { background: rgba(106,166,227,0.25); }
+  100% { background: transparent; }
+}
 .agent-banner-left {
   display: flex;
   align-items: center;
@@ -2052,6 +2281,13 @@ body {
     <!-- Dynamically populated -->
   </div>
 </div>
+<!-- Pinned message banner -->
+<div class="pinned-banner" id="pinnedBanner">
+  <span class="pin-icon">📌</span>
+  <span class="pin-text" id="pinnedText"></span>
+  <span class="pin-count" id="pinnedCount"></span>
+  <button class="pin-close" id="pinnedClose" title="Dismiss">✕</button>
+</div>
 <div class="search-bar" id="searchBar">
   <input type="text" id="searchInput" placeholder="Search messages…" />
   <span class="search-count" id="searchCount"></span>
@@ -2063,8 +2299,32 @@ body {
   <div class="floating-date hidden" id="floatingDate"><span></span></div>
   <div class="loading">Loading…</div>
 </div>
+<div class="drop-zone-overlay" id="dropZoneOverlay">
+  <div class="drop-zone-content">
+    <div class="drop-zone-icon">📎</div>
+    <div class="drop-zone-text">Drop files to send</div>
+  </div>
+</div>
+<div class="file-preview-bar" id="filePreviewBar" style="display:none">
+  <div class="file-preview-items" id="filePreviewItems"></div>
+  <div class="file-preview-actions">
+    <button class="file-preview-cancel" id="filePreviewCancel">✕ Cancel</button>
+    <button class="file-preview-send" id="filePreviewSend">Send</button>
+  </div>
+</div>
 <button class="new-msgs-btn" id="newMsgsBtn" onclick="scrollToBottom()">↓ New messages</button>
 <div class="typing-indicator" id="typingIndicator"></div>
+<div class="image-paste-bar" id="imagePasteBar">
+  <img class="image-paste-thumb" id="imagePasteThumb" src="" alt="preview" />
+  <div class="image-paste-info">
+    <div class="image-paste-label">📷 Paste image</div>
+    <input class="image-paste-caption" id="imagePasteCaption" type="text" placeholder="Add a caption…" />
+  </div>
+  <div class="image-paste-actions">
+    <button class="image-paste-send" id="imagePasteSend">Send</button>
+    <button class="image-paste-cancel" id="imagePasteCancel">✕</button>
+  </div>
+</div>
 <div class="reply-bar" id="replyBar">
   <div class="reply-bar-content">
     <div class="reply-bar-sender" id="replyBarSender"></div>
@@ -2444,6 +2704,74 @@ function doSend() {
 }
 sendBtn.addEventListener('click', doSend);
 
+// ── Image Paste ──
+let pastedImageData = null; // { base64, mimeType }
+const imagePasteBar = document.getElementById('imagePasteBar');
+const imagePasteThumb = document.getElementById('imagePasteThumb');
+const imagePasteCaption = document.getElementById('imagePasteCaption');
+const imagePasteSend = document.getElementById('imagePasteSend');
+const imagePasteCancel = document.getElementById('imagePasteCancel');
+
+function showImagePaste(dataUrl, mimeType) {
+  pastedImageData = { dataUrl: dataUrl, mimeType: mimeType };
+  imagePasteThumb.src = dataUrl;
+  imagePasteCaption.value = '';
+  imagePasteBar.classList.add('active');
+  setTimeout(function() { imagePasteCaption.focus(); }, 50);
+}
+
+function clearImagePaste() {
+  pastedImageData = null;
+  imagePasteBar.classList.remove('active');
+  imagePasteThumb.src = '';
+  imagePasteCaption.value = '';
+  msgInput.focus();
+}
+
+function sendPastedImage() {
+  if (!pastedImageData) return;
+  var base64 = pastedImageData.dataUrl.split(',')[1];
+  var mimeType = pastedImageData.mimeType;
+  var ext = mimeType === 'image/png' ? '.png' : mimeType === 'image/jpeg' ? '.jpg' : mimeType === 'image/webp' ? '.webp' : '.png';
+  var caption = imagePasteCaption.value.trim();
+  var tempId = --optimisticIdCounter;
+  vscode.postMessage({
+    type: 'sendFile',
+    data: base64,
+    fileName: 'paste' + ext,
+    mimeType: mimeType,
+    caption: caption,
+    tempId: tempId
+  });
+  clearImagePaste();
+}
+
+imagePasteSend.addEventListener('click', sendPastedImage);
+imagePasteCancel.addEventListener('click', clearImagePaste);
+imagePasteCaption.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendPastedImage(); }
+  if (e.key === 'Escape') { e.preventDefault(); clearImagePaste(); }
+});
+
+msgInput.addEventListener('paste', function(e) {
+  var items = e.clipboardData && e.clipboardData.items;
+  if (!items) return;
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    if (item.type && item.type.match(/^image\/(png|jpeg|jpg|webp|gif)$/)) {
+      e.preventDefault();
+      var blob = item.getAsFile();
+      if (!blob) return;
+      var reader = new FileReader();
+      reader.onload = function(ev) {
+        showImagePaste(ev.target.result, item.type);
+      };
+      reader.readAsDataURL(blob);
+      return;
+    }
+  }
+});
+
 // ── Emoji Picker ──
 (function() {
   const EMOJI_DATA = {
@@ -2601,7 +2929,8 @@ msgInput.addEventListener('keydown', (e) => {
     doSend();
   }
   if (e.key === 'Escape') {
-    if (editingMsgId) { clearEdit(); }
+    if (pastedImageData) { clearImagePaste(); }
+    else if (editingMsgId) { clearEdit(); }
     else if (replyToId) { clearReply(); }
   }
 });
@@ -2800,6 +3129,9 @@ window.addEventListener('message', (event) => {
       break;
     case 'agentInfo':
       updateAgentBanner(msg.info);
+      break;
+    case 'pinnedMessages':
+      handlePinnedMessages(msg.messages);
       break;
     case 'agentDetails':
       renderAgentDetails(msg.data);

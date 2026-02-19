@@ -811,6 +811,22 @@ input.addEventListener('keydown', (e) => {
 
   // --- Messages ---
 
+  async getPinnedMessages(dialogId: string): Promise<MessageInfo[]> {
+    if (!this.client) throw new Error('Not connected');
+    const { chatId, topicId } = TelegramService.parseDialogId(dialogId);
+    const entity = await this.client.getEntity(chatId);
+
+    const opts: any = { filter: Api.InputMessagesFilterPinned, limit: 10 };
+    if (topicId) opts.replyTo = topicId;
+
+    const msgs = await this.client.getMessages(entity, opts);
+    const results: MessageInfo[] = [];
+    for (const msg of msgs) {
+      results.push(await this.messageToInfo(msg));
+    }
+    return results;
+  }
+
   async searchMessages(dialogId: string, query: string, limit: number = 20): Promise<MessageInfo[]> {
     if (!this.client) throw new Error('Not connected');
     const { chatId, topicId } = TelegramService.parseDialogId(dialogId);
@@ -1077,6 +1093,20 @@ input.addEventListener('keydown', (e) => {
     if (replyToMsgId) opts.replyTo = replyToMsgId;
 
     await this.client.sendMessage(entity, opts);
+  }
+
+  async sendFile(dialogId: string, buffer: Buffer, fileName: string, mimeType?: string, caption?: string): Promise<void> {
+    if (!this.client) throw new Error('Not connected');
+    const { chatId, topicId } = TelegramService.parseDialogId(dialogId);
+    const entity = await this.client.getEntity(chatId);
+
+    await this.client.sendFile(entity, {
+      file: buffer,
+      fileName,
+      caption: caption || '',
+      forceDocument: !(mimeType && mimeType.startsWith('image/')),
+      replyTo: topicId,
+    });
   }
 
   async editMessage(dialogId: string, messageId: number, text: string): Promise<void> {
