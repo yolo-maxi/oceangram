@@ -4,8 +4,11 @@ import { KanbanPanel } from './kanbanPanel';
 import { SimplePanel } from './simplePanel';
 import { ResourcePanel } from './resourcePanel';
 import { AgentPanel } from './agentPanel';
+import { setStoragePath } from './services/telegram';
 
 export function activate(context: vscode.ExtensionContext) {
+  // Use VS Code's globalStorageUri for cache — always local to the UI machine
+  setStoragePath(context.globalStorageUri.fsPath);
   // Comms — chat picker (Cmd+Shift+1)
   context.subscriptions.push(
     vscode.commands.registerCommand('oceangram.openComms', () => {
@@ -37,7 +40,7 @@ export function activate(context: vscode.ExtensionContext) {
   // Telegram login/logout command
   context.subscriptions.push(
     vscode.commands.registerCommand('oceangram.telegramLogin', async () => {
-      const configPath = require('path').join(process.env.HOME || '', '.oceangram', 'config.json');
+      const configPath = require('path').join(context.globalStorageUri.fsPath, 'config.json');
       try {
         const fs = require('fs');
         if (fs.existsSync(configPath)) {

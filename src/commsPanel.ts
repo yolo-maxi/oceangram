@@ -1771,6 +1771,7 @@ msgInput.addEventListener('keydown', (e) => {
 let allMessages = [];
 let loadingOlder = false;
 let oldestId = 0;
+let prevMsgIds = '';
 const newMsgsBtn = document.getElementById('newMsgsBtn');
 let newMsgCount = 0;
 
@@ -1789,18 +1790,36 @@ window.addEventListener('message', (event) => {
     case 'messages':
       var wasAtBottom = isScrolledToBottom();
       var prevLen = allMessages.length;
-      // Preserve un-echoed optimistic messages
-      var stillPending = allMessages.filter(function(m) {
-        if (!m._optimistic) return false;
-        // Check if the real message arrived in the new batch
-        return !msg.messages.some(function(rm) {
-          return rm.isOutgoing && rm.text === m.text && Math.abs(rm.timestamp - m.timestamp) < 30;
-        });
-      });
-      allMessages = msg.messages.concat(stillPending);
+      // Merge server messages with optimistic ones — in-place replacement, no flicker
+      var newMsgs = msg.messages;
+      var optimisticList = allMessages.filter(function(m) { return m._optimistic; });
+      // Replace optimistic messages that now have real echoes
+      for (var oi = 0; oi < optimisticList.length; oi++) {
+        var opt = optimisticList[oi];
+        var matchIdx = -1;
+        for (var ni = 0; ni < newMsgs.length; ni++) {
+          if (newMsgs[ni].isOutgoing && newMsgs[ni].text === opt.text && Math.abs(newMsgs[ni].timestamp - opt.timestamp) < 30) {
+            matchIdx = ni;
+            break;
+          }
+        }
+        if (matchIdx !== -1) {
+          // Real message found — drop the optimistic one
+          pendingOptimistic.delete(opt.id);
+          optimisticList.splice(oi, 1);
+          oi--;
+        }
+      }
+      // Merge: server messages + any still-pending optimistic ones
+      allMessages = newMsgs.concat(optimisticList);
       allMessages.sort(function(a, b) { return a.timestamp - b.timestamp || a.id - b.id; });
       if (allMessages.length > 0) oldestId = allMessages[0].id || 0;
+      // Skip re-render if nothing actually changed (avoid flicker)
+      var newIds = allMessages.map(function(m) { return m.id; }).join(',');
+      var prevIds = (prevLen > 0) ? null : ''; // force render on first load
       var isFirstLoad = prevLen === 0;
+      if (!isFirstLoad && newIds === prevMsgIds) break;
+      prevMsgIds = newIds;
       renderMessages(allMessages);
       if (isFirstLoad) { messagesList.scrollTop = messagesList.scrollHeight; }
       if (!wasAtBottom && allMessages.length > prevLen && prevLen > 0) {

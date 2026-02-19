@@ -8,12 +8,34 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-const CONFIG_DIR = path.join(process.env.HOME || '/home/xiko', '.oceangram');
-const PINNED_PATH = path.join(CONFIG_DIR, 'pinned.json');
-const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
-const DIALOGS_CACHE_PATH = path.join(CONFIG_DIR, 'dialogs-cache.json');
-const MESSAGES_CACHE_PATH = path.join(CONFIG_DIR, 'messages-cache.json');
-const RECENT_PATH = path.join(CONFIG_DIR, 'recent.json');
+// Default fallback for non-extension contexts
+const DEFAULT_CONFIG_DIR = path.join(process.env.HOME || '/home/xiko', '.oceangram');
+
+// Storage directory — set via setStoragePath() to use VS Code's globalStorageUri
+let CONFIG_DIR = DEFAULT_CONFIG_DIR;
+
+function getPath(name: string): string {
+  return path.join(CONFIG_DIR, name);
+}
+
+/** Set the storage directory (call with context.globalStorageUri.fsPath) */
+export function setStoragePath(storagePath: string): void {
+  CONFIG_DIR = storagePath;
+  if (!fs.existsSync(CONFIG_DIR)) {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  }
+  // Migrate from old location if needed
+  const oldDir = DEFAULT_CONFIG_DIR;
+  if (oldDir !== CONFIG_DIR && fs.existsSync(oldDir)) {
+    for (const file of ['config.json', 'pinned.json', 'dialogs-cache.json', 'messages.jsonl', 'recent.json']) {
+      const oldFile = path.join(oldDir, file);
+      const newFile = path.join(CONFIG_DIR, file);
+      if (fs.existsSync(oldFile) && !fs.existsSync(newFile)) {
+        try { fs.copyFileSync(oldFile, newFile); } catch { /* ignore */ }
+      }
+    }
+  }
+}
 
 export interface DialogInfo {
   id: string;           // "chatId" or "chatId:topicId" for forum topics
@@ -117,8 +139,8 @@ export class TelegramService {
 
   private loadDialogCache(): DialogInfo[] | null {
     try {
-      if (fs.existsSync(DIALOGS_CACHE_PATH)) {
-        const data = JSON.parse(fs.readFileSync(DIALOGS_CACHE_PATH, 'utf-8'));
+      if (fs.existsSync(getPath('dialogs-cache.json'))) {
+        const data = JSON.parse(fs.readFileSync(getPath('dialogs-cache.json'), 'utf-8'));
         if (data && Array.isArray(data.dialogs)) {
           this.dialogCache = data.dialogs;
           this.dialogCacheTime = data.timestamp || 0;
@@ -141,13 +163,13 @@ export class TelegramService {
         topicEmoji: d.topicEmoji,
       }))
     };
-    fs.writeFileSync(DIALOGS_CACHE_PATH, JSON.stringify(data));
+    fs.writeFileSync(getPath('dialogs-cache.json'), JSON.stringify(data));
   }
 
   private loadMessageCache(): void {
     try {
-      if (fs.existsSync(MESSAGES_CACHE_PATH)) {
-        const data = JSON.parse(fs.readFileSync(MESSAGES_CACHE_PATH, 'utf-8'));
+      if (fs.existsSync(getPath('messages-cache.json'))) {
+        const data = JSON.parse(fs.readFileSync(getPath('messages-cache.json'), 'utf-8'));
         if (data && typeof data === 'object') {
           for (const [dialogId, entry] of Object.entries(data)) {
             const e = entry as any;
@@ -170,14 +192,14 @@ export class TelegramService {
         timestamp: entry.timestamp,
       };
     }
-    fs.writeFileSync(MESSAGES_CACHE_PATH, JSON.stringify(data));
+    fs.writeFileSync(getPath('messages-cache.json'), JSON.stringify(data));
   }
 
   // Recent chats
   getRecentChats(): { id: string; timestamp: number }[] {
     try {
-      if (fs.existsSync(RECENT_PATH)) {
-        return JSON.parse(fs.readFileSync(RECENT_PATH, 'utf-8')) || [];
+      if (fs.existsSync(getPath('recent.json'))) {
+        return JSON.parse(fs.readFileSync(getPath('recent.json'), 'utf-8')) || [];
       }
     } catch { /* ignore */ }
     return [];
@@ -188,13 +210,13 @@ export class TelegramService {
     let recent = this.getRecentChats().filter(r => r.id !== chatId);
     recent.unshift({ id: chatId, timestamp: Date.now() });
     recent = recent.slice(0, 10);
-    fs.writeFileSync(RECENT_PATH, JSON.stringify(recent));
+    fs.writeFileSync(getPath('recent.json'), JSON.stringify(recent));
   }
 
   private loadConfig(): Record<string, string> {
     try {
-      if (fs.existsSync(CONFIG_PATH)) {
-        return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+      if (fs.existsSync(getPath('config.json'))) {
+        return JSON.parse(fs.readFileSync(getPath('config.json'), 'utf-8'));
       }
     } catch { /* ignore */ }
     return {};
@@ -204,7 +226,7 @@ export class TelegramService {
     if (!fs.existsSync(CONFIG_DIR)) {
       fs.mkdirSync(CONFIG_DIR, { recursive: true });
     }
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+    fs.writeFileSync(getPath('config.json'), JSON.stringify(config, null, 2));
   }
 
   // Built-in app credentials (same as any public Telegram client)
@@ -475,8 +497,8 @@ input.addEventListener('keydown', (e) => {
 
   getPinnedIds(): string[] {
     try {
-      if (fs.existsSync(PINNED_PATH)) {
-        return JSON.parse(fs.readFileSync(PINNED_PATH, 'utf-8'));
+      if (fs.existsSync(getPath('pinned.json'))) {
+        return JSON.parse(fs.readFileSync(getPath('pinned.json'), 'utf-8'));
       }
     } catch { /* ignore */ }
     return [];
@@ -486,7 +508,7 @@ input.addEventListener('keydown', (e) => {
     if (!fs.existsSync(CONFIG_DIR)) {
       fs.mkdirSync(CONFIG_DIR, { recursive: true });
     }
-    fs.writeFileSync(PINNED_PATH, JSON.stringify(ids, null, 2));
+    fs.writeFileSync(getPath('pinned.json'), JSON.stringify(ids, null, 2));
   }
 
   pinDialog(dialogId: string): void {
