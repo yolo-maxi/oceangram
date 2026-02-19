@@ -747,6 +747,9 @@ export class ChatTab {
                   case 'deleteMessages':
                     this.panel.webview.postMessage({ type: 'deleteMessages', messageIds: event.messageIds });
                     break;
+                  case 'typing':
+                    this.panel.webview.postMessage({ type: 'typing', userId: event.userId, userName: event.userName });
+                    break;
                   default:
                     // Handle messagesRefreshed from cache background refresh
                     if ((event as any).type === 'messagesRefreshed') {
@@ -804,6 +807,14 @@ export class ChatTab {
             const older = await addSyntaxHighlighting(await tg.getMessages(this.chatId, 30, msg.beforeId));
             this.panel.webview.postMessage({ type: 'olderMessages', messages: older });
             this.fetchAndSendProfilePhotos(tg, older);
+            break;
+          case 'tabFocused':
+            this.unreadCount = 0;
+            this.updateTitle();
+            break;
+          case 'sendTyping':
+            await tg.connect();
+            await tg.sendTyping(this.chatId);
             break;
           case 'poll':
             await tg.connect();
@@ -1448,6 +1459,113 @@ body {
 .send-btn:active { transform: scale(0.92); }
 .send-btn svg { width: 20px; height: 20px; fill: currentColor; }
 
+/* Emoji button */
+.emoji-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--tg-text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 20px;
+  transition: background 0.15s, color 0.15s;
+}
+.emoji-btn:hover { background: rgba(106,178,242,0.1); color: var(--tg-accent); }
+.emoji-btn.active { color: var(--tg-accent); }
+
+/* Emoji picker */
+.emoji-picker {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  max-height: 300px;
+  background: var(--tg-bg-secondary, #1e2c3a);
+  border-top: 1px solid var(--tg-border, rgba(255,255,255,0.08));
+  display: flex;
+  flex-direction: column;
+  z-index: 200;
+  animation: emojiSlideUp 0.15s ease-out;
+}
+@keyframes emojiSlideUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.emoji-picker-search {
+  padding: 8px;
+  flex-shrink: 0;
+}
+.emoji-picker-search input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  background: var(--tg-composer-input-bg);
+  color: var(--tg-text);
+  border: 1px solid var(--tg-border, rgba(255,255,255,0.08));
+  border-radius: 8px;
+  font-size: 13px;
+  outline: none;
+}
+.emoji-picker-search input:focus { border-color: var(--tg-accent); }
+.emoji-picker-search input::placeholder { color: var(--tg-text-secondary); }
+.emoji-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 8px 4px;
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+.emoji-tabs::-webkit-scrollbar { display: none; }
+.emoji-tab {
+  padding: 4px 6px;
+  font-size: 18px;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  opacity: 0.5;
+  transition: opacity 0.15s, background 0.15s;
+  flex-shrink: 0;
+}
+.emoji-tab:hover { opacity: 0.8; background: rgba(255,255,255,0.05); }
+.emoji-tab.active { opacity: 1; background: rgba(106,178,242,0.15); }
+.emoji-grid-wrap {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 8px 8px;
+}
+.emoji-grid-wrap::-webkit-scrollbar { width: 4px; }
+.emoji-grid-wrap::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+.emoji-cat-label {
+  font-size: 11px;
+  color: var(--tg-text-secondary);
+  padding: 6px 2px 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 2px;
+}
+.emoji-grid span {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.1s;
+}
+.emoji-grid span:hover { background: rgba(255,255,255,0.1); }
+
 /* Loading & error */
 .loading {
   display: flex;
@@ -1881,6 +1999,32 @@ body {
   border-radius: 16px;
 }
 .floating-date.hidden { opacity: 0; }
+
+/* Typing indicator */
+.typing-indicator {
+  padding: 4px 16px 4px 62px;
+  font-size: 12px;
+  color: var(--tg-accent);
+  height: 20px;
+  overflow: hidden;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.typing-indicator.visible { opacity: 1; }
+.typing-indicator .typing-dots {
+  display: inline-block;
+}
+.typing-indicator .typing-dots span {
+  animation: typingDot 1.4s infinite;
+  display: inline-block;
+}
+.typing-indicator .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+.typing-indicator .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes typingDot {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-2px); }
+}
 </style>
 </head>
 <body>
@@ -1920,6 +2064,7 @@ body {
   <div class="loading">Loading…</div>
 </div>
 <button class="new-msgs-btn" id="newMsgsBtn" onclick="scrollToBottom()">↓ New messages</button>
+<div class="typing-indicator" id="typingIndicator"></div>
 <div class="reply-bar" id="replyBar">
   <div class="reply-bar-content">
     <div class="reply-bar-sender" id="replyBarSender"></div>
@@ -1934,11 +2079,19 @@ body {
   </div>
   <button class="edit-bar-close" id="editBarClose">✕</button>
 </div>
-<div class="composer">
-  <textarea id="msgInput" rows="1" placeholder="Message ${name}…" autofocus></textarea>
-  <button class="send-btn" id="sendBtn" title="Send">
-    <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
-  </button>
+<div style="position:relative">
+  <div class="emoji-picker" id="emojiPicker" style="display:none">
+    <div class="emoji-picker-search"><input type="text" id="emojiSearch" placeholder="Search emoji…" /></div>
+    <div class="emoji-tabs" id="emojiTabs"></div>
+    <div class="emoji-grid-wrap" id="emojiGridWrap"></div>
+  </div>
+  <div class="composer">
+    <textarea id="msgInput" rows="1" placeholder="Message ${name}…" autofocus></textarea>
+    <button class="emoji-btn" id="emojiBtn" title="Emoji">😊</button>
+    <button class="send-btn" id="sendBtn" title="Send">
+      <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+    </button>
+  </div>
 </div>
 <div id="errorBox" class="error" style="display:none"></div>
 
@@ -2430,6 +2583,11 @@ window.addEventListener('message', (event) => {
         }, 300);
       }
       break;
+    case 'typing':
+      if (msg.userId && msg.userName) {
+        handleTypingEvent(msg.userId, msg.userName);
+      }
+      break;
     case 'olderMessages':
       loadingOlder = false;
       if (msg.messages && msg.messages.length > 0) {
@@ -2734,7 +2892,10 @@ messagesList.addEventListener('scroll', () => {
   }
   if (isScrolledToBottom()) {
     newMsgsBtn.style.display = 'none';
-    newMsgCount = 0;
+    if (newMsgCount > 0) {
+      newMsgCount = 0;
+      vscode.postMessage({ type: 'tabFocused' });
+    }
   }
 });
 
@@ -3059,6 +3220,46 @@ messagesList.addEventListener('scroll', function() {
     });
   }
 }, { passive: true });
+
+// --- Typing indicators ---
+var typingIndicator = document.getElementById('typingIndicator');
+var typingUsers = {}; // userId -> { name, timeout }
+
+function updateTypingDisplay() {
+  var names = Object.values(typingUsers).map(function(u) { return u.name; });
+  if (names.length === 0) {
+    typingIndicator.classList.remove('visible');
+    return;
+  }
+  var text = names.length === 1
+    ? names[0] + ' is typing'
+    : names.slice(0, 2).join(' and ') + (names.length > 2 ? ' and others' : '') + ' are typing';
+  typingIndicator.innerHTML = esc(text) + ' <span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>';
+  typingIndicator.classList.add('visible');
+}
+
+function handleTypingEvent(userId, userName) {
+  if (typingUsers[userId]) clearTimeout(typingUsers[userId].timeout);
+  typingUsers[userId] = {
+    name: userName,
+    timeout: setTimeout(function() {
+      delete typingUsers[userId];
+      updateTypingDisplay();
+    }, 6000)
+  };
+  updateTypingDisplay();
+}
+
+// Debounced sendTyping on keydown in composer (max once per 5s)
+var lastTypingSent = 0;
+msgInput.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' || e.key === 'Escape' || e.key === 'Shift' || e.key === 'Control' || e.key === 'Alt' || e.key === 'Meta') return;
+  var now = Date.now();
+  if (now - lastTypingSent > 5000) {
+    lastTypingSent = now;
+    vscode.postMessage({ type: 'sendTyping' });
+  }
+});
 
 vscode.postMessage({ type: 'init' });
 </script>

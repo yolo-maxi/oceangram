@@ -1451,7 +1451,73 @@ input.addEventListener('keydown', (e) => {
       }
     }, new DeletedMessage({}));
 
+    // Typing indicators via raw updates
+    this.client.addEventHandler(async (update: Api.TypeUpdate) => {
+      try {
+        let chatId = '';
+        let userId = '';
+
+        if (update instanceof Api.UpdateUserTyping) {
+          // DM typing
+          userId = update.userId.toString();
+          chatId = userId;
+        } else if (update instanceof Api.UpdateChatUserTyping) {
+          chatId = `-${update.chatId.toString()}`;
+          userId = update.fromId && update.fromId instanceof Api.PeerUser
+            ? update.fromId.userId.toString() : '';
+        } else if (update instanceof Api.UpdateChannelUserTyping) {
+          chatId = `-100${update.channelId.toString()}`;
+          userId = update.fromId && update.fromId instanceof Api.PeerUser
+            ? update.fromId.userId.toString() : '';
+        } else {
+          return;
+        }
+
+        if (!userId || !chatId) return;
+
+        // Check if anyone is listening on this chatId or any topic under it
+        const matchingDialogIds: string[] = [];
+        for (const [dialogId] of this.chatListeners) {
+          const parsed = TelegramService.parseDialogId(dialogId);
+          if (parsed.chatId === chatId) {
+            matchingDialogIds.push(dialogId);
+          }
+        }
+        if (matchingDialogIds.length === 0) return;
+
+        // Resolve user name
+        let userName = 'Someone';
+        try {
+          const entity = await this.client!.getEntity(userId);
+          userName = this.getEntityName(entity);
+        } catch { /* ignore */ }
+
+        for (const dialogId of matchingDialogIds) {
+          this.emit(dialogId, { type: 'typing', userId, userName });
+        }
+      } catch (err) {
+        console.error('[Oceangram] Typing handler error:', err);
+      }
+    });
+
     console.log('[Oceangram] Real-time event handlers registered');
+  }
+
+  /** Send typing indicator to a dialog */
+  async sendTyping(dialogId: string): Promise<void> {
+    if (!this.client) return;
+    try {
+      const { chatId, topicId } = TelegramService.parseDialogId(dialogId);
+      const entity = await this.client.getEntity(chatId);
+      const params: any = {
+        peer: entity,
+        action: new Api.SendMessageTypingAction(),
+      };
+      if (topicId) params.topMsgId = topicId;
+      await this.client.invoke(new Api.messages.SetTyping(params));
+    } catch {
+      // Silently ignore typing errors
+    }
   }
 }
 
@@ -1460,6 +1526,7 @@ input.addEventListener('keydown', (e) => {
 export type ChatEvent =
   | { type: 'newMessage'; message: MessageInfo }
   | { type: 'editMessage'; message: MessageInfo }
-  | { type: 'deleteMessages'; messageIds: number[] };
+  | { type: 'deleteMessages'; messageIds: number[] }
+  | { type: 'typing'; userId: string; userName: string };
 
 export type ChatEventListener = (event: ChatEvent) => void;
