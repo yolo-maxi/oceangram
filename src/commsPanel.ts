@@ -1682,10 +1682,13 @@ function renderMessages(msgs) {
   }
 
   // Check scroll position BEFORE replacing content
-  var shouldScroll = messagesList.scrollHeight - messagesList.scrollTop - messagesList.clientHeight < 60;
+  var prevLen = allMessages ? allMessages.length : 0;
+  var isFirstRender = messagesList.querySelector('.empty-state') !== null || messagesList.querySelector('.loading') !== null;
+  var shouldScroll = isFirstRender || (messagesList.scrollHeight - messagesList.scrollTop - messagesList.clientHeight < 60);
   messagesList.innerHTML = html;
   if (shouldScroll) {
-    messagesList.scrollTop = messagesList.scrollHeight;
+    // Use setTimeout to ensure DOM has fully updated before scrolling
+    setTimeout(function() { messagesList.scrollTop = messagesList.scrollHeight; }, 0);
   }
 
   // Track last message ID for polling
@@ -1821,7 +1824,7 @@ window.addEventListener('message', (event) => {
       if (!isFirstLoad && newIds === prevMsgIds) break;
       prevMsgIds = newIds;
       renderMessages(allMessages);
-      if (isFirstLoad) { messagesList.scrollTop = messagesList.scrollHeight; }
+      if (isFirstLoad) { setTimeout(function() { messagesList.scrollTop = messagesList.scrollHeight; }, 0); }
       if (!wasAtBottom && allMessages.length > prevLen && prevLen > 0) {
         newMsgCount += allMessages.length - prevLen;
         newMsgsBtn.textContent = '↓ ' + newMsgCount + ' new message' + (newMsgCount > 1 ? 's' : '');
