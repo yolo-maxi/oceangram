@@ -11,6 +11,9 @@ import * as vscode from 'vscode';
 const CONFIG_DIR = path.join(process.env.HOME || '/home/xiko', '.oceangram');
 const PINNED_PATH = path.join(CONFIG_DIR, 'pinned.json');
 const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
+const DIALOGS_CACHE_PATH = path.join(CONFIG_DIR, 'dialogs-cache.json');
+const MESSAGES_CACHE_PATH = path.join(CONFIG_DIR, 'messages-cache.json');
+const RECENT_PATH = path.join(CONFIG_DIR, 'recent.json');
 
 export interface DialogInfo {
   id: string;           // "chatId" or "chatId:topicId" for forum topics
@@ -79,10 +82,114 @@ export interface MessageInfo {
   reactions?: ReactionInfo[];
 }
 
+export type DialogUpdateListener = (dialogs: DialogInfo[]) => void;
+
 export class TelegramService {
   private client: TelegramClient | null = null;
   private connected = false;
   private forumTopicsCache: Map<string, Api.ForumTopic[]> = new Map();
+
+  // Dialog cache (stale-while-revalidate)
+  private dialogCache: DialogInfo[] | null = null;
+  private dialogCacheTime = 0;
+  private dialogCacheTTL = 30_000; // 30 seconds
+  private dialogRefreshing = false;
+  private dialogUpdateListeners: Set<DialogUpdateListener> = new Set();
+
+  // Message cache (per dialog)
+  private messageCache: Map<string, { messages: MessageInfo[]; timestamp: number }> = new Map();
+  private messageCacheTTL = 30_000;
+
+  onDialogUpdate(listener: DialogUpdateListener): () => void {
+    this.dialogUpdateListeners.add(listener);
+    return () => { this.dialogUpdateListeners.delete(listener); };
+  }
+
+  private emitDialogUpdate(dialogs: DialogInfo[]) {
+    for (const listener of this.dialogUpdateListeners) {
+      try { listener(dialogs); } catch (e) { console.error('[Oceangram] Dialog update listener error:', e); }
+    }
+  }
+
+  private ensureConfigDir() {
+    if (!fs.existsSync(CONFIG_DIR)) fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  }
+
+  private loadDialogCache(): DialogInfo[] | null {
+    try {
+      if (fs.existsSync(DIALOGS_CACHE_PATH)) {
+        const data = JSON.parse(fs.readFileSync(DIALOGS_CACHE_PATH, 'utf-8'));
+        if (data && Array.isArray(data.dialogs)) {
+          this.dialogCache = data.dialogs;
+          this.dialogCacheTime = data.timestamp || 0;
+          return data.dialogs;
+        }
+      }
+    } catch { /* ignore */ }
+    return null;
+  }
+
+  private saveDialogCache(dialogs: DialogInfo[]) {
+    this.ensureConfigDir();
+    const data = {
+      timestamp: Date.now(),
+      dialogs: dialogs.map(d => ({
+        id: d.id, chatId: d.chatId, topicId: d.topicId, name: d.name,
+        lastMessage: d.lastMessage, lastMessageTime: d.lastMessageTime,
+        unreadCount: d.unreadCount, initials: d.initials, isPinned: d.isPinned,
+        isForum: d.isForum, groupName: d.groupName, topicName: d.topicName,
+        topicEmoji: d.topicEmoji,
+      }))
+    };
+    fs.writeFileSync(DIALOGS_CACHE_PATH, JSON.stringify(data));
+  }
+
+  private loadMessageCache(): void {
+    try {
+      if (fs.existsSync(MESSAGES_CACHE_PATH)) {
+        const data = JSON.parse(fs.readFileSync(MESSAGES_CACHE_PATH, 'utf-8'));
+        if (data && typeof data === 'object') {
+          for (const [dialogId, entry] of Object.entries(data)) {
+            const e = entry as any;
+            if (Array.isArray(e.messages)) {
+              this.messageCache.set(dialogId, { messages: e.messages, timestamp: e.timestamp || 0 });
+            }
+          }
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
+  private saveMessageCache() {
+    this.ensureConfigDir();
+    const data: Record<string, any> = {};
+    for (const [dialogId, entry] of this.messageCache) {
+      // Persist only last 20 per chat to keep file small
+      data[dialogId] = {
+        messages: entry.messages.slice(-20),
+        timestamp: entry.timestamp,
+      };
+    }
+    fs.writeFileSync(MESSAGES_CACHE_PATH, JSON.stringify(data));
+  }
+
+  // Recent chats
+  getRecentChats(): { id: string; timestamp: number }[] {
+    try {
+      if (fs.existsSync(RECENT_PATH)) {
+        return JSON.parse(fs.readFileSync(RECENT_PATH, 'utf-8')) || [];
+      }
+    } catch { /* ignore */ }
+    return [];
+  }
+
+  trackRecentChat(chatId: string) {
+    this.ensureConfigDir();
+    let recent = this.getRecentChats().filter(r => r.id !== chatId);
+    recent.unshift({ id: chatId, timestamp: Date.now() });
+    recent = recent.slice(0, 10);
+    fs.writeFileSync(RECENT_PATH, JSON.stringify(recent));
+  }
 
   private loadConfig(): Record<string, string> {
     try {
@@ -458,6 +565,49 @@ input.addEventListener('keydown', (e) => {
   // --- Dialogs ---
 
   async getDialogs(limit = 100): Promise<DialogInfo[]> {
+    // Stale-while-revalidate: return cache immediately, refresh in background
+    const now = Date.now();
+
+    // Try memory cache first, then disk cache
+    if (!this.dialogCache) {
+      this.loadDialogCache();
+      this.loadMessageCache(); // Also load message cache on first access
+    }
+
+    if (this.dialogCache && this.dialogCache.length > 0) {
+      // Update pinned status from current pinned list
+      const pinnedIds = this.getPinnedIds();
+      this.dialogCache.forEach(d => d.isPinned = pinnedIds.includes(d.id));
+
+      // If stale, refresh in background
+      if (now - this.dialogCacheTime > this.dialogCacheTTL && !this.dialogRefreshing) {
+        this.dialogRefreshing = true;
+        this.fetchDialogsFresh(limit).then(fresh => {
+          this.dialogCache = fresh;
+          this.dialogCacheTime = Date.now();
+          this.dialogRefreshing = false;
+          this.saveDialogCache(fresh);
+          this.emitDialogUpdate(fresh);
+        }).catch(() => { this.dialogRefreshing = false; });
+      }
+      return this.dialogCache;
+    }
+
+    // No cache — fetch fresh (blocking)
+    const fresh = await this.fetchDialogsFresh(limit);
+    this.dialogCache = fresh;
+    this.dialogCacheTime = Date.now();
+    this.saveDialogCache(fresh);
+    return fresh;
+  }
+
+  /** Get cached dialogs synchronously (for client-side search) */
+  getCachedDialogs(): DialogInfo[] | null {
+    if (this.dialogCache) return this.dialogCache;
+    return this.loadDialogCache();
+  }
+
+  private async fetchDialogsFresh(limit = 100): Promise<DialogInfo[]> {
     if (!this.client) throw new Error('Not connected');
     const dialogs = await this.client.getDialogs({ limit });
     const pinnedIds = this.getPinnedIds();
@@ -539,6 +689,14 @@ input.addEventListener('keydown', (e) => {
     return results;
   }
 
+  /** Search dialogs — uses cache for instant results, API as fallback */
+  searchDialogsFromCache(query: string): DialogInfo[] {
+    const cached = this.getCachedDialogs();
+    if (!cached) return [];
+    const q = query.toLowerCase();
+    return cached.filter(d => d.name.toLowerCase().includes(q));
+  }
+
   async searchDialogs(query: string): Promise<DialogInfo[]> {
     const all = await this.getDialogs(200);
     const q = query.toLowerCase();
@@ -547,7 +705,66 @@ input.addEventListener('keydown', (e) => {
 
   // --- Messages ---
 
-  async getMessages(dialogId: string, limit = 50, offsetId?: number): Promise<MessageInfo[]> {
+  async getMessages(dialogId: string, limit = 20, offsetId?: number): Promise<MessageInfo[]> {
+    // For initial load (no offsetId), use cache
+    if (!offsetId) {
+      const cached = this.messageCache.get(dialogId);
+      if (cached && cached.messages.length > 0) {
+        // Return cache immediately, refresh in background
+        const now = Date.now();
+        if (now - cached.timestamp > this.messageCacheTTL) {
+          this.fetchMessagesFresh(dialogId, limit).then(fresh => {
+            this.updateMessageCache(dialogId, fresh);
+            // Emit update via chat event listeners
+            const listeners = this.chatListeners.get(dialogId);
+            if (listeners) {
+              for (const listener of listeners) {
+                try { listener({ type: 'messagesRefreshed' as any, messages: fresh } as any); } catch {}
+              }
+            }
+          }).catch(() => {});
+        }
+        return cached.messages;
+      }
+    }
+
+    const fresh = await this.fetchMessagesFresh(dialogId, limit, offsetId);
+    if (!offsetId) {
+      this.updateMessageCache(dialogId, fresh);
+    }
+    return fresh;
+  }
+
+  private updateMessageCache(dialogId: string, messages: MessageInfo[]) {
+    const existing = this.messageCache.get(dialogId);
+    let merged = messages;
+    if (existing) {
+      // Merge: keep new messages + any existing that aren't in the fresh batch
+      const freshIds = new Set(messages.map(m => m.id));
+      const kept = existing.messages.filter(m => !freshIds.has(m.id));
+      merged = [...kept, ...messages].sort((a, b) => a.timestamp - b.timestamp || a.id - b.id).slice(-50);
+    }
+    this.messageCache.set(dialogId, { messages: merged, timestamp: Date.now() });
+    this.saveMessageCache();
+  }
+
+  /** Append a single message to cache (for real-time events) */
+  appendMessageToCache(dialogId: string, message: MessageInfo) {
+    const entry = this.messageCache.get(dialogId);
+    if (entry) {
+      if (!entry.messages.some(m => m.id === message.id)) {
+        entry.messages.push(message);
+        if (entry.messages.length > 50) entry.messages.shift();
+        entry.timestamp = Date.now();
+        this.saveMessageCache();
+      }
+    } else {
+      this.messageCache.set(dialogId, { messages: [message], timestamp: Date.now() });
+      this.saveMessageCache();
+    }
+  }
+
+  private async fetchMessagesFresh(dialogId: string, limit = 20, offsetId?: number): Promise<MessageInfo[]> {
     if (!this.client) throw new Error('Not connected');
     const { chatId, topicId } = TelegramService.parseDialogId(dialogId);
     const entity = await this.client.getEntity(chatId);
@@ -979,6 +1196,7 @@ input.addEventListener('keydown', (e) => {
 
       const info = await this.messageToInfo(msg);
       for (const dialogId of dialogIds) {
+        this.appendMessageToCache(dialogId, info);
         this.emit(dialogId, { type: 'newMessage', message: info });
       }
     }, new NewMessage({}));
