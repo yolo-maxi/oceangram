@@ -3751,6 +3751,119 @@ msgInput.addEventListener('keydown', function(e) {
   }
 });
 
+// --- Drag & Drop file sending ---
+var dropOverlay = document.getElementById('dropZoneOverlay');
+var filePreviewBar = document.getElementById('filePreviewBar');
+var filePreviewItems = document.getElementById('filePreviewItems');
+var filePreviewCancel = document.getElementById('filePreviewCancel');
+var filePreviewSend = document.getElementById('filePreviewSend');
+var pendingFiles = [];
+
+var dragCounter = 0;
+document.addEventListener('dragenter', function(e) {
+  e.preventDefault();
+  dragCounter++;
+  if (e.dataTransfer && e.dataTransfer.types.indexOf('Files') !== -1) {
+    dropOverlay.classList.add('active');
+  }
+});
+document.addEventListener('dragleave', function(e) {
+  e.preventDefault();
+  dragCounter--;
+  if (dragCounter <= 0) {
+    dragCounter = 0;
+    dropOverlay.classList.remove('active');
+  }
+});
+document.addEventListener('dragover', function(e) {
+  e.preventDefault();
+});
+document.addEventListener('drop', function(e) {
+  e.preventDefault();
+  dragCounter = 0;
+  dropOverlay.classList.remove('active');
+  if (!e.dataTransfer || !e.dataTransfer.files.length) return;
+  handleDroppedFiles(e.dataTransfer.files);
+});
+
+function formatFileSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
+  return (bytes/(1024*1024)).toFixed(1) + ' MB';
+}
+
+function handleDroppedFiles(fileList) {
+  for (var i = 0; i < fileList.length; i++) {
+    (function(file) {
+      var reader = new FileReader();
+      reader.onload = function(ev) {
+        var dataUrl = ev.target.result;
+        var base64 = dataUrl.split(',')[1];
+        pendingFiles.push({
+          name: file.name,
+          size: file.size,
+          type: file.type || 'application/octet-stream',
+          dataUrl: dataUrl,
+          base64: base64
+        });
+        renderFilePreview();
+      };
+      reader.readAsDataURL(file);
+    })(fileList[i]);
+  }
+}
+
+function renderFilePreview() {
+  if (pendingFiles.length === 0) {
+    filePreviewBar.style.display = 'none';
+    return;
+  }
+  filePreviewBar.style.display = 'flex';
+  filePreviewItems.innerHTML = '';
+  pendingFiles.forEach(function(f, idx) {
+    var item = document.createElement('div');
+    item.className = 'file-preview-item';
+    var isImage = f.type.startsWith('image/');
+    if (isImage) {
+      item.innerHTML = '<img src="' + f.dataUrl + '" alt="" />';
+    } else {
+      item.innerHTML = '<span class="file-icon">📄</span>';
+    }
+    item.innerHTML += '<span class="file-name">' + esc(f.name) + '</span>'
+      + '<span class="file-size">' + formatFileSize(f.size) + '</span>'
+      + '<button class="file-remove" data-idx="' + idx + '">✕</button>';
+    filePreviewItems.appendChild(item);
+  });
+  filePreviewItems.querySelectorAll('.file-remove').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      pendingFiles.splice(parseInt(btn.dataset.idx), 1);
+      renderFilePreview();
+    });
+  });
+}
+
+filePreviewCancel.addEventListener('click', function() {
+  pendingFiles = [];
+  renderFilePreview();
+});
+
+filePreviewSend.addEventListener('click', function() {
+  if (pendingFiles.length === 0) return;
+  pendingFiles.forEach(function(f) {
+    var tempId = 'file_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+    vscode.postMessage({
+      type: 'sendFile',
+      tempId: tempId,
+      fileName: f.name,
+      mimeType: f.type,
+      data: f.base64,
+      caption: ''
+    });
+  });
+  pendingFiles = [];
+  renderFilePreview();
+});
+
 vscode.postMessage({ type: 'init' });
 </script>
 </body>
