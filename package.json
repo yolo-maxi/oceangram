@@ -2,7 +2,7 @@
   "name": "oceangram",
   "displayName": "Oceangram",
   "description": "Telegram + AI agent cockpit for OpenClaw users. Chat, kanban, and agent status — all in your editor.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "oceangram",
   "engines": {
     "vscode": "^1.85.0"

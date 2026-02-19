@@ -312,11 +312,17 @@ export class TelegramService {
 
     // Save session string for next time
     const sessionStr = this.client.session.save() as unknown as string;
-    const config = this.loadConfig();
-    config.session = sessionStr;
-    this.saveConfig(config);
-
-    vscode.window.showInformationMessage('✅ Telegram logged in successfully!');
+    console.log('[Oceangram] Session string length after login:', sessionStr?.length || 0);
+    if (sessionStr && sessionStr.length > 10) {
+      const config = this.loadConfig();
+      config.session = sessionStr;
+      this.saveConfig(config);
+      console.log('[Oceangram] Session saved to config');
+      vscode.window.showInformationMessage('✅ Telegram logged in! Session saved.');
+    } else {
+      console.error('[Oceangram] Session string empty after login — not saved');
+      vscode.window.showWarningMessage('⚠️ Logged in but session may not persist. Try reloading.');
+    }
   }
 
   private loginPanel: vscode.WebviewPanel | undefined;
