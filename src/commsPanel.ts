@@ -2517,6 +2517,12 @@ window.addEventListener('message', (event) => {
       }
       break;
     case 'newMessage':
+      // Clear typing indicator for this sender
+      if (msg.message && msg.message.senderId && typingUsers[msg.message.senderId]) {
+        clearTimeout(typingUsers[msg.message.senderId].timeout);
+        delete typingUsers[msg.message.senderId];
+        updateTypingDisplay();
+      }
       // Real-time: append single new message
       if (msg.message && !allMessages.some(function(m) { return m.id === msg.message.id; })) {
         // Echo suppression: if this matches a pending optimistic message, replace it
