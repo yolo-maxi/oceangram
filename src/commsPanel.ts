@@ -1440,7 +1440,16 @@ window.addEventListener('message', (event) => {
     case 'messages':
       var wasAtBottom = isScrolledToBottom();
       var prevLen = allMessages.length;
-      allMessages = msg.messages;
+      // Preserve un-echoed optimistic messages
+      var stillPending = allMessages.filter(function(m) {
+        if (!m._optimistic) return false;
+        // Check if the real message arrived in the new batch
+        return !msg.messages.some(function(rm) {
+          return rm.isOutgoing && rm.text === m.text && Math.abs(rm.timestamp - m.timestamp) < 30;
+        });
+      });
+      allMessages = msg.messages.concat(stillPending);
+      allMessages.sort(function(a, b) { return a.timestamp - b.timestamp || a.id - b.id; });
       if (allMessages.length > 0) oldestId = allMessages[0].id || 0;
       var isFirstLoad = prevLen === 0;
       renderMessages(allMessages);
@@ -1454,12 +1463,28 @@ window.addEventListener('message', (event) => {
     case 'newMessage':
       // Real-time: append single new message
       if (msg.message && !allMessages.some(function(m) { return m.id === msg.message.id; })) {
+        // Echo suppression: if this matches a pending optimistic message, replace it
+        var echoIdx = -1;
+        if (msg.message.isOutgoing) {
+          for (var ei = allMessages.length - 1; ei >= 0; ei--) {
+            var om = allMessages[ei];
+            if (om._optimistic && om.text === msg.message.text && Math.abs(msg.message.timestamp - om.timestamp) < 30) {
+              echoIdx = ei;
+              pendingOptimistic.delete(om.id);
+              break;
+            }
+          }
+        }
         var atBottom = isScrolledToBottom();
-        allMessages.push(msg.message);
+        if (echoIdx !== -1) {
+          allMessages[echoIdx] = msg.message; // replace optimistic with real
+        } else {
+          allMessages.push(msg.message);
+        }
         if (allMessages.length > 0) lastMsgId = allMessages[allMessages.length - 1].id || 0;
         renderMessages(allMessages);
         if (atBottom) { messagesList.scrollTop = messagesList.scrollHeight; }
-        else {
+        else if (echoIdx === -1) {
           newMsgCount++;
           newMsgsBtn.textContent = '↓ ' + newMsgCount + ' new message' + (newMsgCount > 1 ? 's' : '');
           newMsgsBtn.style.display = 'block';
