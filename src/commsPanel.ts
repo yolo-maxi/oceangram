@@ -464,9 +464,12 @@ export class ChatTab {
             break;
           case 'sendMessage':
             await tg.connect();
-            await tg.sendMessage(this.chatId, msg.text, msg.replyToId);
-            const updated = await addSyntaxHighlighting(await tg.getMessages(this.chatId, 50));
-            this.panel.webview.postMessage({ type: 'messages', messages: updated });
+            try {
+              await tg.sendMessage(this.chatId, msg.text, msg.replyToId);
+              this.panel.webview.postMessage({ type: 'sendSuccess', tempId: msg.tempId });
+            } catch (sendErr: any) {
+              this.panel.webview.postMessage({ type: 'sendFailed', tempId: msg.tempId, error: sendErr.message || 'Send failed' });
+            }
             break;
           case 'loadOlder':
             await tg.connect();
@@ -650,6 +653,13 @@ body {
 /* Hide time on non-last messages in group, show on hover */
 .msg-time.hidden { display: none; }
 .msg:hover .msg-time.hidden { display: inline; }
+
+/* Optimistic message states */
+.msg.optimistic-sending .msg-bubble { opacity: 0.7; }
+.msg.optimistic-sending .msg-time::before { content: '🕐 '; font-size: 10px; }
+.msg.optimistic-failed .msg-bubble { border-left: 2px solid #e06c75; opacity: 0.85; }
+.msg.optimistic-failed .msg-retry { display: inline-block; color: #e06c75; font-size: 11px; cursor: pointer; margin-left: 6px; }
+.msg.optimistic-failed .msg-retry:hover { text-decoration: underline; }
 
 /* Forward header */
 .forward-header {
@@ -1306,8 +1316,16 @@ function renderMessages(msgs) {
 
       // Time goes inside bubble, inline at bottom-right like Telegram
       var timeClass = isLast ? '' : ' hidden';
-      html += '<div class="msg ' + pos + '" data-msg-id="' + m.id + '" data-sender="' + esc(m.senderName || '') + '" data-text="' + esc((m.text || '').slice(0, 100)) + '">' +
-        '<div class="' + bubbleCls + '">' + bubbleInner + '<span class="msg-time' + timeClass + '">' + timeStr + '</span></div>' +
+      var optClass = '';
+      var retryHtml = '';
+      if (m._optimistic === 'sending') optClass = ' optimistic-sending';
+      else if (m._optimistic === 'failed') {
+        optClass = ' optimistic-failed';
+        retryHtml = '<span class="msg-retry" onclick="retryMessage(' + m.id + ')">⚠️ Failed — tap to retry</span>';
+      }
+
+      html += '<div class="msg ' + pos + optClass + '" data-msg-id="' + m.id + '" data-sender="' + esc(m.senderName || '') + '" data-text="' + esc((m.text || '').slice(0, 100)) + '">' +
+        '<div class="' + bubbleCls + '">' + bubbleInner + '<span class="msg-time' + timeClass + '">' + timeStr + '</span>' + retryHtml + '</div>' +
         reactionsHtml +
         '</div>';
     }
@@ -1355,12 +1373,36 @@ function clearReply() {
 }
 replyBarClose.addEventListener('click', clearReply);
 
+let optimisticIdCounter = 0;
+const pendingOptimistic = new Map(); // tempId -> { text, timestamp }
+
 function doSend() {
   const text = msgInput.value.trim();
   if (!text) return;
   msgInput.value = '';
   msgInput.style.height = 'auto';
-  var payload = { type: 'sendMessage', text: text };
+
+  // Optimistic: render immediately
+  const tempId = --optimisticIdCounter; // negative IDs to avoid collision
+  const now = Math.floor(Date.now() / 1000);
+  const optimisticMsg = {
+    id: tempId,
+    text: text,
+    isOutgoing: true,
+    timestamp: now,
+    senderName: '',
+    _optimistic: 'sending'
+  };
+  if (replyToId) optimisticMsg.replyToId = replyToId;
+
+  pendingOptimistic.set(tempId, { text: text, timestamp: now });
+  var atBottom = isScrolledToBottom();
+  allMessages.push(optimisticMsg);
+  renderMessages(allMessages);
+  if (atBottom) messagesList.scrollTop = messagesList.scrollHeight;
+
+  // Send in background
+  var payload = { type: 'sendMessage', text: text, tempId: tempId };
   if (replyToId) payload.replyToId = replyToId;
   vscode.postMessage(payload);
   clearReply();
@@ -1459,6 +1501,22 @@ window.addEventListener('message', (event) => {
           messagesList.scrollTop = messagesList.scrollHeight - prevHeight;
         }
       }
+      break;
+    case 'sendSuccess':
+      // Remove optimistic flag — real message will arrive via newMessage event
+      var sIdx = allMessages.findIndex(function(m) { return m.id === msg.tempId; });
+      if (sIdx !== -1) {
+        allMessages[sIdx]._optimistic = null;
+        renderMessages(allMessages);
+      }
+      break;
+    case 'sendFailed':
+      var fIdx = allMessages.findIndex(function(m) { return m.id === msg.tempId; });
+      if (fIdx !== -1) {
+        allMessages[fIdx]._optimistic = 'failed';
+        renderMessages(allMessages);
+      }
+      pendingOptimistic.delete(msg.tempId);
       break;
     case 'agentInfo':
       updateAgentBanner(msg.info);
@@ -1566,6 +1624,18 @@ function showLightbox(src) {
   overlay.innerHTML = '<img src="' + src + '" />';
   overlay.addEventListener('click', function() { overlay.remove(); });
   document.body.appendChild(overlay);
+}
+
+function retryMessage(tempId) {
+  var idx = allMessages.findIndex(function(m) { return m.id === tempId; });
+  if (idx === -1) return;
+  var m = allMessages[idx];
+  m._optimistic = 'sending';
+  pendingOptimistic.set(tempId, { text: m.text, timestamp: m.timestamp });
+  renderMessages(allMessages);
+  var payload = { type: 'sendMessage', text: m.text, tempId: tempId };
+  if (m.replyToId) payload.replyToId = m.replyToId;
+  vscode.postMessage(payload);
 }
 
 // Real-time polling for new messages
