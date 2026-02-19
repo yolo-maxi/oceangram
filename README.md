@@ -1,36 +1,50 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Oceangram 🦞
 
-## Getting Started
+Telegram + AI agent cockpit for your editor. Built for [OpenClaw](https://openclaw.ai) users.
 
-First, run the development server:
+## Features
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+- **💬 Telegram Chat** — Full Telegram client inside your editor. Pinned chats, message bubbles, replies, reactions, code blocks, inline images, real-time updates via gramJS.
+- **📋 Kanban Board** — Markdown-based project board. Your AI agent can read and write tasks. No SaaS required.
+- **🤖 Agent Status** — See your OpenClaw agent's context window usage, model, active sessions, and health at a glance.
+- **🎨 Telegram Dark Theme** — Full VS Code color theme matching Telegram's dark palette.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Quick Start
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. Install the extension
+2. Open the command palette (`Cmd+Shift+P`) → "Oceangram: Open Comms"
+3. Log in with your Telegram phone number
+4. Pin your chats and start messaging
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Keyboard Shortcuts
 
-## Learn More
+| Shortcut | Panel |
+|----------|-------|
+| `Cmd+Shift+1` | Comms (Telegram) |
+| `Cmd+Shift+2` | Kanban |
+| `Cmd+Shift+3` | Resources |
+| `Cmd+Shift+4` | Agent Status |
 
-To learn more about Next.js, take a look at the following resources:
+## OpenClaw Integration
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+If OpenClaw is running on the same machine (or via Remote SSH), Oceangram auto-discovers the configuration and shows:
+- Agent session context usage as a pinned banner in chat tabs
+- Full session dashboard in the Agent panel
+- Model, token count, and active status per session
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Architecture
 
-## Deploy on Vercel
+- **Telegram**: gramJS (user client) — connects directly to Telegram servers for low latency
+- **Kanban**: Reads/writes markdown files — agent-friendly, version controlled
+- **Agent data**: Reads OpenClaw's `sessions.json` directly — no API needed when running via Remote SSH
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Security
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Telegram session stored locally in `~/.oceangram/config.json`
+- No external API calls except Telegram
+- No telemetry
+- Open source
+
+## License
+
+MIT
