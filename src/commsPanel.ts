@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { TelegramService, ChatEvent } from './services/telegram';
+import { TelegramService, ChatEvent, DialogInfo } from './services/telegram';
 import { OpenClawService, AgentSessionInfo } from './services/openclaw';
 import { highlightMessageCodeBlocks, disposeHighlighter } from './services/highlighter';
 
@@ -26,6 +26,7 @@ export class CommsPicker {
   private panel: vscode.WebviewPanel;
   private disposables: vscode.Disposable[] = [];
   private context: vscode.ExtensionContext;
+  private unsubDialogUpdate?: () => void;
 
   static show(context: vscode.ExtensionContext) {
     if (CommsPicker.current) {
@@ -46,6 +47,7 @@ export class CommsPicker {
 
     this.panel.onDidDispose(() => {
       CommsPicker.current = undefined;
+      if (this.unsubDialogUpdate) this.unsubDialogUpdate();
       this.disposables.forEach(d => d.dispose());
     }, null, this.disposables);
 
@@ -55,15 +57,41 @@ export class CommsPicker {
         switch (msg.type) {
           case 'init':
             await tg.connect();
+            // Subscribe to dialog cache updates (stale-while-revalidate)
+            if (!this.unsubDialogUpdate) {
+              this.unsubDialogUpdate = tg.onDialogUpdate((dialogs) => {
+                this.sendPinnedDialogsFrom(dialogs);
+                this.sendRecentChats(dialogs);
+              });
+            }
             await this.sendPinnedDialogs();
+            this.sendRecentChats();
             break;
+          case 'searchLocal': {
+            // Client-side search from cache — instant
+            const cached = tg.searchDialogsFromCache(msg.query);
+            const collapsed = msg.groupChatId
+              ? cached.filter(d => d.isForum && d.chatId === msg.groupChatId && d.topicId && (d.topicName || '').toLowerCase().includes(msg.query.toLowerCase()))
+              : this.collapseForumGroups(cached);
+            this.panel.webview.postMessage({ type: msg.groupChatId ? 'topicsList' : 'searchResultsLocal', groupName: msg.groupName, groupChatId: msg.groupChatId, dialogs: collapsed });
+            break;
+          }
           case 'search':
             await tg.connect();
-            const results = await tg.searchDialogs(msg.query);
-            this.panel.webview.postMessage({ type: 'searchResults', dialogs: results });
+            const results = msg.groupChatId
+              ? (await tg.getDialogs(200)).filter(d => d.isForum && d.chatId === msg.groupChatId && d.topicId && (d.topicName || '').toLowerCase().includes(msg.query.toLowerCase()))
+              : this.collapseForumGroups(await tg.searchDialogs(msg.query));
+            this.panel.webview.postMessage({ type: msg.groupChatId ? 'topicsList' : 'searchResults', groupName: msg.groupName, groupChatId: msg.groupChatId, dialogs: results });
             break;
           case 'openChat':
+            tg.trackRecentChat(msg.chatId);
             ChatTab.createOrShow(msg.chatId, msg.chatName, this.context);
+            break;
+          case 'getTopics':
+            await tg.connect();
+            const allDialogs = await tg.getDialogs(200);
+            const topics = allDialogs.filter(d => d.isForum && d.groupName === msg.groupName && d.topicId);
+            this.panel.webview.postMessage({ type: 'topicsList', groupName: msg.groupName, groupChatId: msg.groupChatId, dialogs: topics });
             break;
           case 'pin':
             tg.pinDialog(msg.chatId);
@@ -91,6 +119,79 @@ export class CommsPicker {
     const pinned = all.filter(d => pinnedIds.includes(d.id));
     pinned.forEach(d => d.isPinned = true);
     this.panel.webview.postMessage({ type: 'dialogs', dialogs: pinned });
+  }
+
+  private sendPinnedDialogsFrom(dialogs: DialogInfo[]): void {
+    const tg = getTelegram();
+    const pinnedIds = tg.getPinnedIds();
+    if (pinnedIds.length === 0) {
+      this.panel.webview.postMessage({ type: 'dialogs', dialogs: [] });
+      return;
+    }
+    const pinned = dialogs.filter(d => pinnedIds.includes(d.id));
+    pinned.forEach(d => d.isPinned = true);
+    this.panel.webview.postMessage({ type: 'dialogs', dialogs: pinned });
+  }
+
+  private sendRecentChats(allDialogs?: DialogInfo[]): void {
+    const tg = getTelegram();
+    const recentEntries = tg.getRecentChats();
+    if (recentEntries.length === 0) return;
+    const dialogs = allDialogs || tg.getCachedDialogs() || [];
+    const recentIds = new Set(recentEntries.map(r => r.id));
+    const pinnedIds = new Set(tg.getPinnedIds());
+    // Filter: recent but not pinned (pinned already shown)
+    const recent = recentEntries
+      .filter(r => !pinnedIds.has(r.id))
+      .map(r => dialogs.find(d => d.id === r.id))
+      .filter(Boolean) as DialogInfo[];
+    this.panel.webview.postMessage({ type: 'recentChats', dialogs: recent });
+  }
+
+  /** Collapse forum topics into group-level entries for search results */
+  private collapseForumGroups(dialogs: DialogInfo[]): DialogInfo[] {
+    const pinnedIds = getTelegram().getPinnedIds();
+    const forumGroups = new Map<string, { group: DialogInfo, topicCount: number, totalUnread: number, latestTime: number }>();
+    const result: DialogInfo[] = [];
+
+    for (const d of dialogs) {
+      // Pinned forum topics stay as individual entries
+      if (d.isForum && d.topicId && pinnedIds.includes(d.id)) {
+        result.push(d);
+        continue;
+      }
+      // Collapse non-pinned forum topics into their group
+      if (d.isForum && d.topicId && d.groupName) {
+        const key = d.chatId;
+        const existing = forumGroups.get(key);
+        if (existing) {
+          existing.topicCount++;
+          existing.totalUnread += d.unreadCount || 0;
+          if ((d.lastMessageTime || 0) > existing.latestTime) existing.latestTime = d.lastMessageTime || 0;
+        } else {
+          forumGroups.set(key, {
+            group: { ...d, id: d.chatId, topicId: undefined, topicName: undefined, topicEmoji: undefined, name: d.groupName! },
+            topicCount: 1,
+            totalUnread: d.unreadCount || 0,
+            latestTime: d.lastMessageTime || 0,
+          });
+        }
+        continue;
+      }
+      result.push(d);
+    }
+
+    // Add collapsed forum groups
+    for (const [, entry] of forumGroups) {
+      const g = entry.group;
+      g.unreadCount = entry.totalUnread;
+      g.lastMessageTime = entry.latestTime;
+      (g as any)._topicCount = entry.topicCount;
+      (g as any)._isForumGroup = true;
+      result.push(g);
+    }
+
+    return result;
   }
 
   private getHtml(): string {
@@ -189,6 +290,19 @@ input[type="text"]:focus { background: var(--tg-hover); }
   flex-shrink: 0; font-size: 14px; color: var(--tg-text-secondary);
 }
 .pin-btn:hover, .unpin-btn:hover { background: var(--tg-surface); color: var(--tg-text); }
+.forum-chevron {
+  font-size: 14px; color: var(--tg-text-secondary); flex-shrink: 0; margin-left: 4px;
+}
+.topic-count {
+  font-size: 11px; color: var(--tg-text-secondary); flex-shrink: 0;
+}
+.back-btn {
+  display: flex; align-items: center; gap: 6px; padding: 10px 12px;
+  background: var(--tg-bg-secondary); cursor: pointer; font-size: 14px;
+  color: var(--tg-accent); font-weight: 500; flex-shrink: 0;
+  border-bottom: 1px solid var(--tg-border);
+}
+.back-btn:hover { background: var(--tg-hover); }
 .empty { text-align: center; padding: 40px 20px; color: var(--tg-text-secondary); font-size: 14px; line-height: 1.6; }
 .error { color: var(--tg-danger); padding: 12px 16px; font-size: 12px; background: var(--tg-bg-secondary); }
 .loading { text-align: center; padding: 24px; color: var(--tg-text-secondary); }
@@ -198,23 +312,28 @@ input[type="text"]:focus { background: var(--tg-hover); }
 <div class="search-bar">
   <input type="text" id="searchInput" placeholder="Search chats..." autofocus />
 </div>
+<div id="backBar" class="back-btn" style="display:none"></div>
 <div class="content" id="chatList">
   <div class="loading">Connecting...</div>
 </div>
 <div id="searchResults" style="display:none" class="content"></div>
+<div id="topicsList" style="display:none" class="content"></div>
 <div id="errorBox" class="error" style="display:none"></div>
 
 <script>
 const vscode = acquireVsCodeApi();
 const chatList = document.getElementById('chatList');
 const searchResults = document.getElementById('searchResults');
+const topicsList = document.getElementById('topicsList');
 const searchInput = document.getElementById('searchInput');
 const errorBox = document.getElementById('errorBox');
+const backBar = document.getElementById('backBar');
 
 const avatarColors = ['#e17076','#eda86c','#a695e7','#7bc862','#6ec9cb','#65aadd','#ee7aae','#6bb2f2'];
 function pickColor(id) { return avatarColors[Math.abs(parseInt(id || '0', 10)) % avatarColors.length]; }
 
 let selectedIndex = -1;
+let currentForumGroup = null; // { chatId, groupName }
 
 function esc(s) {
   const d = document.createElement('div');
@@ -246,7 +365,38 @@ function updateSelection(container) {
 }
 
 function getActiveContainer() {
-  return searchResults.style.display !== 'none' ? searchResults : chatList;
+  if (topicsList.style.display !== 'none') return topicsList;
+  if (searchResults.style.display !== 'none') return searchResults;
+  return chatList;
+}
+
+function showView(view) {
+  chatList.style.display = view === 'main' ? 'block' : 'none';
+  searchResults.style.display = view === 'search' ? 'block' : 'none';
+  topicsList.style.display = view === 'topics' ? 'block' : 'none';
+  backBar.style.display = view === 'topics' ? 'flex' : 'none';
+  var recentEl = document.getElementById('recentList');
+  if (recentEl) recentEl.style.display = view === 'main' ? 'block' : 'none';
+  if (view !== 'topics') currentForumGroup = null;
+}
+
+function exitTopicsView() {
+  showView(searchInput.value.trim() ? 'search' : 'main');
+  currentForumGroup = null;
+  searchInput.placeholder = 'Search chats...';
+  searchInput.value = '';
+  selectedIndex = -1;
+  searchInput.focus();
+}
+
+function enterForumGroup(chatId, groupName) {
+  currentForumGroup = { chatId: chatId, groupName: groupName };
+  backBar.innerHTML = '\u2190 ' + esc(groupName);
+  searchInput.placeholder = 'Search topics in ' + groupName + '...';
+  searchInput.value = '';
+  showView('topics');
+  topicsList.innerHTML = '<div class="loading">Loading topics...</div>';
+  vscode.postMessage({ type: 'getTopics', groupChatId: chatId, groupName: groupName });
 }
 
 function renderDialogs(dialogs, container, showPinBtn) {
@@ -256,41 +406,92 @@ function renderDialogs(dialogs, container, showPinBtn) {
     return;
   }
   container.innerHTML = dialogs.map(d => {
-    const actionBtn = showPinBtn
-      ? (d.isPinned ? '' : '<span class="pin-btn" data-id="' + d.id + '">📌</span>')
-      : '<span class="unpin-btn" data-id="' + d.id + '" title="Unpin">✕</span>';
+    const isForumGroup = d._isForumGroup;
+    const actionBtn = isForumGroup ? '' : (showPinBtn
+      ? (d.isPinned ? '' : '<span class="pin-btn" data-id="' + d.id + '">\ud83d\udccc</span>')
+      : '<span class="unpin-btn" data-id="' + d.id + '" title="Unpin">\u2715</span>');
 
     const hasUnread = d.unreadCount > 0;
     const isTopic = d.groupName && d.topicName;
-    const color = pickColor(d.id);
-    const avatarHtml = isTopic
-      ? '<div class="avatar" style="background:' + color + '">' + esc(d.initials) + '<span class="topic-badge">#</span></div>'
-      : '<div class="avatar" style="background:' + color + '">' + esc(d.initials) + '</div>';
+    const color = pickColor(d.chatId || d.id);
+
+    let avatarHtml;
+    if (isForumGroup) {
+      avatarHtml = '<div class="avatar" style="background:' + color + '">' + esc(d.initials) + '<span class="topic-badge">\u2317</span></div>';
+    } else if (isTopic) {
+      avatarHtml = '<div class="avatar" style="background:' + color + '">' + esc(d.initials) + '<span class="topic-badge">#</span></div>';
+    } else {
+      avatarHtml = '<div class="avatar" style="background:' + color + '">' + esc(d.initials) + '</div>';
+    }
 
     const preview = d.lastMessage ? esc(d.lastMessage.slice(0, 80)) : '';
     const timeStr = relativeTime(d.lastMessageTime);
     const timeClass = 'chat-time' + (hasUnread ? ' has-unread' : '');
     const unreadHtml = hasUnread ? '<span class="unread-badge">' + d.unreadCount + '</span>' : '';
 
-    const infoHtml = isTopic
-      ? '<div class="chat-info">' +
-          '<div class="chat-name-row"><div class="chat-group-name">⌗ ' + esc(d.groupName) + '</div><span class="' + timeClass + '">' + timeStr + '</span></div>' +
-          '<div class="chat-name-row"><div class="chat-topic-name">' + esc(d.topicEmoji || '') + ' ' + esc(d.topicName) + '</div></div>' +
-          '<div class="chat-preview-row"><span class="chat-preview">' + preview + '</span>' + unreadHtml + '</div>' +
-        '</div>'
-      : '<div class="chat-info">' +
-          '<div class="chat-name-row"><span class="chat-name">' + esc(d.name) + '</span><span class="' + timeClass + '">' + timeStr + '</span></div>' +
-          '<div class="chat-preview-row"><span class="chat-preview">' + preview + '</span>' + unreadHtml + '</div>' +
-        '</div>';
+    let infoHtml;
+    if (isForumGroup) {
+      const countLabel = d._topicCount + ' topic' + (d._topicCount !== 1 ? 's' : '');
+      infoHtml = '<div class="chat-info">' +
+        '<div class="chat-name-row"><span class="chat-name">' + esc(d.name) + '</span><span class="' + timeClass + '">' + timeStr + '</span></div>' +
+        '<div class="chat-preview-row"><span class="topic-count">' + countLabel + '</span>' + unreadHtml + '<span class="forum-chevron">\u203a</span></div>' +
+      '</div>';
+    } else if (isTopic) {
+      infoHtml = '<div class="chat-info">' +
+        '<div class="chat-name-row"><div class="chat-group-name">\u2317 ' + esc(d.groupName) + '</div><span class="' + timeClass + '">' + timeStr + '</span></div>' +
+        '<div class="chat-name-row"><div class="chat-topic-name">' + esc(d.topicEmoji || '') + ' ' + esc(d.topicName) + '</div></div>' +
+        '<div class="chat-preview-row"><span class="chat-preview">' + preview + '</span>' + unreadHtml + '</div>' +
+      '</div>';
+    } else {
+      infoHtml = '<div class="chat-info">' +
+        '<div class="chat-name-row"><span class="chat-name">' + esc(d.name) + '</span><span class="' + timeClass + '">' + timeStr + '</span></div>' +
+        '<div class="chat-preview-row"><span class="chat-preview">' + preview + '</span>' + unreadHtml + '</div>' +
+      '</div>';
+    }
 
-    return '<div class="chat-item" data-id="' + d.id + '" data-name="' + esc(d.name) + '">' +
+    const extraData = isForumGroup ? ' data-forum-group="1" data-chat-id="' + d.chatId + '" data-group-name="' + esc(d.name) + '"' : '';
+    return '<div class="chat-item" data-id="' + d.id + '" data-name="' + esc(d.name) + '"' + extraData + '>' +
       avatarHtml + infoHtml + actionBtn + '</div>';
   }).join('');
 
+  bindChatItemEvents(container);
+}
+
+function renderTopics(dialogs, container) {
+  selectedIndex = -1;
+  if (!dialogs.length) {
+    container.innerHTML = '<div class="empty">No topics found.</div>';
+    return;
+  }
+  container.innerHTML = dialogs.map(d => {
+    const hasUnread = d.unreadCount > 0;
+    const timeStr = relativeTime(d.lastMessageTime);
+    const timeClass = 'chat-time' + (hasUnread ? ' has-unread' : '');
+    const unreadHtml = hasUnread ? '<span class="unread-badge">' + d.unreadCount + '</span>' : '';
+    const emoji = d.topicEmoji || '\u2317';
+
+    return '<div class="chat-item" data-id="' + d.id + '" data-name="' + esc(d.name) + '">' +
+      '<div class="avatar" style="background:transparent;font-size:22px">' + esc(emoji) + '</div>' +
+      '<div class="chat-info">' +
+        '<div class="chat-name-row"><span class="chat-name">' + esc(d.topicName || d.name) + '</span><span class="' + timeClass + '">' + timeStr + '</span></div>' +
+        '<div class="chat-preview-row"><span class="chat-preview">' + (d.lastMessage ? esc(d.lastMessage.slice(0, 80)) : '') + '</span>' + unreadHtml + '</div>' +
+      '</div>' +
+      (d.isPinned ? '' : '<span class="pin-btn" data-id="' + d.id + '">\ud83d\udccc</span>') +
+    '</div>';
+  }).join('');
+
+  bindChatItemEvents(container);
+}
+
+function bindChatItemEvents(container) {
   container.querySelectorAll('.chat-item').forEach(el => {
     el.addEventListener('click', (e) => {
       if (e.target.closest('.pin-btn') || e.target.closest('.unpin-btn')) return;
-      vscode.postMessage({ type: 'openChat', chatId: el.dataset.id, chatName: el.dataset.name });
+      if (el.dataset.forumGroup) {
+        enterForumGroup(el.dataset.chatId, el.dataset.groupName);
+      } else {
+        vscode.postMessage({ type: 'openChat', chatId: el.dataset.id, chatName: el.dataset.name });
+      }
     });
   });
   container.querySelectorAll('.pin-btn').forEach(el => {
@@ -301,15 +502,41 @@ function renderDialogs(dialogs, container, showPinBtn) {
   });
 }
 
+backBar.addEventListener('click', exitTopicsView);
+
 let searchTimeout;
+let apiSearchTimeout;
 searchInput.addEventListener('input', () => {
   const q = searchInput.value.trim();
-  if (!q) { searchResults.style.display = 'none'; chatList.style.display = 'block'; selectedIndex = -1; return; }
-  clearTimeout(searchTimeout);
-  searchTimeout = setTimeout(() => vscode.postMessage({ type: 'search', query: q }), 300);
+  if (currentForumGroup) {
+    clearTimeout(searchTimeout);
+    clearTimeout(apiSearchTimeout);
+    if (!q) {
+      vscode.postMessage({ type: 'getTopics', groupChatId: currentForumGroup.chatId, groupName: currentForumGroup.groupName });
+      return;
+    }
+    // Search within topics: local then API
+    vscode.postMessage({ type: 'searchLocal', query: q, groupChatId: currentForumGroup.chatId, groupName: currentForumGroup.groupName });
+    apiSearchTimeout = setTimeout(() => vscode.postMessage({ type: 'search', query: q, groupChatId: currentForumGroup.chatId, groupName: currentForumGroup.groupName }), 150);
+    return;
+  }
+  if (!q) { showView('main'); selectedIndex = -1; clearTimeout(searchTimeout); clearTimeout(apiSearchTimeout); return; }
+  vscode.postMessage({ type: 'searchLocal', query: q });
+  clearTimeout(apiSearchTimeout);
+  apiSearchTimeout = setTimeout(() => vscode.postMessage({ type: 'search', query: q }), 150);
 });
 
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    if (currentForumGroup) { exitTopicsView(); return; }
+    searchInput.value = '';
+    showView('main');
+    selectedIndex = -1;
+    searchInput.focus();
+    return;
+  }
+
   const container = getActiveContainer();
   const items = container.querySelectorAll('.chat-item');
   const count = items.length;
@@ -326,14 +553,11 @@ document.addEventListener('keydown', (e) => {
   } else if (e.key === 'Enter' && selectedIndex >= 0 && items[selectedIndex]) {
     e.preventDefault();
     const el = items[selectedIndex];
-    vscode.postMessage({ type: 'openChat', chatId: el.dataset.id, chatName: el.dataset.name });
-  } else if (e.key === 'Escape') {
-    e.preventDefault();
-    searchInput.value = '';
-    searchResults.style.display = 'none';
-    chatList.style.display = 'block';
-    selectedIndex = -1;
-    searchInput.focus();
+    if (el.dataset.forumGroup) {
+      enterForumGroup(el.dataset.chatId, el.dataset.groupName);
+    } else {
+      vscode.postMessage({ type: 'openChat', chatId: el.dataset.id, chatName: el.dataset.name });
+    }
   }
 });
 
@@ -341,10 +565,45 @@ window.addEventListener('message', (event) => {
   const msg = event.data;
   switch (msg.type) {
     case 'dialogs': renderDialogs(msg.dialogs, chatList, false); break;
+    case 'recentChats':
+      if (msg.dialogs && msg.dialogs.length > 0) {
+        var recentDiv = document.getElementById('recentList');
+        if (!recentDiv) {
+          recentDiv = document.createElement('div');
+          recentDiv.id = 'recentList';
+          chatList.parentNode.insertBefore(recentDiv, chatList);
+        }
+        recentDiv.innerHTML = '<div style="padding:6px 12px;font-size:12px;color:var(--tg-text-secondary);font-weight:600;text-transform:uppercase;letter-spacing:0.5px">Recent</div>';
+        var recentContainer = document.createElement('div');
+        recentDiv.appendChild(recentContainer);
+        renderDialogs(msg.dialogs, recentContainer, true);
+      }
+      break;
+    case 'searchResultsLocal':
+      if (currentForumGroup) {
+        showView('topics');
+        renderTopics(msg.dialogs, topicsList);
+      } else {
+        showView('search');
+        renderDialogs(msg.dialogs, searchResults, true);
+      }
+      break;
     case 'searchResults':
-      searchResults.style.display = 'block';
-      chatList.style.display = 'none';
+      if (currentForumGroup) {
+        // Should not happen (search with groupChatId returns topicsList)
+        break;
+      }
+      showView('search');
       renderDialogs(msg.dialogs, searchResults, true);
+      break;
+    case 'topicsList':
+      showView('topics');
+      if (!currentForumGroup && msg.groupName) {
+        currentForumGroup = { chatId: msg.groupChatId, groupName: msg.groupName };
+        backBar.innerHTML = '\u2190 ' + esc(msg.groupName);
+        searchInput.placeholder = 'Search topics in ' + msg.groupName + '...';
+      }
+      renderTopics(msg.dialogs, topicsList);
       break;
     case 'error':
       errorBox.textContent = msg.message;
@@ -400,6 +659,8 @@ export class ChatTab {
   private chatName: string;
   private disposables: vscode.Disposable[] = [];
   private unsubscribeEvents?: () => void;
+  private unreadCount: number = 0;
+  private isActive: boolean = true;
 
   static createOrShow(chatId: string, chatName: string, context: vscode.ExtensionContext) {
     const existing = ChatTab.tabs.get(chatId);
@@ -414,11 +675,28 @@ export class ChatTab {
     ChatTab.tabs.set(chatId, new ChatTab(panel, chatId, chatName));
   }
 
+  private updateTitle() {
+    if (this.unreadCount > 0) {
+      this.panel.title = `(${this.unreadCount}) 💬 ${this.chatName}`;
+    } else {
+      this.panel.title = `💬 ${this.chatName}`;
+    }
+  }
+
   private constructor(panel: vscode.WebviewPanel, chatId: string, chatName: string) {
     this.panel = panel;
     this.chatId = chatId;
     this.chatName = chatName;
     this.panel.webview.html = this.getHtml();
+
+    // Track tab visibility for unread badge
+    this.panel.onDidChangeViewState((e) => {
+      this.isActive = e.webviewPanel.active;
+      if (this.isActive) {
+        this.unreadCount = 0;
+        this.updateTitle();
+      }
+    }, null, this.disposables);
 
     // Start OpenClaw session polling if configured
     const openclaw = getOpenClaw();
@@ -443,13 +721,17 @@ export class ChatTab {
         switch (msg.type) {
           case 'init':
             await tg.connect();
-            const messages = await addSyntaxHighlighting(await tg.getMessages(this.chatId, 50));
+            const messages = await addSyntaxHighlighting(await tg.getMessages(this.chatId, 20));
             this.panel.webview.postMessage({ type: 'messages', messages });
             // Subscribe to real-time events
             if (!this.unsubscribeEvents) {
               this.unsubscribeEvents = tg.onChatEvent(this.chatId, async (event: ChatEvent) => {
                 switch (event.type) {
                   case 'newMessage':
+                    if (!this.isActive) {
+                      this.unreadCount++;
+                      this.updateTitle();
+                    }
                     this.panel.webview.postMessage({ type: 'newMessage', message: await addSyntaxHighlightingSingle(event.message) });
                     break;
                   case 'editMessage':
@@ -457,6 +739,13 @@ export class ChatTab {
                     break;
                   case 'deleteMessages':
                     this.panel.webview.postMessage({ type: 'deleteMessages', messageIds: event.messageIds });
+                    break;
+                  default:
+                    // Handle messagesRefreshed from cache background refresh
+                    if ((event as any).type === 'messagesRefreshed') {
+                      const refreshed = await addSyntaxHighlighting((event as any).messages);
+                      this.panel.webview.postMessage({ type: 'messages', messages: refreshed });
+                    }
                     break;
                 }
               });
@@ -740,6 +1029,14 @@ body {
 .reaction-chip.selected {
   border-color: var(--tg-accent);
   background: rgba(106,178,242,0.2);
+}
+@keyframes reactionPulse {
+  0% { background: rgba(106,178,242,0.15); }
+  50% { background: rgba(106,178,242,0.08); }
+  100% { background: transparent; }
+}
+.msg.reaction-flash > .msg-bubble {
+  animation: reactionPulse 1s ease-out;
 }
 .reaction-emoji { font-size: 15px; }
 .reaction-count { font-size: 12px; color: var(--tg-text-secondary); }
@@ -1548,8 +1845,19 @@ window.addEventListener('message', (event) => {
       if (msg.message) {
         var idx = allMessages.findIndex(function(m) { return m.id === msg.message.id; });
         if (idx !== -1) {
+          // Detect reaction changes for flash animation
+          var oldReactions = JSON.stringify((allMessages[idx].reactions || []).map(function(r) { return r.emoji + r.count; }).sort());
+          var newReactions = JSON.stringify((msg.message.reactions || []).map(function(r) { return r.emoji + r.count; }).sort());
+          var reactionsChanged = oldReactions !== newReactions;
           allMessages[idx] = msg.message;
           renderMessages(allMessages);
+          if (reactionsChanged) {
+            var flashEl = messagesList.querySelector('.msg[data-msg-id="' + msg.message.id + '"]');
+            if (flashEl) {
+              flashEl.classList.add('reaction-flash');
+              setTimeout(function() { flashEl.classList.remove('reaction-flash'); }, 1000);
+            }
+          }
         }
       }
       break;
