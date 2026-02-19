@@ -811,6 +811,23 @@ input.addEventListener('keydown', (e) => {
 
   // --- Messages ---
 
+  async searchMessages(dialogId: string, query: string, limit: number = 20): Promise<MessageInfo[]> {
+    if (!this.client) throw new Error('Not connected');
+    const { chatId, topicId } = TelegramService.parseDialogId(dialogId);
+    const entity = await this.client.getEntity(chatId);
+
+    const opts: any = { limit, search: query };
+    if (topicId) opts.replyTo = topicId;
+
+    const msgs = await this.client.getMessages(entity, opts);
+    const results: MessageInfo[] = [];
+    for (const msg of msgs) {
+      if (!msg.message && !msg.media) continue;
+      results.push(await this.messageToInfo(msg));
+    }
+    return results;
+  }
+
   async getMessages(dialogId: string, limit = 20, offsetId?: number): Promise<MessageInfo[]> {
     // For initial load (no offsetId), use cache
     if (!offsetId) {

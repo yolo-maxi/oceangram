@@ -776,6 +776,11 @@ export class ChatTab {
               this.panel.webview.postMessage({ type: 'userInfoError', error: uErr.message || 'Failed to fetch user info' });
             }
             break;
+          case 'searchMessages':
+            await tg.connect();
+            const searchResults = await addSyntaxHighlighting(await tg.searchMessages(this.chatId, msg.query, msg.limit || 20));
+            this.panel.webview.postMessage({ type: 'searchResults', messages: searchResults });
+            break;
           case 'loadOlder':
             await tg.connect();
             const older = await addSyntaxHighlighting(await tg.getMessages(this.chatId, 30, msg.beforeId));
@@ -1509,6 +1514,49 @@ body {
 .profile-status { font-size: 12px; color: var(--tg-text-secondary); }
 .profile-status.online { color: #98c379; }
 .profile-loading { color: var(--tg-text-secondary); font-size: 13px; padding: 20px 0; }
+
+/* Search bar */
+.search-bar {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--tg-bg-secondary);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  flex-shrink: 0;
+}
+.search-bar.visible { display: flex; }
+.search-bar input {
+  flex: 1;
+  background: var(--tg-composer-input-bg);
+  border: none;
+  border-radius: 8px;
+  padding: 6px 10px;
+  color: var(--tg-text);
+  font-size: 13px;
+  outline: none;
+}
+.search-bar input::placeholder { color: var(--tg-text-secondary); }
+.search-bar .search-count {
+  color: var(--tg-text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  min-width: 60px;
+  text-align: center;
+}
+.search-bar button {
+  background: none;
+  border: none;
+  color: var(--tg-text-secondary);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  line-height: 1;
+}
+.search-bar button:hover { color: var(--tg-text); background: rgba(255,255,255,0.06); }
+.msg-bubble.search-highlight { box-shadow: 0 0 0 2px var(--tg-accent); }
+.msg-bubble.search-current { box-shadow: 0 0 0 2px #e5c07b; background: rgba(229,192,123,0.12); }
 </style>
 </head>
 <body>
@@ -1525,6 +1573,13 @@ body {
     </div>
     <span class="agent-context-label" id="agentContextLabel"></span>
   </div>
+</div>
+<div class="search-bar" id="searchBar">
+  <input type="text" id="searchInput" placeholder="Search messages…" />
+  <span class="search-count" id="searchCount"></span>
+  <button id="searchUp" title="Previous">▲</button>
+  <button id="searchDown" title="Next">▼</button>
+  <button id="searchClose" title="Close">✕</button>
 </div>
 <div class="messages-list" id="messagesList">
   <div class="loading">Loading…</div>
@@ -2244,6 +2299,86 @@ window.addEventListener('message', function(event) {
     activeProfilePopup.innerHTML = html;
   } else if (msg.type === 'userInfoError' && activeProfilePopup) {
     activeProfilePopup.innerHTML = '<div class="profile-loading">Failed to load profile</div>';
+  }
+});
+
+// --- Search (Ctrl+F) ---
+var searchBar = document.getElementById('searchBar');
+var searchInput = document.getElementById('searchInput');
+var searchCount = document.getElementById('searchCount');
+var searchMatches = [];
+var searchIdx = -1;
+
+function openSearch() {
+  searchBar.classList.add('visible');
+  searchInput.focus();
+  searchInput.select();
+}
+function closeSearch() {
+  searchBar.classList.remove('visible');
+  searchInput.value = '';
+  clearSearchHighlights();
+  searchMatches = [];
+  searchIdx = -1;
+  searchCount.textContent = '';
+}
+function clearSearchHighlights() {
+  document.querySelectorAll('.msg-bubble.search-highlight, .msg-bubble.search-current').forEach(function(el) {
+    el.classList.remove('search-highlight', 'search-current');
+  });
+}
+function doLocalSearch() {
+  var q = (searchInput.value || '').toLowerCase().trim();
+  clearSearchHighlights();
+  searchMatches = [];
+  searchIdx = -1;
+  if (!q) { searchCount.textContent = ''; return; }
+  var bubbles = document.querySelectorAll('.msg-bubble');
+  bubbles.forEach(function(b) {
+    if ((b.textContent || '').toLowerCase().indexOf(q) !== -1) {
+      b.classList.add('search-highlight');
+      searchMatches.push(b);
+    }
+  });
+  if (searchMatches.length > 0) {
+    searchIdx = searchMatches.length - 1;
+    navigateSearch(0);
+  }
+  searchCount.textContent = searchMatches.length > 0 ? (searchIdx + 1) + ' / ' + searchMatches.length : 'No results';
+}
+function navigateSearch(delta) {
+  if (searchMatches.length === 0) return;
+  if (searchIdx >= 0 && searchIdx < searchMatches.length) {
+    searchMatches[searchIdx].classList.remove('search-current');
+    searchMatches[searchIdx].classList.add('search-highlight');
+  }
+  searchIdx = (searchIdx + delta + searchMatches.length) % searchMatches.length;
+  searchMatches[searchIdx].classList.remove('search-highlight');
+  searchMatches[searchIdx].classList.add('search-current');
+  searchMatches[searchIdx].scrollIntoView({ behavior: 'smooth', block: 'center' });
+  searchCount.textContent = (searchIdx + 1) + ' / ' + searchMatches.length;
+}
+
+var searchDebounce;
+searchInput.addEventListener('input', function() {
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(doLocalSearch, 150);
+});
+searchInput.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') { e.preventDefault(); navigateSearch(e.shiftKey ? -1 : 1); }
+  if (e.key === 'Escape') { e.preventDefault(); closeSearch(); }
+});
+document.getElementById('searchUp').addEventListener('click', function() { navigateSearch(-1); });
+document.getElementById('searchDown').addEventListener('click', function() { navigateSearch(1); });
+document.getElementById('searchClose').addEventListener('click', closeSearch);
+
+document.addEventListener('keydown', function(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+    e.preventDefault();
+    openSearch();
+  }
+  if (e.key === 'Escape' && searchBar.classList.contains('visible')) {
+    closeSearch();
   }
 });
 
