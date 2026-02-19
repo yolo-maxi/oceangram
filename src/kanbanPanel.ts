@@ -148,11 +148,20 @@ export class KanbanPanel {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
+:root {
+  --tg-bg: #0e1621;
+  --tg-bg-secondary: #17212b;
+  --tg-msg-in-bg: #182533;
+  --tg-accent: #6ab2f2;
+  --tg-text: #f5f5f5;
+  --tg-text-secondary: #6d7f8f;
+  --tg-border: #1e2c3a;
+}
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
-  font-family: var(--vscode-font-family, system-ui);
-  color: var(--vscode-foreground, #ccc);
-  background: var(--vscode-editor-background, #1e1e1e);
+  font-family: system-ui, -apple-system, sans-serif;
+  color: var(--tg-text);
+  background: var(--tg-bg);
   overflow: hidden;
   height: 100vh;
   display: flex;
@@ -165,22 +174,26 @@ body {
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  border-bottom: 1px solid var(--vscode-panel-border, #333);
+  border-bottom: 1px solid var(--tg-border);
+  background: var(--tg-bg-secondary);
   flex-shrink: 0;
 }
 .toolbar select {
-  background: var(--vscode-input-background, #2d2d2d);
-  color: var(--vscode-input-foreground, #ccc);
-  border: 1px solid var(--vscode-input-border, #444);
+  background: var(--tg-bg);
+  color: var(--tg-text);
+  border: 1px solid var(--tg-border);
   padding: 4px 8px;
   border-radius: 4px;
   font-size: 13px;
   outline: none;
 }
+.toolbar select:focus {
+  border-color: var(--tg-accent);
+}
 .toolbar .board-name {
   font-weight: 600;
   font-size: 14px;
-  opacity: 0.7;
+  color: var(--tg-text-secondary);
   margin-left: auto;
 }
 
@@ -199,8 +212,8 @@ body {
 .column {
   min-width: 260px;
   max-width: 300px;
-  background: var(--vscode-sideBar-background, #252526);
-  border: 1px solid var(--vscode-panel-border, #333);
+  background: var(--tg-bg-secondary);
+  border: 1px solid var(--tg-border);
   border-radius: 6px;
   display: flex;
   flex-direction: column;
@@ -214,16 +227,16 @@ body {
   padding: 8px 10px;
   font-weight: 600;
   font-size: 13px;
-  border-bottom: 1px solid var(--vscode-panel-border, #333);
+  border-bottom: 1px solid var(--tg-border);
   flex-shrink: 0;
 }
 .column-header .count {
-  background: var(--vscode-badge-background, #444);
-  color: var(--vscode-badge-foreground, #fff);
+  background: var(--tg-accent);
+  color: var(--tg-bg);
   padding: 1px 6px;
   border-radius: 8px;
   font-size: 11px;
-  font-weight: 400;
+  font-weight: 600;
 }
 .column-header .add-btn {
   cursor: pointer;
@@ -231,7 +244,7 @@ body {
   font-size: 16px;
   border: none;
   background: none;
-  color: var(--vscode-foreground, #ccc);
+  color: var(--tg-text);
   padding: 0 4px;
 }
 .column-header .add-btn:hover { opacity: 1; }
@@ -241,13 +254,13 @@ body {
   flex: 1;
 }
 .column-body.drag-over {
-  background: rgba(59, 130, 246, 0.08);
+  background: rgba(106, 178, 242, 0.08);
 }
 
 /* Card */
 .card {
-  background: var(--vscode-editor-background, #1e1e1e);
-  border: 1px solid var(--vscode-panel-border, #333);
+  background: var(--tg-msg-in-bg);
+  border: 1px solid var(--tg-border);
   border-radius: 4px;
   padding: 8px 10px;
   margin-bottom: 6px;
@@ -256,7 +269,7 @@ body {
   font-size: 12px;
 }
 .card:hover {
-  border-color: var(--vscode-focusBorder, #007fd4);
+  border-color: var(--tg-accent);
   box-shadow: 0 1px 4px rgba(0,0,0,0.3);
 }
 .card.dragging { opacity: 0.4; }
@@ -279,31 +292,31 @@ body {
   font-weight: 600;
   color: #fff;
 }
-.badge-P0 { background: #ef4444; }
-.badge-P1 { background: #f97316; }
-.badge-P2 { background: #3b82f6; }
-.badge-P3 { background: #6b7280; }
+.badge-P0 { background: #e06c75; }
+.badge-P1 { background: #d19a66; }
+.badge-P2 { background: #61afef; }
+.badge-P3 { background: #5a6e7e; }
 .tag {
   font-size: 10px;
-  opacity: 0.6;
+  color: var(--tg-text-secondary);
 }
 .assigned {
   font-size: 10px;
-  opacity: 0.5;
+  color: var(--tg-text-secondary);
   margin-left: auto;
 }
 .card-id {
   font-size: 10px;
-  opacity: 0.35;
+  color: var(--tg-text-secondary);
 }
 
 /* Expanded description */
 .card-desc {
   margin-top: 6px;
   padding-top: 6px;
-  border-top: 1px solid var(--vscode-panel-border, #333);
+  border-top: 1px solid var(--tg-border);
   font-size: 11px;
-  opacity: 0.7;
+  color: var(--tg-text-secondary);
   white-space: pre-wrap;
   display: none;
 }
@@ -312,15 +325,15 @@ body {
 /* Create form */
 .create-form {
   padding: 6px;
-  border-top: 1px solid var(--vscode-panel-border, #333);
+  border-top: 1px solid var(--tg-border);
   display: none;
 }
 .create-form.show { display: block; }
 .create-form input, .create-form select, .create-form textarea {
   width: 100%;
-  background: var(--vscode-input-background, #2d2d2d);
-  color: var(--vscode-input-foreground, #ccc);
-  border: 1px solid var(--vscode-input-border, #444);
+  background: var(--tg-bg);
+  color: var(--tg-text);
+  border: 1px solid var(--tg-border);
   padding: 4px 6px;
   border-radius: 3px;
   font-size: 12px;
@@ -347,13 +360,14 @@ body {
   border: none;
 }
 .btn-create {
-  background: var(--vscode-button-background, #0e639c);
-  color: var(--vscode-button-foreground, #fff);
+  background: var(--tg-accent);
+  color: var(--tg-bg);
+  font-weight: 600;
 }
 .btn-cancel {
   background: transparent;
-  color: var(--vscode-foreground, #ccc);
-  border: 1px solid var(--vscode-panel-border, #444) !important;
+  color: var(--tg-text-secondary);
+  border: 1px solid var(--tg-border) !important;
 }
 
 /* Loading / Error */
@@ -362,9 +376,21 @@ body {
   align-items: center;
   justify-content: center;
   height: 100%;
-  opacity: 0.5;
+  color: var(--tg-text-secondary);
   font-size: 14px;
 }
+
+/* Priority left border on cards */
+.card[data-priority="P0"] { border-left: 3px solid #e06c75; }
+.card[data-priority="P1"] { border-left: 3px solid #d19a66; }
+.card[data-priority="P2"] { border-left: 3px solid #61afef; }
+.card[data-priority="P3"] { border-left: 3px solid #5a6e7e; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--tg-text-secondary); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--tg-accent); }
 </style>
 </head>
 <body>
@@ -447,7 +473,7 @@ function renderColumn(col) {
 
 function renderCard(t) {
   const expanded = expandedTasks.has(t.id);
-  return '<div class="card" draggable="true" data-task-id="' + t.id + '">' +
+  return '<div class="card" draggable="true" data-task-id="' + t.id + '" data-priority="' + t.priority + '">' +
     '<div class="card-title" onclick="toggleDesc(\\'' + t.id + '\\')">' + escHtml(t.title) + '</div>' +
     '<div class="card-meta">' +
       '<span class="badge badge-' + t.priority + '">' + t.priority + '</span>' +
