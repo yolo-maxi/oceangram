@@ -1641,17 +1641,20 @@ function retryMessage(tempId) {
 // Real-time polling for new messages
 let pollInterval;
 let lastMsgId = 0;
+const POLL_FOCUSED = 2000;
+const POLL_HIDDEN = 4000;
 function startPolling() {
-  if (pollInterval) return;
+  stopPolling();
+  var interval = document.hidden ? POLL_HIDDEN : POLL_FOCUSED;
   pollInterval = setInterval(() => {
     vscode.postMessage({ type: 'poll', afterId: lastMsgId });
-  }, 30000); // Fallback polling — real-time events handle most updates
+  }, interval);
 }
 function stopPolling() {
   if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
 }
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) stopPolling(); else startPolling();
+  startPolling(); // restart with appropriate interval
 });
 
 vscode.postMessage({ type: 'init' });
