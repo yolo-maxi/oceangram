@@ -730,6 +730,10 @@ export class ChatTab {
             await tg.connect();
             const messages = await addSyntaxHighlighting(await tg.getMessages(this.chatId, 20));
             this.panel.webview.postMessage({ type: 'messages', messages });
+            // Track last message ID for gap detection
+            if (messages.length > 0) {
+              tg.trackMessageId(this.chatId, messages[messages.length - 1].id);
+            }
             // Fetch profile photos for senders
             this.fetchAndSendProfilePhotos(tg, messages);
             // Fetch pinned messages
@@ -2037,6 +2041,33 @@ body {
   flex-shrink: 0;
 }
 
+/* Reconnecting banner */
+.reconnect-banner {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 6px 16px;
+  background: rgba(255, 152, 0, 0.12);
+  border-bottom: 1px solid rgba(255, 152, 0, 0.25);
+  flex-shrink: 0;
+  font-size: 13px;
+  color: #ffb74d;
+}
+.reconnect-banner.visible { display: flex; }
+.reconnect-banner .spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 183, 77, 0.3);
+  border-top-color: #ffb74d;
+  border-radius: 50%;
+  animation: reconnect-spin 0.8s linear infinite;
+}
+@keyframes reconnect-spin {
+  to { transform: rotate(360deg); }
+}
+
 /* Agent banner — pinned Telegram-style */
 .agent-banner {
   display: flex;
@@ -2531,6 +2562,11 @@ body {
 </style>
 </head>
 <body>
+<!-- Reconnecting banner -->
+<div class="reconnect-banner" id="reconnectBanner">
+  <span class="spinner"></span>
+  <span id="reconnectText">Reconnecting...</span>
+</div>
 <!-- Agent banner (hidden if no OpenClaw session) -->
 <div class="agent-banner" id="agentBanner" style="display:none">
   <div class="agent-banner-left">
@@ -3596,6 +3632,20 @@ window.addEventListener('message', (event) => {
     case 'agentDetails':
       renderAgentDetails(msg.data);
       break;
+    case 'connectionState': {
+      var rcBanner = document.getElementById('reconnectBanner');
+      var rcText = document.getElementById('reconnectText');
+      if (msg.state === 'connected') {
+        if (rcBanner) rcBanner.classList.remove('visible');
+      } else if (msg.state === 'reconnecting') {
+        if (rcBanner) rcBanner.classList.add('visible');
+        if (rcText) rcText.textContent = 'Reconnecting' + (msg.attempt > 1 ? ' (attempt ' + msg.attempt + ')' : '') + '...';
+      } else if (msg.state === 'disconnected') {
+        if (rcBanner) rcBanner.classList.add('visible');
+        if (rcText) rcText.textContent = 'Disconnected — waiting to reconnect...';
+      }
+      break;
+    }
     case 'error':
       errorBox.textContent = msg.message;
       errorBox.style.display = 'block';
