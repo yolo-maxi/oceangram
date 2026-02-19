@@ -767,6 +767,15 @@ export class ChatTab {
               this.panel.webview.postMessage({ type: 'sendFailed', tempId: msg.tempId, error: sendErr.message || 'Send failed' });
             }
             break;
+          case 'editMessage':
+            await tg.connect();
+            try {
+              await tg.editMessage(this.chatId, msg.messageId, msg.text);
+              this.panel.webview.postMessage({ type: 'editSuccess', messageId: msg.messageId });
+            } catch (editErr: any) {
+              this.panel.webview.postMessage({ type: 'editFailed', messageId: msg.messageId, error: editErr.message || 'Edit failed' });
+            }
+            break;
           case 'getUserInfo':
             await tg.connect();
             try {
@@ -780,6 +789,15 @@ export class ChatTab {
             await tg.connect();
             const searchResults = await addSyntaxHighlighting(await tg.searchMessages(this.chatId, msg.query, msg.limit || 20));
             this.panel.webview.postMessage({ type: 'searchResults', messages: searchResults });
+            break;
+          case 'deleteMessage':
+            await tg.connect();
+            try {
+              await tg.deleteMessages(this.chatId, msg.messageIds, msg.revoke);
+              this.panel.webview.postMessage({ type: 'deleteMessages', messageIds: msg.messageIds });
+            } catch (delErr: any) {
+              this.panel.webview.postMessage({ type: 'deleteError', error: delErr.message || 'Delete failed' });
+            }
             break;
           case 'loadOlder':
             await tg.connect();
@@ -1351,6 +1369,10 @@ body {
   gap: 10px;
 }
 .ctx-menu-item:hover { background: rgba(255,255,255,0.06); }
+.ctx-menu-item.danger { color: #e06c75; }
+.ctx-menu-item.danger:hover { background: rgba(224,108,117,0.12); }
+.ctx-menu-sep { height: 1px; background: rgba(255,255,255,0.08); margin: 4px 0; }
+.msg.fade-out { opacity: 0; transform: scale(0.95); transition: opacity 0.3s, transform 0.3s; }
 
 /* Composer */
 .composer {
@@ -1814,6 +1836,25 @@ body {
 .search-bar button:hover { color: var(--tg-text); background: rgba(255,255,255,0.06); }
 .msg-bubble.search-highlight { box-shadow: 0 0 0 2px var(--tg-accent); }
 .msg-bubble.search-current { box-shadow: 0 0 0 2px #e5c07b; background: rgba(229,192,123,0.12); }
+
+/* Floating date header */
+.floating-date {
+  position: sticky;
+  top: 8px;
+  z-index: 10;
+  text-align: center;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+.floating-date span {
+  font-size: 13px;
+  font-weight: 500;
+  color: #fff;
+  background: var(--tg-date-bg);
+  padding: 4px 12px;
+  border-radius: 16px;
+}
+.floating-date.hidden { opacity: 0; }
 </style>
 </head>
 <body>
@@ -1849,6 +1890,7 @@ body {
   <button id="searchClose" title="Close">✕</button>
 </div>
 <div class="messages-list" id="messagesList">
+  <div class="floating-date hidden" id="floatingDate"><span></span></div>
   <div class="loading">Loading…</div>
 </div>
 <button class="new-msgs-btn" id="newMsgsBtn" onclick="scrollToBottom()">↓ New messages</button>
@@ -2085,7 +2127,7 @@ function renderMessages(msgs) {
         retryHtml = '<span class="msg-retry" onclick="retryMessage(' + m.id + ')">⚠️ Failed — tap to retry</span>';
       }
 
-      html += '<div class="msg ' + pos + optClass + '" data-msg-id="' + m.id + '" data-sender="' + esc(m.senderName || '') + '" data-text="' + esc((m.text || '').slice(0, 100)) + '">' +
+      html += '<div class="msg ' + pos + optClass + '" data-msg-id="' + m.id + '" data-sender="' + esc(m.senderName || '') + '" data-text="' + esc((m.text || '').slice(0, 100)) + '" data-outgoing="' + (g.isOutgoing ? '1' : '0') + '" data-timestamp="' + (m.timestamp || 0) + '">' +
         '<div class="' + bubbleCls + '">' + bubbleInner + '<span class="msg-time' + timeClass + '">' + timeStr + '</span>' + retryHtml + '</div>' +
         reactionsHtml +
         '</div>';
@@ -2627,16 +2669,30 @@ document.addEventListener('contextmenu', (e) => {
   menu.className = 'ctx-menu';
   menu.style.left = e.clientX + 'px';
   menu.style.top = e.clientY + 'px';
-  menu.innerHTML =
+  const isOutgoing = msgEl.dataset.outgoing === '1';
+  const msgTimestamp = parseInt(msgEl.dataset.timestamp || '0') * 1000;
+  const canDeleteForEveryone = isOutgoing && (Date.now() - msgTimestamp) < 48 * 60 * 60 * 1000;
+  let menuHtml =
     '<div class="ctx-menu-item" data-action="reply">↩️ Reply</div>' +
-    '<div class="ctx-menu-item" data-action="copy">📋 Copy text</div>';
+    '<div class="ctx-menu-item" data-action="copy">📋 Copy text</div>' +
+    '<div class="ctx-menu-sep"></div>' +
+    '<div class="ctx-menu-item danger" data-action="deleteForMe">🗑 Delete for me</div>';
+  if (canDeleteForEveryone) {
+    menuHtml += '<div class="ctx-menu-item danger" data-action="deleteForAll">🗑 Delete for everyone</div>';
+  }
+  menu.innerHTML = menuHtml;
   menu.querySelectorAll('.ctx-menu-item').forEach(item => {
     item.addEventListener('click', () => {
       const action = item.dataset.action;
+      const msgId = parseInt(msgEl.dataset.msgId);
       if (action === 'reply') {
-        setReply(parseInt(msgEl.dataset.msgId), msgEl.dataset.sender, msgEl.dataset.text);
+        setReply(msgId, msgEl.dataset.sender, msgEl.dataset.text);
       } else if (action === 'copy') {
         navigator.clipboard.writeText(msgEl.dataset.text || '');
+      } else if (action === 'deleteForMe') {
+        vscode.postMessage({ type: 'deleteMessage', messageIds: [msgId], revoke: false });
+      } else if (action === 'deleteForAll') {
+        vscode.postMessage({ type: 'deleteMessage', messageIds: [msgId], revoke: true });
       }
       removeCtxMenu();
     });
@@ -2857,6 +2913,59 @@ document.addEventListener('keydown', function(e) {
     }
   }
 });
+
+// Floating date header on scroll
+var floatingDate = document.getElementById('floatingDate');
+var floatingDateSpan = floatingDate.querySelector('span');
+var floatingDateTimeout = null;
+
+function updateFloatingDate() {
+  var separators = messagesList.querySelectorAll('.date-separator');
+  if (separators.length === 0) { floatingDate.classList.add('hidden'); return; }
+
+  var containerTop = messagesList.getBoundingClientRect().top;
+  var bestSep = null;
+  var bestSepRect = null;
+
+  for (var i = 0; i < separators.length; i++) {
+    var rect = separators[i].getBoundingClientRect();
+    if (rect.top <= containerTop + 40) {
+      bestSep = separators[i];
+      bestSepRect = rect;
+    }
+  }
+
+  if (!bestSep) {
+    floatingDate.classList.add('hidden');
+    return;
+  }
+
+  // Hide if the real separator is visible near the top to avoid doubling
+  if (bestSepRect && bestSepRect.top > containerTop - 5 && bestSepRect.bottom < containerTop + 50) {
+    floatingDate.classList.add('hidden');
+    return;
+  }
+
+  var dateText = bestSep.querySelector('span').textContent;
+  floatingDateSpan.textContent = dateText;
+  floatingDate.classList.remove('hidden');
+
+  clearTimeout(floatingDateTimeout);
+  floatingDateTimeout = setTimeout(function() {
+    floatingDate.classList.add('hidden');
+  }, 2000);
+}
+
+var floatingDateRaf = false;
+messagesList.addEventListener('scroll', function() {
+  if (!floatingDateRaf) {
+    floatingDateRaf = true;
+    requestAnimationFrame(function() {
+      floatingDateRaf = false;
+      updateFloatingDate();
+    });
+  }
+}, { passive: true });
 
 vscode.postMessage({ type: 'init' });
 </script>

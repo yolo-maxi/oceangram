@@ -1079,6 +1079,26 @@ input.addEventListener('keydown', (e) => {
     await this.client.sendMessage(entity, opts);
   }
 
+  async editMessage(dialogId: string, messageId: number, text: string): Promise<void> {
+    if (!this.client) throw new Error('Not connected');
+    const { chatId } = TelegramService.parseDialogId(dialogId);
+    const entity = await this.client.getEntity(chatId);
+    await this.client.editMessage(entity, { message: messageId, text });
+  }
+
+  async deleteMessages(dialogId: string, messageIds: number[], revoke: boolean): Promise<void> {
+    if (!this.client) throw new Error('Not connected');
+    const { chatId } = TelegramService.parseDialogId(dialogId);
+    const entity = await this.client.getEntity(chatId);
+    await this.client.deleteMessages(entity, messageIds, { revoke });
+    // Remove from cache
+    const cached = this.messageCache.get(dialogId);
+    if (cached) {
+      const delSet = new Set(messageIds);
+      this.messageCache.set(dialogId, cached.filter(m => !delSet.has(m.id)));
+    }
+  }
+
   // --- Profile Photo Cache ---
 
   /**
