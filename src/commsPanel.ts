@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { TelegramService, ChatEvent, DialogInfo } from './services/telegram';
+import { TelegramService, ChatEvent, DialogInfo, ConnectionState } from './services/telegram';
 import { OpenClawService, AgentSessionInfo, AgentDetailedInfo } from './services/openclaw';
 import { highlightMessageCodeBlocks, disposeHighlighter } from './services/highlighter';
 
@@ -707,9 +707,16 @@ export class ChatTab {
       });
     }
 
+    // Subscribe to connection state changes
+    const tgForState = getTelegram();
+    const unsubConnState = tgForState.onConnectionStateChange((state, attempt) => {
+      this.panel.webview.postMessage({ type: 'connectionState', state, attempt });
+    });
+
     this.panel.onDidDispose(() => {
       ChatTab.tabs.delete(this.chatId);
       if (this.unsubscribeEvents) this.unsubscribeEvents();
+      unsubConnState();
       const { chatId: rawChatId, topicId } = TelegramService.parseDialogId(this.chatId);
       getOpenClaw().stopPolling(rawChatId, topicId);
       this.disposables.forEach(d => d.dispose());
@@ -755,6 +762,22 @@ export class ChatTab {
                     break;
                   case 'typing':
                     this.panel.webview.postMessage({ type: 'typing', userId: event.userId, userName: event.userName });
+                    break;
+                  case 'readOutbox':
+                    this.panel.webview.postMessage({ type: 'readOutbox', maxId: event.maxId });
+                    break;
+                  case 'reconnected':
+                    // Fetch missed messages after reconnect
+                    try {
+                      const missed = await tg.fetchMissedMessages(this.chatId);
+                      if (missed.length > 0) {
+                        const hlMissed = await addSyntaxHighlighting(missed);
+                        for (const m of hlMissed) {
+                          tg.trackMessageId(this.chatId, m.id);
+                          this.panel.webview.postMessage({ type: 'newMessage', message: m });
+                        }
+                      }
+                    } catch { /* ignore */ }
                     break;
                   default:
                     // Handle messagesRefreshed from cache background refresh
@@ -1112,6 +1135,12 @@ body {
 /* Hide time on non-last messages in group, show on hover */
 .msg-time.hidden { display: none; }
 .msg:hover .msg-time.hidden { display: inline; }
+
+/* Read receipt check icons */
+.msg-status { display: inline; margin-left: 3px; font-size: 11px; vertical-align: middle; }
+.msg-status.sent { color: rgba(255,255,255,0.45); }
+.msg-status.read { color: #53bdeb; }
+.msg-group:not(.outgoing) .msg-status { display: none; }
 
 /* Optimistic message states */
 .msg.optimistic-sending .msg-bubble { opacity: 0.7; }
@@ -2916,8 +2945,16 @@ function renderMessages(msgs) {
         retryHtml = '<span class="msg-retry" onclick="retryMessage(' + m.id + ')">⚠️ Failed — tap to retry</span>';
       }
 
+      // Read receipt status icon for outgoing messages
+      var statusHtml = '';
+      if (g.isOutgoing && !m._optimistic) {
+        var statusCls = m.status === 'read' ? 'read' : 'sent';
+        var statusIcon = m.status === 'read' ? '✓✓' : '✓✓';
+        statusHtml = '<span class="msg-status ' + statusCls + '">' + statusIcon + '</span>';
+      }
+
       html += '<div class="msg ' + pos + optClass + '" data-msg-id="' + m.id + '" data-sender="' + esc(m.senderName || '') + '" data-text="' + esc((m.text || '').slice(0, 100)) + '" data-outgoing="' + (g.isOutgoing ? '1' : '0') + '" data-timestamp="' + (m.timestamp || 0) + '">' +
-        '<div class="' + bubbleCls + '">' + bubbleInner + '<span class="msg-time' + timeClass + '">' + timeStr + '</span>' + retryHtml + '</div>' +
+        '<div class="' + bubbleCls + '">' + bubbleInner + '<span class="msg-time' + timeClass + '">' + timeStr + statusHtml + '</span>' + retryHtml + '</div>' +
         reactionsHtml +
         '</div>';
     }
@@ -3416,6 +3453,30 @@ window.addEventListener('message', (event) => {
     case 'typing':
       if (msg.userId && msg.userName) {
         handleTypingEvent(msg.userId, msg.userName);
+      }
+      break;
+    case 'readOutbox':
+      // Update outgoing message statuses to 'read' for ids <= maxId
+      if (msg.maxId) {
+        var changed = false;
+        for (var ri = allMessages.length - 1; ri >= 0; ri--) {
+          var rm = allMessages[ri];
+          if (rm.isOutgoing && rm.id > 0 && rm.id <= msg.maxId && rm.status !== 'read') {
+            rm.status = 'read';
+            changed = true;
+          }
+        }
+        if (changed) {
+          // Update status icons in-place without full re-render
+          var statusEls = messagesList.querySelectorAll('.msg[data-outgoing="1"] .msg-status');
+          statusEls.forEach(function(el) {
+            var msgEl = el.closest('.msg');
+            var msgId = msgEl ? parseInt(msgEl.dataset.msgId) : 0;
+            if (msgId > 0 && msgId <= msg.maxId) {
+              el.className = 'msg-status read';
+            }
+          });
+        }
       }
       break;
     case 'olderMessages':

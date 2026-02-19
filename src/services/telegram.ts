@@ -105,14 +105,27 @@ export interface MessageInfo {
   linkPreview?: LinkPreview;
   // Reactions
   reactions?: ReactionInfo[];
+  // Read receipt status for outgoing messages
+  status?: 'sent' | 'read';
 }
 
 export type DialogUpdateListener = (dialogs: DialogInfo[]) => void;
+
+export type ConnectionState = 'connected' | 'disconnected' | 'reconnecting';
+export type ConnectionStateListener = (state: ConnectionState, attempt?: number) => void;
 
 export class TelegramService {
   private client: TelegramClient | null = null;
   private connected = false;
   private forumTopicsCache: Map<string, Api.ForumTopic[]> = new Map();
+
+  // Reconnection state
+  private connectionState: ConnectionState = 'disconnected';
+  private connectionStateListeners: Set<ConnectionStateListener> = new Set();
+  private reconnecting = false;
+  private reconnectAttempt = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastKnownMessageIds: Map<string, number> = new Map(); // dialogId → highest msg ID
 
   // Dialog cache (stale-while-revalidate)
   private dialogCache: DialogInfo[] | null = null;
@@ -132,6 +145,56 @@ export class TelegramService {
   onDialogUpdate(listener: DialogUpdateListener): () => void {
     this.dialogUpdateListeners.add(listener);
     return () => { this.dialogUpdateListeners.delete(listener); };
+  }
+
+  /** Subscribe to connection state changes. Returns unsubscribe function. */
+  onConnectionStateChange(listener: ConnectionStateListener): () => void {
+    this.connectionStateListeners.add(listener);
+    // Emit current state immediately
+    listener(this.connectionState);
+    return () => { this.connectionStateListeners.delete(listener); };
+  }
+
+  getConnectionState(): ConnectionState { return this.connectionState; }
+
+  private setConnectionState(state: ConnectionState, attempt?: number) {
+    this.connectionState = state;
+    for (const listener of this.connectionStateListeners) {
+      try { listener(state, attempt); } catch (e) { console.error('[Oceangram] Connection state listener error:', e); }
+    }
+  }
+
+  /** Track the highest message ID seen for a dialog (for gap detection) */
+  trackMessageId(dialogId: string, messageId: number) {
+    const current = this.lastKnownMessageIds.get(dialogId) || 0;
+    if (messageId > current) {
+      this.lastKnownMessageIds.set(dialogId, messageId);
+    }
+  }
+
+  /** Fetch messages that were missed during a disconnect for a dialog */
+  async fetchMissedMessages(dialogId: string): Promise<MessageInfo[]> {
+    const lastId = this.lastKnownMessageIds.get(dialogId);
+    if (!lastId || !this.client) return [];
+
+    try {
+      const { chatId, topicId } = TelegramService.parseDialogId(dialogId);
+      const entity = await this.client.getEntity(chatId);
+      const opts: any = { limit: 50, minId: lastId };
+      if (topicId) opts.replyTo = topicId;
+      const msgs = await this.client.getMessages(entity, opts);
+      const results: MessageInfo[] = [];
+      for (const msg of msgs) {
+        const evtTopicId = msg.replyTo && (msg.replyTo as any).forumTopic
+          ? (msg.replyTo.replyToTopId || msg.replyTo.replyToMsgId)
+          : undefined;
+        results.push(await this.messageToInfo(msg, evtTopicId));
+      }
+      return results.reverse();
+    } catch (err) {
+      console.error('[Oceangram] Failed to fetch missed messages:', err);
+      return [];
+    }
   }
 
   private emitDialogUpdate(dialogs: DialogInfo[]) {
@@ -336,7 +399,93 @@ export class TelegramService {
     }
 
     this.connected = true;
+    this.reconnectAttempt = 0;
+    this.setConnectionState('connected');
+    this.setupDisconnectDetection();
     console.log('[Oceangram] Telegram connected');
+  }
+
+  private setupDisconnectDetection() {
+    if (!this.client) return;
+
+    // gramJS emits 'disconnected' on the client's _sender
+    // We monitor via a periodic health check since gramJS doesn't expose clean events
+    const healthCheck = setInterval(async () => {
+      if (!this.client || !this.connected) {
+        clearInterval(healthCheck);
+        return;
+      }
+      try {
+        // Lightweight ping — invoking GetState is cheap
+        await this.client.invoke(new Api.updates.GetState());
+      } catch (err: any) {
+        const msg = err?.message || '';
+        if (msg.includes('disconnect') || msg.includes('CONNECTION_') || msg.includes('timeout') || msg.includes('ECONNRESET') || !this.client?.connected) {
+          console.warn('[Oceangram] Connection lost, starting reconnection...');
+          clearInterval(healthCheck);
+          this.handleDisconnect();
+        }
+      }
+    }, 15_000); // Check every 15 seconds
+
+    // Also hook into the client's internal disconnect signal if available
+    if ((this.client as any)._sender) {
+      const sender = (this.client as any)._sender;
+      const origDisconnect = sender.disconnect?.bind(sender);
+      if (origDisconnect) {
+        sender.disconnect = (...args: any[]) => {
+          console.warn('[Oceangram] Sender disconnected');
+          this.handleDisconnect();
+          return origDisconnect(...args);
+        };
+      }
+    }
+  }
+
+  private handleDisconnect() {
+    if (this.reconnecting) return;
+    this.connected = false;
+    this.reconnecting = true;
+    this.setConnectionState('disconnected');
+    this.attemptReconnect();
+  }
+
+  private attemptReconnect() {
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectAttempt++;
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempt - 1), 60_000); // 1s, 2s, 4s, ... 60s max
+    console.log(`[Oceangram] Reconnect attempt ${this.reconnectAttempt} in ${delay}ms`);
+    this.setConnectionState('reconnecting', this.reconnectAttempt);
+
+    this.reconnectTimer = setTimeout(async () => {
+      try {
+        if (this.client) {
+          await this.client.connect();
+          this.connected = true;
+          this.reconnecting = false;
+          this.reconnectAttempt = 0;
+          this.setConnectionState('connected');
+          console.log('[Oceangram] Reconnected successfully');
+
+          // Re-register event handlers
+          this.eventHandlersRegistered = false;
+          this.ensureEventHandlers();
+
+          // Notify listeners about reconnection so they can fetch missed messages
+          this.setupDisconnectDetection();
+
+          // Emit a special reconnect event to all active chat listeners
+          for (const [dialogId, listeners] of this.chatListeners) {
+            for (const listener of listeners) {
+              try { listener({ type: 'reconnected' } as any); } catch {}
+            }
+          }
+        }
+      } catch (err) {
+        console.error('[Oceangram] Reconnect failed:', err);
+        this.attemptReconnect();
+      }
+    }, delay);
   }
 
   private async promptApiCredentials(): Promise<{ apiId: number; apiHash: string } | null> {
@@ -568,9 +717,12 @@ input.addEventListener('keydown', (e) => {
   }
 
   async disconnect(): Promise<void> {
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+    this.reconnecting = false;
     if (this.client) {
       await this.client.disconnect();
       this.connected = false;
+      this.setConnectionState('disconnected');
     }
   }
 
@@ -890,8 +1042,9 @@ input.addEventListener('keydown', (e) => {
     this.saveMessageCacheForChat(dialogId);
   }
 
-  /** Append a single message to cache (for real-time events) */
+  /** Append a single message to cache (for real-time events). Also tracks message ID for gap detection. */
   appendMessageToCache(dialogId: string, message: MessageInfo) {
+    this.trackMessageId(dialogId, message.id);
     const entry = this.messageCache.get(dialogId);
     if (entry) {
       if (!entry.messages.some(m => m.id === message.id)) {
@@ -1673,6 +1826,35 @@ input.addEventListener('keydown', (e) => {
       }
     });
 
+    // Read receipts for outgoing messages (UpdateReadHistoryOutbox / UpdateReadChannelOutbox)
+    this.client.addEventHandler(async (update: Api.TypeUpdate) => {
+      try {
+        let chatId = '';
+        let maxId = 0;
+
+        if (update instanceof Api.UpdateReadHistoryOutbox) {
+          chatId = this.peerToId(update.peer);
+          maxId = update.maxId;
+        } else if (update instanceof Api.UpdateReadChannelOutbox) {
+          chatId = `-100${update.channelId.toString()}`;
+          maxId = update.maxId;
+        } else {
+          return;
+        }
+
+        if (!chatId || !maxId) return;
+
+        for (const [dialogId] of this.chatListeners) {
+          const parsed = TelegramService.parseDialogId(dialogId);
+          if (parsed.chatId === chatId) {
+            this.emit(dialogId, { type: 'readOutbox', maxId });
+          }
+        }
+      } catch (err) {
+        console.error('[Oceangram] Read receipt handler error:', err);
+      }
+    });
+
     console.log('[Oceangram] Real-time event handlers registered');
   }
 
@@ -1700,6 +1882,8 @@ export type ChatEvent =
   | { type: 'newMessage'; message: MessageInfo }
   | { type: 'editMessage'; message: MessageInfo }
   | { type: 'deleteMessages'; messageIds: number[] }
-  | { type: 'typing'; userId: string; userName: string };
+  | { type: 'typing'; userId: string; userName: string }
+  | { type: 'readOutbox'; maxId: number }
+  | { type: 'reconnected' };
 
 export type ChatEventListener = (event: ChatEvent) => void;
