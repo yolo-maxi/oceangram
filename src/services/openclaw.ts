@@ -12,6 +12,57 @@ export interface AgentSessionInfo {
   isActive: boolean;
 }
 
+export interface WorkspaceFileInfo {
+  name: string;
+  chars: number;
+  truncated: boolean;
+}
+
+export interface SkillInfo {
+  name: string;
+  source: string; // openclaw-bundled, openclaw-workspace, agents-skills-project
+  chars: number;
+}
+
+export interface ToolInfo {
+  name: string;
+  schemaChars: number;
+}
+
+export interface SubAgentInfo {
+  sessionKey: string;
+  model: string;
+  isActive: boolean;
+  updatedAt: number;
+}
+
+export interface AgentDetailedInfo extends AgentSessionInfo {
+  // Context breakdown
+  systemPromptChars: number;
+  projectContextChars: number;
+  conversationChars: number;
+  
+  // Workspace files loaded into context
+  workspaceFiles: WorkspaceFileInfo[];
+  
+  // Skills available
+  skills: SkillInfo[];
+  totalSkillChars: number;
+  
+  // Tools available
+  tools: ToolInfo[];
+  totalToolChars: number;
+  
+  // Sub-agents (other active sessions)
+  subAgents: SubAgentInfo[];
+  
+  // Session metadata
+  channel: string;
+  chatType: string;
+  workspaceDir: string;
+  sandboxed: boolean;
+}
+
 const OPENCLAW_DIR = path.join(process.env.HOME || '/home/xiko', '.openclaw');
 const SESSIONS_PATH = path.join(OPENCLAW_DIR, 'agents', 'main', 'sessions', 'sessions.json');
 const CONFIG_PATH = path.join(OPENCLAW_DIR, 'openclaw.json');
@@ -156,5 +207,118 @@ export class OpenClawService {
     this.pollTimers.clear();
     this.listeners.clear();
     if (this.watcher) { this.watcher.close(); this.watcher = null; }
+  }
+
+  /**
+   * Get detailed session info including context breakdown, skills, tools, and sub-agents
+   */
+  getDetailedSession(chatId: string, topicId?: number): AgentDetailedInfo | null {
+    const basicInfo = this.findSession(chatId, topicId);
+    if (!basicInfo) return null;
+
+    const sessions = this.loadSessions();
+    const session = sessions[basicInfo.sessionKey];
+    if (!session) return null;
+
+    const report = session.systemPromptReport || {};
+    
+    // Parse workspace files from injectedWorkspaceFiles
+    const workspaceFiles: WorkspaceFileInfo[] = [];
+    const injectedFiles = report.injectedWorkspaceFiles || [];
+    for (const file of injectedFiles) {
+      workspaceFiles.push({
+        name: file.name || 'unknown',
+        chars: file.chars || 0,
+        truncated: file.truncated || false,
+      });
+    }
+
+    // Parse skills from skills.entries
+    const skills: SkillInfo[] = [];
+    let totalSkillChars = 0;
+    const skillsData = report.skills || {};
+    const skillEntries = skillsData.entries || [];
+    for (const skill of skillEntries) {
+      const chars = skill.chars || 0;
+      skills.push({
+        name: skill.name || 'unknown',
+        source: skill.source || 'unknown',
+        chars,
+      });
+      totalSkillChars += chars;
+    }
+
+    // Parse tools from tools.entries
+    const tools: ToolInfo[] = [];
+    let totalToolChars = 0;
+    const toolsData = report.tools || {};
+    const toolEntries = toolsData.entries || [];
+    for (const tool of toolEntries) {
+      const schemaChars = tool.schemaChars || tool.chars || 0;
+      tools.push({
+        name: tool.name || 'unknown',
+        schemaChars,
+      });
+      totalToolChars += schemaChars;
+    }
+
+    // Find other active sessions (potential sub-agents)
+    const subAgents: SubAgentInfo[] = [];
+    const now = Date.now();
+    const ACTIVE_THRESHOLD = 5 * 60 * 1000; // 5 minutes
+    
+    for (const [key, s] of Object.entries(sessions)) {
+      if (key === basicInfo.sessionKey) continue; // Skip self
+      
+      const updatedAt = (s as any).updatedAt || 0;
+      const isActive = (now - updatedAt) < ACTIVE_THRESHOLD;
+      
+      // Only include recently active sessions
+      if (isActive) {
+        subAgents.push({
+          sessionKey: key,
+          model: (s as any).model || 'unknown',
+          isActive: true,
+          updatedAt,
+        });
+      }
+    }
+
+    // Sort sub-agents by most recent first
+    subAgents.sort((a, b) => b.updatedAt - a.updatedAt);
+
+    // Extract session metadata
+    const deliveryContext = session.deliveryContext || {};
+    const channel = deliveryContext.channel || 'unknown';
+    const chatType = deliveryContext.chatType || basicInfo.sessionKey.includes(':group:') ? 'group' : 'dm';
+    const workspaceDir = report.workspaceDir || session.workspaceDir || '';
+    const sandboxed = session.sandboxed || false;
+
+    // Calculate chars breakdown
+    const systemPromptChars = report.systemPromptChars || report.baseChars || 0;
+    const projectContextChars = report.projectContextChars || 
+      workspaceFiles.reduce((sum, f) => sum + f.chars, 0);
+    
+    // Estimate conversation chars from total tokens (roughly 4 chars per token for English)
+    const totalChars = (basicInfo.totalTokens || 0) * 4;
+    const contextUsedChars = systemPromptChars + projectContextChars + totalSkillChars + totalToolChars;
+    const conversationChars = Math.max(0, totalChars - contextUsedChars);
+
+    return {
+      ...basicInfo,
+      systemPromptChars,
+      projectContextChars,
+      conversationChars,
+      workspaceFiles,
+      skills,
+      totalSkillChars,
+      tools,
+      totalToolChars,
+      subAgents,
+      channel,
+      chatType,
+      workspaceDir,
+      sandboxed,
+    };
   }
 }

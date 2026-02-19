@@ -12,14 +12,25 @@ export interface SessionEntry {
   totalTokens: number | null;
   inputTokens: number | null;
   outputTokens: number | null;
+  label: string | null;
+  chatType: string | null;
+  channel: string | null;
+  lastTo: string | null;
+  origin: any | null;
+}
+
+export interface SessionGroup {
+  parent: SessionEntry;
+  children: SessionEntry[]; // sub-agents spawned from this context
 }
 
 export interface AgentPanelData {
-  sessions: SessionEntry[];
+  groups: SessionGroup[];
   totalSessions: number;
-  activeSessions: number;   // updated < 5min ago
+  activeSessions: number;
   defaultModel: string;
   updatedAtMs: number;
+  totalCostEstimate: number; // rough USD estimate
 }
 
 // --- Paths ---
@@ -31,13 +42,84 @@ export function getSessionsPath(): string {
   return SESSIONS_PATH;
 }
 
+// --- Friendly name resolution ---
+
+export function friendlySessionName(s: SessionEntry): string {
+  // Use label if available (cron jobs, sub-agents with labels)
+  if (s.label) {
+    // Clean up cron labels
+    if (s.label.startsWith('Cron: ')) return `⏰ ${s.label.slice(6)}`;
+    return s.label;
+  }
+
+  const key = s.key;
+
+  // Main session
+  if (key === 'agent:main:main') return '🏠 Main Session';
+
+  // Telegram group with topic
+  const groupTopicMatch = key.match(/telegram:group:(-?\d+):topic:(\d+)/);
+  if (groupTopicMatch) {
+    const groupId = groupTopicMatch[1];
+    const topicId = groupTopicMatch[2];
+    // Try to get origin label
+    const originLabel = s.origin?.label;
+    if (originLabel) {
+      // Extract group name from label like "Arbeit Macht Frei 🪸 id:-xxx topic:8547"
+      const nameMatch = originLabel.match(/^(.+?)\s+id:/);
+      if (nameMatch) return `💬 ${nameMatch[1]} #${topicId}`;
+      return `💬 ${originLabel}`;
+    }
+    return `💬 Group ${groupId} #${topicId}`;
+  }
+
+  // Telegram DM
+  const dmMatch = key.match(/telegram:dm:(-?\d+)/);
+  if (dmMatch) {
+    const originLabel = s.origin?.label;
+    if (originLabel) return `👤 ${originLabel}`;
+    return `👤 DM ${dmMatch[1]}`;
+  }
+
+  // Cron session
+  const cronMatch = key.match(/cron:(.+)/);
+  if (cronMatch) return `⏰ ${cronMatch[1].slice(0, 20)}`;
+
+  // Sub-agent
+  const subMatch = key.match(/subagent:(.+)/);
+  if (subMatch) return `🔄 Sub-agent`;
+
+  // Fallback: trim prefix
+  return key.replace(/^agent:main:/, '');
+}
+
+// --- Cost estimation ---
+
+// Rough pricing per 1M tokens (USD) - Opus 4
+const PRICING: Record<string, { input: number; output: number; cacheRead: number }> = {
+  'claude-opus-4-6': { input: 15, output: 75, cacheRead: 1.5 },
+  'claude-opus-4-5': { input: 15, output: 75, cacheRead: 1.5 },
+  'claude-sonnet-4-20250514': { input: 3, output: 15, cacheRead: 0.3 },
+  'default': { input: 15, output: 75, cacheRead: 1.5 },
+};
+
+export function estimateCost(s: SessionEntry): number {
+  const model = s.model || 'default';
+  const pricing = PRICING[model] || PRICING['default'];
+  const input = (s.inputTokens || 0) / 1_000_000;
+  const output = (s.outputTokens || 0) / 1_000_000;
+  // Rough: assume 80% of input was cache reads
+  const cacheReads = input * 0.8;
+  const freshInput = input * 0.2;
+  return freshInput * pricing.input + output * pricing.output + cacheReads * pricing.cacheRead;
+}
+
 // --- Data fetching ---
 
 export function fetchAgentPanelData(): AgentPanelData {
   const now = Date.now();
   const fiveMinAgo = now - 5 * 60 * 1000;
 
-  // Read sessions
   let sessions: SessionEntry[] = [];
   try {
     const raw = JSON.parse(fs.readFileSync(SESSIONS_PATH, 'utf8'));
@@ -49,11 +131,15 @@ export function fetchAgentPanelData(): AgentPanelData {
       totalTokens: val.totalTokens || null,
       inputTokens: val.inputTokens || null,
       outputTokens: val.outputTokens || null,
+      label: val.label || null,
+      chatType: val.chatType || null,
+      channel: val.channel || null,
+      lastTo: val.lastTo || null,
+      origin: val.origin || null,
     }));
     sessions.sort((a, b) => b.updatedAt - a.updatedAt);
   } catch { /* empty */ }
 
-  // Read default model from config
   let defaultModel = 'unknown';
   try {
     const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
@@ -62,12 +148,43 @@ export function fetchAgentPanelData(): AgentPanelData {
 
   const activeSessions = sessions.filter(s => s.updatedAt > fiveMinAgo).length;
 
+  // Group: sub-agents under their parent (heuristic: recent sub-agents near cron/main sessions)
+  const subAgents = sessions.filter(s => s.key.includes(':subagent:'));
+  const nonSubAgents = sessions.filter(s => !s.key.includes(':subagent:'));
+
+  const groups: SessionGroup[] = nonSubAgents.map(parent => ({
+    parent,
+    children: [] as SessionEntry[],
+  }));
+
+  // Assign sub-agents to the most recently active non-sub session
+  // (rough heuristic — OpenClaw doesn't store parent ID)
+  for (const sub of subAgents) {
+    // Find the closest active parent by time
+    let bestGroup = groups[0]; // fallback to most recent
+    let bestDiff = Infinity;
+    for (const g of groups) {
+      const diff = Math.abs(g.parent.updatedAt - sub.updatedAt);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        bestGroup = g;
+      }
+    }
+    if (bestGroup) {
+      bestGroup.children.push(sub);
+    }
+  }
+
+  // Calculate total cost
+  const totalCostEstimate = sessions.reduce((sum, s) => sum + estimateCost(s), 0);
+
   return {
-    sessions,
+    groups,
     totalSessions: sessions.length,
     activeSessions,
     defaultModel,
     updatedAtMs: now,
+    totalCostEstimate,
   };
 }
 
@@ -79,9 +196,9 @@ export function formatTokens(tokens: number): string {
 }
 
 export function contextBarColor(percentage: number): string {
-  if (percentage < 60) return '#6ab2f2';  // blue
-  if (percentage < 80) return '#e5c07b';  // yellow
-  return '#e06c75';                        // red
+  if (percentage < 60) return '#6ab2f2';
+  if (percentage < 80) return '#e5c07b';
+  return '#e06c75';
 }
 
 export function formatRelativeTime(timestampMs: number): string {
@@ -97,12 +214,18 @@ export function formatRelativeTime(timestampMs: number): string {
   return `${days}d ago`;
 }
 
+export function formatCost(usd: number): string {
+  if (usd < 0.01) return '<$0.01';
+  if (usd < 1) return `$${usd.toFixed(2)}`;
+  return `$${usd.toFixed(2)}`;
+}
+
 export function truncateKey(key: string, maxLen = 40): string {
   if (key.length <= maxLen) return key;
   return key.substring(0, maxLen - 3) + '...';
 }
 
-// Keep old exports for backward compat (used by existing panel)
+// Legacy exports for backward compat
 export interface ContextWindow { used: number; max: number; percentage: number; }
 export interface CronJob { id: string; name: string; schedule: string; nextRun: string; lastRun: string; status: string; }
 export interface PM2Process { name: string; status: string; memory: number; cpu: number; uptime: number; restarts: number; }

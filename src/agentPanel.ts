@@ -5,10 +5,13 @@ import {
   getSessionsPath,
   formatTokens,
   formatRelativeTime,
-  truncateKey,
+  formatCost,
   contextBarColor,
+  friendlySessionName,
+  estimateCost,
   AgentPanelData,
   SessionEntry,
+  SessionGroup,
 } from './services/agent';
 
 export class AgentPanel {
@@ -52,16 +55,12 @@ export class AgentPanel {
       this.disposables
     );
 
-    // Watch sessions.json for changes
     try {
       const sessionsPath = getSessionsPath();
-      this.fileWatcher = fs.watch(sessionsPath, () => {
-        this.refresh();
-      });
+      this.fileWatcher = fs.watch(sessionsPath, () => this.refresh());
     } catch { /* file may not exist yet */ }
 
     this.refresh();
-    // Also refresh on interval for relative time updates
     this.refreshTimer = setInterval(() => this.refresh(), 30000);
   }
 
@@ -74,53 +73,68 @@ export class AgentPanel {
     }
   }
 
-  private renderSessionRow(s: SessionEntry): string {
-    const model = s.model || 'default';
+  private renderSessionCard(s: SessionEntry, indent: boolean = false): string {
+    const name = friendlySessionName(s);
+    const model = (s.model || 'default').replace(/^anthropic\//, '');
     const lastActive = formatRelativeTime(s.updatedAt);
-    const keyDisplay = truncateKey(s.key, 45);
+    const cost = estimateCost(s);
+    const costStr = formatCost(cost);
 
-    // Context usage
     const ctxMax = s.contextTokens || 0;
     const ctxUsed = s.totalTokens || 0;
     const pct = ctxMax > 0 ? Math.min(Math.round((ctxUsed / ctxMax) * 100), 100) : 0;
     const barColor = contextBarColor(pct);
 
-    // Active badge (updated < 5min)
     const isActive = (Date.now() - s.updatedAt) < 5 * 60 * 1000;
-    const activeDot = isActive
-      ? '<span class="dot active"></span>'
-      : '<span class="dot idle"></span>';
+    const dotClass = isActive ? 'active' : 'idle';
+    const indentClass = indent ? ' sub-agent' : '';
 
     const ctxBar = ctxMax > 0
       ? `<div class="ctx-bar-bg">
            <div class="ctx-bar-fill" style="width:${pct}%;background:${barColor}"></div>
-         </div>
-         <div class="ctx-label">
-           <span>${formatTokens(ctxUsed)} / ${formatTokens(ctxMax)}</span>
-           <span>${pct}%</span>
          </div>`
-      : '<div class="ctx-label"><span class="meta">No context data</span></div>';
+      : '';
+
+    const ctxLabel = ctxMax > 0
+      ? `<span class="ctx-pct">${pct}%</span>
+         <span class="ctx-tokens">${formatTokens(ctxUsed)} / ${formatTokens(ctxMax)}</span>`
+      : '<span class="ctx-tokens dim">No context data</span>';
 
     return `
-    <div class="session-card">
-      <div class="session-header">
-        <div class="session-info">
-          ${activeDot}
-          <span class="session-model">${this.escapeHtml(model)}</span>
-          <span class="session-time">${lastActive}</span>
-        </div>
+    <div class="session-card${indentClass}">
+      <div class="session-row-1">
+        <span class="dot ${dotClass}"></span>
+        <span class="session-name">${this.esc(name)}</span>
+        <span class="session-time">${lastActive}</span>
       </div>
       ${ctxBar}
-      <div class="session-key" title="${this.escapeHtml(s.key)}">${this.escapeHtml(keyDisplay)}</div>
+      <div class="session-row-2">
+        <div class="session-meta-left">
+          ${ctxLabel}
+        </div>
+        <div class="session-meta-right">
+          <span class="session-model">${this.esc(model)}</span>
+          <span class="session-cost">${costStr}</span>
+        </div>
+      </div>
     </div>`;
   }
 
-  private escapeHtml(str: string): string {
+  private renderGroup(g: SessionGroup): string {
+    let html = this.renderSessionCard(g.parent, false);
+    for (const child of g.children) {
+      html += this.renderSessionCard(child, true);
+    }
+    return html;
+  }
+
+  private esc(str: string): string {
     return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
   private getHtml(data: AgentPanelData): string {
-    const sessionRows = data.sessions.map(s => this.renderSessionRow(s)).join('');
+    const groupRows = data.groups.map(g => this.renderGroup(g)).join('');
+    const subAgentCount = data.groups.reduce((n, g) => n + g.children.length, 0);
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -128,123 +142,103 @@ export class AgentPanel {
 <meta charset="UTF-8">
 <style>
 :root {
-  --tg-bg: #0e1621;
-  --tg-bg-secondary: #17212b;
-  --tg-text: #f5f5f5;
-  --tg-text-secondary: #708499;
-  --tg-accent: #6ab2f2;
-  --tg-border: #1e2c3a;
-  --tg-card: #17212b;
-  --tg-card-hover: #1c2a3a;
+  --bg: #0e1621;
+  --bg2: #17212b;
+  --text: #f5f5f5;
+  --text2: #708499;
+  --accent: #6ab2f2;
+  --border: #1e2c3a;
+  --card: #17212b;
+  --card-hover: #1c2a3a;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  color: var(--tg-text);
-  background: var(--tg-bg);
+  color: var(--text);
+  background: var(--bg);
   padding: 16px;
   font-size: 13px;
 }
+
+/* Header */
 .header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--tg-border);
+  margin-bottom: 14px;
 }
-.header h1 {
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--tg-text);
-}
+.header h1 { font-size: 16px; font-weight: 600; }
 .refresh-btn {
   background: none;
-  border: 1px solid var(--tg-border);
-  color: var(--tg-accent);
-  padding: 4px 12px;
+  border: 1px solid var(--border);
+  color: var(--accent);
+  padding: 3px 10px;
   border-radius: 6px;
   cursor: pointer;
   font-size: 12px;
-  transition: background 0.2s;
 }
-.refresh-btn:hover { background: var(--tg-bg-secondary); }
+.refresh-btn:hover { background: var(--bg2); }
 
-/* Stats bar */
-.stats-bar {
+/* Summary strip */
+.summary {
   display: flex;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-.stat-card {
-  flex: 1;
-  background: var(--tg-card);
-  border: 1px solid var(--tg-border);
+  gap: 16px;
+  align-items: center;
+  padding: 10px 14px;
+  background: var(--bg2);
   border-radius: 8px;
-  padding: 12px;
-  text-align: center;
+  margin-bottom: 14px;
+  font-size: 12px;
+  color: var(--text2);
+  flex-wrap: wrap;
 }
-.stat-value {
-  font-size: 24px;
-  font-weight: 700;
-  color: var(--tg-accent);
-}
-.stat-label {
-  font-size: 11px;
-  color: var(--tg-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-top: 2px;
-}
-.stat-model .stat-value {
-  font-size: 14px;
-  word-break: break-all;
-}
+.summary .val { color: var(--text); font-weight: 600; }
+.summary .accent { color: var(--accent); }
+.sep { opacity: 0.3; }
 
 /* Session cards */
-.sessions-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
+.sessions { display: flex; flex-direction: column; gap: 2px; }
+
 .session-card {
-  background: var(--tg-card);
-  border: 1px solid var(--tg-border);
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 10px 12px;
+  padding: 8px 12px;
   transition: background 0.15s;
 }
-.session-card:hover { background: var(--tg-card-hover); }
-.session-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 6px;
+.session-card:hover { background: var(--card-hover); }
+
+.session-card.sub-agent {
+  margin-left: 24px;
+  border-left: 2px solid var(--accent);
+  border-radius: 0 8px 8px 0;
+  opacity: 0.85;
 }
-.session-info {
+
+.session-row-1 {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-bottom: 4px;
 }
-.session-model {
+.session-name {
   font-weight: 600;
   font-size: 13px;
-  color: var(--tg-text);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .session-time {
   font-size: 11px;
-  color: var(--tg-text-secondary);
+  color: var(--text2);
+  flex-shrink: 0;
 }
-.session-key {
-  font-size: 11px;
-  color: var(--tg-text-secondary);
-  font-family: 'SF Mono', 'Fira Code', monospace;
-  margin-top: 4px;
-}
+
 .dot {
   display: inline-block;
-  width: 8px;
-  height: 8px;
+  width: 7px; height: 7px;
   border-radius: 50%;
   flex-shrink: 0;
 }
@@ -254,33 +248,55 @@ body {
 /* Context bar */
 .ctx-bar-bg {
   width: 100%;
-  height: 6px;
-  background: #1e2c3a;
-  border-radius: 3px;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
   overflow: hidden;
-  margin: 4px 0 2px;
+  margin-bottom: 4px;
 }
 .ctx-bar-fill {
   height: 100%;
-  border-radius: 3px;
+  border-radius: 2px;
   transition: width 0.3s ease;
 }
-.ctx-label {
+
+.session-row-2 {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   font-size: 11px;
-  color: var(--tg-text-secondary);
+  color: var(--text2);
 }
-.meta {
-  font-size: 11px;
-  color: var(--tg-text-secondary);
-  font-style: italic;
+.session-meta-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
-.footer {
+.session-meta-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ctx-pct {
+  font-weight: 600;
+  color: var(--text);
+}
+.ctx-tokens { color: var(--text2); }
+.ctx-tokens.dim { font-style: italic; }
+.session-model {
+  color: var(--text2);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 10px;
+}
+.session-cost {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.empty-state {
   text-align: center;
-  margin-top: 12px;
-  font-size: 11px;
-  color: var(--tg-text-secondary);
+  padding: 40px 20px;
+  color: var(--text2);
 }
 </style>
 </head>
@@ -290,26 +306,20 @@ body {
   <button class="refresh-btn" onclick="vscode.postMessage({command:'refresh'})">↻ Refresh</button>
 </div>
 
-<div class="stats-bar">
-  <div class="stat-card">
-    <div class="stat-value">${data.totalSessions}</div>
-    <div class="stat-label">Total Sessions</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-value">${data.activeSessions}</div>
-    <div class="stat-label">Active (&lt;5m)</div>
-  </div>
-  <div class="stat-card stat-model">
-    <div class="stat-value">${this.escapeHtml(data.defaultModel)}</div>
-    <div class="stat-label">Default Model</div>
-  </div>
+<div class="summary">
+  <span><span class="val">${data.activeSessions}</span> active</span>
+  <span class="sep">|</span>
+  <span><span class="val">${data.totalSessions}</span> sessions</span>
+  ${subAgentCount > 0 ? `<span class="sep">|</span><span><span class="val accent">🔄 ${subAgentCount}</span> sub-agents</span>` : ''}
+  <span class="sep">|</span>
+  <span>model: <span class="val">${this.esc(data.defaultModel.replace(/^anthropic\//, ''))}</span></span>
+  <span class="sep">|</span>
+  <span>est. cost: <span class="val accent">${formatCost(data.totalCostEstimate)}</span></span>
 </div>
 
-<div class="sessions-list">
-  ${sessionRows || '<div class="meta" style="text-align:center;padding:20px">No sessions found</div>'}
+<div class="sessions">
+  ${groupRows || '<div class="empty-state">No sessions found</div>'}
 </div>
-
-<div class="footer">Auto-refreshes on file change &amp; every 30s</div>
 
 <script>const vscode = acquireVsCodeApi();</script>
 </body>

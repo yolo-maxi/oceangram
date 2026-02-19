@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { TelegramService, ChatEvent, DialogInfo } from './services/telegram';
-import { OpenClawService, AgentSessionInfo } from './services/openclaw';
+import { OpenClawService, AgentSessionInfo, AgentDetailedInfo } from './services/openclaw';
 import { highlightMessageCodeBlocks, disposeHighlighter } from './services/highlighter';
 
 // Shared telegram service across all panels
@@ -797,6 +797,13 @@ export class ChatTab {
               this.panel.webview.postMessage({ type: 'messages', messages: await addSyntaxHighlighting(polled) });
             }
             break;
+          case 'getAgentDetails': {
+            const openclaw = getOpenClaw();
+            const { chatId: rawChatId, topicId: rawTopicId } = TelegramService.parseDialogId(this.chatId);
+            const details = openclaw.getDetailedSession(rawChatId, rawTopicId);
+            this.panel.webview.postMessage({ type: 'agentDetails', data: details });
+            break;
+          }
         }
       } catch (err: any) {
         this.panel.webview.postMessage({ type: 'error', message: err.message || 'Unknown error' });
@@ -1471,6 +1478,256 @@ body {
   min-width: 36px;
   text-align: right;
 }
+.agent-subagent-indicator {
+  font-size: 11px;
+  color: var(--tg-accent);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+.agent-subagent-indicator .pulse {
+  animation: subagentPulse 1.5s ease-in-out infinite;
+}
+@keyframes subagentPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Agent details expanded panel */
+.agent-details-panel {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease, padding 0.3s ease;
+  background: var(--tg-bg-secondary);
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.agent-details-panel.expanded {
+  max-height: 600px;
+  overflow-y: auto;
+}
+.agent-details-panel::-webkit-scrollbar { width: 4px; }
+.agent-details-panel::-webkit-scrollbar-thumb { background: var(--tg-scrollbar); border-radius: 2px; }
+
+.agent-details-content {
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.agent-details-section {
+  background: #1e2c3a;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.agent-details-section-header {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--tg-text-secondary);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.agent-details-section-header .icon {
+  font-size: 12px;
+}
+
+/* Context usage bar */
+.context-bar-full {
+  height: 8px;
+  background: rgba(255,255,255,0.05);
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+  margin-bottom: 8px;
+}
+.context-bar-full .segment {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+.context-bar-full .segment.system { background: #6ab2f2; }
+.context-bar-full .segment.project { background: #98c379; }
+.context-bar-full .segment.skills { background: #c678dd; }
+.context-bar-full .segment.tools { background: #e5c07b; }
+.context-bar-full .segment.conversation { background: #e06c75; }
+.context-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  font-size: 11px;
+}
+.context-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--tg-text-secondary);
+}
+.context-legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.context-legend-dot.system { background: #6ab2f2; }
+.context-legend-dot.project { background: #98c379; }
+.context-legend-dot.skills { background: #c678dd; }
+.context-legend-dot.tools { background: #e5c07b; }
+.context-legend-dot.conversation { background: #e06c75; }
+.context-total {
+  font-size: 12px;
+  color: var(--tg-text);
+  margin-top: 8px;
+  text-align: right;
+}
+
+/* Workspace files list */
+.workspace-files-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.workspace-file-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.03);
+}
+.workspace-file-item.custom {
+  border-left: 2px solid var(--tg-accent);
+}
+.workspace-file-name {
+  color: var(--tg-text);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.workspace-file-name .truncated {
+  color: #e5c07b;
+  font-size: 10px;
+}
+.workspace-file-size {
+  color: var(--tg-text-secondary);
+  font-size: 11px;
+}
+
+/* Skills list */
+.skills-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.skills-group-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--tg-text-secondary);
+  margin-top: 4px;
+}
+.skills-group-label.bundled { color: #6d7f8f; }
+.skills-group-label.workspace { color: #6ab2f2; }
+.skills-group-label.custom { color: #c678dd; }
+.skills-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.skill-chip {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.05);
+  color: var(--tg-text);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.skill-chip .size {
+  color: var(--tg-text-secondary);
+  font-size: 10px;
+}
+.skills-total {
+  font-size: 11px;
+  color: var(--tg-text-secondary);
+  margin-top: 4px;
+}
+
+/* Tools list */
+.tools-summary {
+  font-size: 12px;
+  color: var(--tg-text);
+  margin-bottom: 6px;
+}
+.tools-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.tool-chip {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.04);
+  color: var(--tg-text-secondary);
+}
+
+/* Active sessions */
+.sessions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.session-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.03);
+}
+.session-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.session-key {
+  color: var(--tg-text);
+  font-size: 11px;
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-model {
+  color: var(--tg-accent);
+  font-size: 11px;
+}
+.session-time {
+  color: var(--tg-text-secondary);
+  font-size: 10px;
+}
+.session-status {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #98c379;
+  animation: sessionPulse 2s ease-in-out infinite;
+}
+@keyframes sessionPulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 4px #98c379; }
+  50% { opacity: 0.6; box-shadow: none; }
+}
+.sessions-empty {
+  font-size: 12px;
+  color: var(--tg-text-secondary);
+  font-style: italic;
+}
 
 /* User profile popup */
 .group-sender { cursor: pointer; }
@@ -1568,10 +1825,20 @@ body {
     <span class="agent-status" id="agentStatus"></span>
   </div>
   <div class="agent-banner-right">
+    <span class="agent-subagent-indicator" id="agentSubagentIndicator" style="display:none">
+      <span class="pulse">🔄</span>
+      <span id="agentSubagentCount"></span>
+    </span>
     <div class="agent-context-bar">
       <div class="agent-context-fill" id="agentContextFill"></div>
     </div>
     <span class="agent-context-label" id="agentContextLabel"></span>
+  </div>
+</div>
+<!-- Agent details expanded panel -->
+<div class="agent-details-panel" id="agentDetailsPanel">
+  <div class="agent-details-content" id="agentDetailsContent">
+    <!-- Dynamically populated -->
   </div>
 </div>
 <div class="search-bar" id="searchBar">
@@ -2106,12 +2373,23 @@ const agentModel = document.getElementById('agentModel');
 const agentStatus = document.getElementById('agentStatus');
 const agentContextFill = document.getElementById('agentContextFill');
 const agentContextLabel = document.getElementById('agentContextLabel');
+const agentSubagentIndicator = document.getElementById('agentSubagentIndicator');
+const agentSubagentCount = document.getElementById('agentSubagentCount');
+const agentDetailsPanel = document.getElementById('agentDetailsPanel');
+const agentDetailsContent = document.getElementById('agentDetailsContent');
+
+let agentPanelExpanded = false;
+let currentAgentInfo = null;
+let currentAgentDetails = null;
 
 function updateAgentBanner(info) {
   if (!info) {
     agentBanner.style.display = 'none';
+    agentDetailsPanel.classList.remove('expanded');
+    agentPanelExpanded = false;
     return;
   }
+  currentAgentInfo = info;
   agentBanner.style.display = 'flex';
   var modelName = (info.model || 'unknown').replace(/^anthropic\\//, '').replace(/^openai\\//, '');
   agentModel.textContent = modelName;
@@ -2126,6 +2404,197 @@ function updateAgentBanner(info) {
   agentContextFill.style.width = pct + '%';
   agentContextFill.className = 'agent-context-fill' + (pct > 80 ? ' critical' : pct > 60 ? ' warn' : '');
   agentContextLabel.textContent = Math.round(info.totalTokens / 1000) + 'k/' + Math.round(info.contextTokens / 1000) + 'k';
+}
+
+function toggleAgentPanel() {
+  agentPanelExpanded = !agentPanelExpanded;
+  if (agentPanelExpanded) {
+    agentDetailsPanel.classList.add('expanded');
+    // Request detailed info
+    vscode.postMessage({ type: 'getAgentDetails' });
+  } else {
+    agentDetailsPanel.classList.remove('expanded');
+  }
+}
+
+function closeAgentPanel() {
+  if (agentPanelExpanded) {
+    agentPanelExpanded = false;
+    agentDetailsPanel.classList.remove('expanded');
+  }
+}
+
+agentBanner.addEventListener('click', toggleAgentPanel);
+
+function formatChars(chars) {
+  if (chars >= 1000000) return (chars / 1000000).toFixed(1) + 'M';
+  if (chars >= 1000) return (chars / 1000).toFixed(1) + 'k';
+  return chars.toString();
+}
+
+function formatRelativeTime(ts) {
+  var ago = Math.round((Date.now() - ts) / 1000);
+  if (ago < 60) return 'just now';
+  if (ago < 3600) return Math.round(ago / 60) + 'm ago';
+  return Math.round(ago / 3600) + 'h ago';
+}
+
+function renderAgentDetails(data) {
+  if (!data) {
+    agentDetailsContent.innerHTML = '<div class="sessions-empty">Failed to load details</div>';
+    return;
+  }
+  currentAgentDetails = data;
+  
+  // Update sub-agent indicator in banner
+  if (data.subAgents && data.subAgents.length > 0) {
+    agentSubagentIndicator.style.display = 'flex';
+    agentSubagentCount.textContent = data.subAgents.length + ' agent' + (data.subAgents.length > 1 ? 's' : '');
+  } else {
+    agentSubagentIndicator.style.display = 'none';
+  }
+  
+  var html = '';
+  
+  // Context Usage section
+  var totalTokens = data.totalTokens || 0;
+  var contextTokens = data.contextTokens || 200000;
+  var totalChars = totalTokens * 4; // rough estimate
+  var maxChars = contextTokens * 4;
+  
+  var sysChars = data.systemPromptChars || 0;
+  var projChars = data.projectContextChars || 0;
+  var skillChars = data.totalSkillChars || 0;
+  var toolChars = data.totalToolChars || 0;
+  var convChars = data.conversationChars || 0;
+  
+  var sysPct = Math.min(100, (sysChars / maxChars) * 100);
+  var projPct = Math.min(100 - sysPct, (projChars / maxChars) * 100);
+  var skillPct = Math.min(100 - sysPct - projPct, (skillChars / maxChars) * 100);
+  var toolPct = Math.min(100 - sysPct - projPct - skillPct, (toolChars / maxChars) * 100);
+  var convPct = Math.min(100 - sysPct - projPct - skillPct - toolPct, (convChars / maxChars) * 100);
+  
+  html += '<div class="agent-details-section">';
+  html += '<div class="agent-details-section-header"><span class="icon">📊</span> Context Usage</div>';
+  html += '<div class="context-bar-full">';
+  html += '<div class="segment system" style="width:' + sysPct + '%"></div>';
+  html += '<div class="segment project" style="width:' + projPct + '%"></div>';
+  html += '<div class="segment skills" style="width:' + skillPct + '%"></div>';
+  html += '<div class="segment tools" style="width:' + toolPct + '%"></div>';
+  html += '<div class="segment conversation" style="width:' + convPct + '%"></div>';
+  html += '</div>';
+  html += '<div class="context-legend">';
+  html += '<div class="context-legend-item"><span class="context-legend-dot system"></span>System ' + formatChars(sysChars) + '</div>';
+  html += '<div class="context-legend-item"><span class="context-legend-dot project"></span>Project ' + formatChars(projChars) + '</div>';
+  html += '<div class="context-legend-item"><span class="context-legend-dot skills"></span>Skills ' + formatChars(skillChars) + '</div>';
+  html += '<div class="context-legend-item"><span class="context-legend-dot tools"></span>Tools ' + formatChars(toolChars) + '</div>';
+  html += '<div class="context-legend-item"><span class="context-legend-dot conversation"></span>Conversation ' + formatChars(convChars) + '</div>';
+  html += '</div>';
+  html += '<div class="context-total">' + Math.round(totalTokens / 1000) + 'k / ' + Math.round(contextTokens / 1000) + 'k tokens (' + data.contextPercent + '%)</div>';
+  html += '</div>';
+  
+  // Workspace Files section
+  var wsFiles = data.workspaceFiles || [];
+  if (wsFiles.length > 0) {
+    var standardFiles = ['AGENTS.md', 'SOUL.md', 'USER.md', 'TOOLS.md', 'MEMORY.md'];
+    html += '<div class="agent-details-section">';
+    html += '<div class="agent-details-section-header"><span class="icon">📁</span> Workspace Files (' + wsFiles.length + ')</div>';
+    html += '<div class="workspace-files-list">';
+    for (var i = 0; i < wsFiles.length; i++) {
+      var f = wsFiles[i];
+      var isStandard = standardFiles.indexOf(f.name) !== -1;
+      html += '<div class="workspace-file-item' + (isStandard ? '' : ' custom') + '">';
+      html += '<span class="workspace-file-name">' + esc(f.name);
+      if (f.truncated) html += ' <span class="truncated">✂️</span>';
+      html += '</span>';
+      html += '<span class="workspace-file-size">' + formatChars(f.chars) + '</span>';
+      html += '</div>';
+    }
+    html += '</div></div>';
+  }
+  
+  // Skills section
+  var skills = data.skills || [];
+  if (skills.length > 0) {
+    html += '<div class="agent-details-section">';
+    html += '<div class="agent-details-section-header"><span class="icon">🧩</span> Skills (' + skills.length + ')</div>';
+    html += '<div class="skills-list">';
+    
+    // Group by source
+    var bundled = skills.filter(function(s) { return s.source === 'openclaw-bundled' || s.source === 'bundled'; });
+    var workspace = skills.filter(function(s) { return s.source === 'openclaw-workspace' || s.source === 'workspace'; });
+    var custom = skills.filter(function(s) { return s.source !== 'openclaw-bundled' && s.source !== 'bundled' && s.source !== 'openclaw-workspace' && s.source !== 'workspace'; });
+    
+    if (bundled.length > 0) {
+      html += '<div class="skills-group-label bundled">Bundled</div>';
+      html += '<div class="skills-items">';
+      for (var bi = 0; bi < bundled.length; bi++) {
+        html += '<span class="skill-chip">' + esc(bundled[bi].name) + '<span class="size">' + formatChars(bundled[bi].chars) + '</span></span>';
+      }
+      html += '</div>';
+    }
+    if (workspace.length > 0) {
+      html += '<div class="skills-group-label workspace">Workspace</div>';
+      html += '<div class="skills-items">';
+      for (var wi = 0; wi < workspace.length; wi++) {
+        html += '<span class="skill-chip">' + esc(workspace[wi].name) + '<span class="size">' + formatChars(workspace[wi].chars) + '</span></span>';
+      }
+      html += '</div>';
+    }
+    if (custom.length > 0) {
+      html += '<div class="skills-group-label custom">Custom</div>';
+      html += '<div class="skills-items">';
+      for (var ci = 0; ci < custom.length; ci++) {
+        html += '<span class="skill-chip">' + esc(custom[ci].name) + '<span class="size">' + formatChars(custom[ci].chars) + '</span></span>';
+      }
+      html += '</div>';
+    }
+    
+    html += '<div class="skills-total">Total: ' + formatChars(data.totalSkillChars || 0) + ' chars</div>';
+    html += '</div></div>';
+  }
+  
+  // Tools section
+  var tools = data.tools || [];
+  if (tools.length > 0) {
+    html += '<div class="agent-details-section">';
+    html += '<div class="agent-details-section-header"><span class="icon">🔧</span> Tools</div>';
+    html += '<div class="tools-summary">' + tools.length + ' tools available (' + formatChars(data.totalToolChars || 0) + ' chars)</div>';
+    html += '<div class="tools-list">';
+    for (var ti = 0; ti < tools.length; ti++) {
+      html += '<span class="tool-chip">' + esc(tools[ti].name) + '</span>';
+    }
+    html += '</div></div>';
+  }
+  
+  // Active Sessions section
+  html += '<div class="agent-details-section">';
+  html += '<div class="agent-details-section-header"><span class="icon">🤖</span> Active Sessions</div>';
+  var subAgents = data.subAgents || [];
+  if (subAgents.length > 0) {
+    html += '<div class="sessions-list">';
+    for (var si = 0; si < subAgents.length; si++) {
+      var sa = subAgents[si];
+      var saModel = (sa.model || 'unknown').replace(/^anthropic\\//, '').replace(/^openai\\//, '');
+      var saKey = sa.sessionKey || '';
+      // Shorten session key for display
+      var saKeyShort = saKey.length > 40 ? saKey.slice(0, 20) + '...' + saKey.slice(-15) : saKey;
+      html += '<div class="session-item">';
+      html += '<div class="session-info">';
+      html += '<span class="session-key" title="' + esc(saKey) + '">' + esc(saKeyShort) + '</span>';
+      html += '<span class="session-model">' + esc(saModel) + '</span>';
+      html += '</div>';
+      html += '<div class="session-time">' + formatRelativeTime(sa.updatedAt) + '</div>';
+      html += '<div class="session-status"></div>';
+      html += '</div>';
+    }
+    html += '</div>';
+  } else {
+    html += '<div class="sessions-empty">No active sub-agents</div>';
+  }
+  html += '</div>';
+  
+  agentDetailsContent.innerHTML = html;
 }
 
 // Infinite scroll — load older on scroll to top, hide new msg btn at bottom
