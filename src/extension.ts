@@ -88,6 +88,13 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  // Export chat command
+  context.subscriptions.push(
+    vscode.commands.registerCommand('oceangram.exportChat', () => {
+      vscode.window.showInformationMessage('Use the 📥 button in an open chat header to export.');
+    })
+  );
+
   // Quick command palette (Cmd+Shift+O)
   context.subscriptions.push(
     vscode.commands.registerCommand('oceangram.quickPick', () => {
@@ -97,6 +104,52 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Auto-open chat picker
   CommsPicker.show(context);
+
+  // Cost ticker status bar item (TASK-038)
+  const costItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 50);
+  costItem.command = 'oceangram.openAgent';
+  costItem.tooltip = 'Oceangram: Today\'s estimated cost (click for details)';
+  costItem.text = '💰 $0.00 today';
+  costItem.show();
+  context.subscriptions.push(costItem);
+
+  const updateCostTicker = async () => {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const sessionsPath = path.join(
+        process.env.HOME || '~', '.openclaw', 'agents', 'main', 'sessions', 'sessions.json'
+      );
+      if (!fs.existsSync(sessionsPath)) { return; }
+      const data = JSON.parse(fs.readFileSync(sessionsPath, 'utf-8'));
+      const todayStart = new Date().setHours(0, 0, 0, 0);
+      const PRICING: Record<string, { input: number; output: number; cacheRead: number }> = {
+        'claude-opus-4-6': { input: 15, output: 75, cacheRead: 1.5 },
+        'claude-opus-4-5': { input: 15, output: 75, cacheRead: 1.5 },
+        'claude-sonnet-4-20250514': { input: 3, output: 15, cacheRead: 0.3 },
+        'default': { input: 15, output: 75, cacheRead: 1.5 },
+      };
+      let totalCost = 0;
+      for (const key of Object.keys(data)) {
+        const s = data[key];
+        if (!s.updatedAt || s.updatedAt < todayStart) { continue; }
+        const model = s.model || 'default';
+        const pricing = PRICING[model] || PRICING['default'];
+        const input = (s.inputTokens || 0) / 1_000_000;
+        const output = (s.outputTokens || 0) / 1_000_000;
+        const cacheReads = input * 0.8;
+        const freshInput = input * 0.2;
+        totalCost += freshInput * pricing.input + output * pricing.output + cacheReads * pricing.cacheRead;
+      }
+      costItem.text = '💰 $' + totalCost.toFixed(2) + ' today';
+    } catch {
+      // silently ignore
+    }
+  };
+
+  updateCostTicker();
+  const costInterval = setInterval(updateCostTicker, 30000);
+  context.subscriptions.push({ dispose: () => clearInterval(costInterval) });
 
   console.log('Oceangram activated — Cmd+Shift+1-4');
 }
