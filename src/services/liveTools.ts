@@ -1,6 +1,6 @@
-import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
+import * as vscode from 'vscode';
+import { readRemoteFile, readRemoteDir, remoteFileExists, remoteFileStat, getOpenclawDir } from './remoteFs';
 
 // --- Types ---
 
@@ -187,14 +187,15 @@ export function pairToolCalls(
 
 // --- Session JSONL watcher ---
 
-const SESSIONS_DIR = path.join(os.homedir(), '.openclaw', 'agents', 'main', 'sessions');
+function getSessionsDir(): string {
+  return path.join(getOpenclawDir(), 'agents', 'main', 'sessions');
+}
 
-export function getActiveSessionId(): string | null {
+export async function getActiveSessionId(): Promise<string | null> {
   try {
-    const sessionsPath = path.join(SESSIONS_DIR, 'sessions.json');
-    const raw = JSON.parse(fs.readFileSync(sessionsPath, 'utf8'));
-    
-    // Find the most recently updated session
+    const sessionsPath = path.join(getSessionsDir(), 'sessions.json');
+    const raw = JSON.parse(await readRemoteFile(sessionsPath));
+
     let bestKey = '';
     let bestTime = 0;
     for (const [key, val] of Object.entries(raw as Record<string, any>)) {
@@ -204,23 +205,26 @@ export function getActiveSessionId(): string | null {
         bestKey = key;
       }
     }
-    
+
     if (!bestKey) return null;
-    
-    // Find the sessionId — it's the JSONL filename
+
     const entry = raw[bestKey];
     if (entry.sessionId) return entry.sessionId;
-    
-    // Fallback: find JSONL files and pick most recently modified
-    const jsonlFiles = fs.readdirSync(SESSIONS_DIR)
-      .filter(f => f.endsWith('.jsonl'))
-      .map(f => ({ name: f, mtime: fs.statSync(path.join(SESSIONS_DIR, f)).mtimeMs }))
-      .sort((a, b) => b.mtime - a.mtime);
-    
+
+    // Fallback: find most recently modified JSONL
+    const entries = await readRemoteDir(getSessionsDir());
+    const jsonlFiles: { name: string; mtime: number }[] = [];
+    for (const [name, type] of entries) {
+      if (!name.endsWith('.jsonl') || type !== vscode.FileType.File) continue;
+      const stat = await remoteFileStat(path.join(getSessionsDir(), name));
+      jsonlFiles.push({ name, mtime: stat?.mtime || 0 });
+    }
+    jsonlFiles.sort((a, b) => b.mtime - a.mtime);
+
     if (jsonlFiles.length > 0) {
       return jsonlFiles[0].name.replace('.jsonl', '');
     }
-    
+
     return null;
   } catch {
     return null;
@@ -228,31 +232,25 @@ export function getActiveSessionId(): string | null {
 }
 
 export function getSessionJsonlPath(sessionId: string): string {
-  return path.join(SESSIONS_DIR, `${sessionId}.jsonl`);
+  return path.join(getSessionsDir(), `${sessionId}.jsonl`);
 }
 
 /**
- * Read all tool calls from a JSONL file.
+ * Read all tool calls from a JSONL file (remote).
  */
-export function readToolCallsFromFile(filePath: string, maxEntries: number = 100): ToolCallEntry[] {
+export async function readToolCallsFromFile(filePath: string, maxEntries: number = 100): Promise<ToolCallEntry[]> {
   try {
-    const content = fs.readFileSync(filePath, 'utf8');
+    const content = await readRemoteFile(filePath);
     const lines = content.split('\n');
-    
+
     const allEntries: ParsedEntry[] = [];
     for (const line of lines) {
       allEntries.push(...parseJsonlLine(line));
     }
 
     const { completed, pending } = pairToolCalls(allEntries);
-    
-    // Include pending calls too (they're in-progress)
     const all = [...completed, ...Array.from(pending.values())];
-    
-    // Sort by startedAt descending (newest first)
     all.sort((a, b) => b.startedAt - a.startedAt);
-    
-    // Limit
     return all.slice(0, maxEntries);
   } catch {
     return [];

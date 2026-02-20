@@ -1,8 +1,5 @@
-import * as fs from 'fs';
 import * as path from 'path';
-
-const PROJECTS_JSON = '/home/xiko/kanban-app/data/projects.json';
-const BRIEFS_DIR = '/home/xiko/clawd/memory/projects';
+import { readRemoteFile, writeRemoteFile, remoteFileExists, getProjectsJsonPath, getBriefsDir } from './remoteFs';
 
 export interface ProjectBrief {
   slug: string;
@@ -31,27 +28,28 @@ export interface ProjectListEntry {
 }
 
 /**
- * Load the project list from kanban-app's projects.json
+ * Load the project list from kanban-app's projects.json (remote)
  */
-export function loadProjectList(projectsJsonPath: string = PROJECTS_JSON): ProjectListEntry[] {
-  const raw = fs.readFileSync(projectsJsonPath, 'utf-8');
+export async function loadProjectList(projectsJsonPath?: string): Promise<ProjectListEntry[]> {
+  const jsonPath = projectsJsonPath || getProjectsJsonPath();
+  const briefsDir = getBriefsDir();
+  const raw = await readRemoteFile(jsonPath);
   const data = JSON.parse(raw);
   const projects = data.projects || {};
-  return Object.entries(projects).map(([slug, info]: [string, any]) => {
-    const briefPath = path.join(BRIEFS_DIR, `${slug}.md`);
-    return {
-      slug,
-      name: info.name || slug,
-      hasBrief: fs.existsSync(briefPath),
-    };
-  });
+  const entries: ProjectListEntry[] = [];
+  for (const [slug, info] of Object.entries(projects) as [string, any][]) {
+    const briefPath = path.join(briefsDir, `${slug}.md`);
+    const hasBrief = await remoteFileExists(briefPath);
+    entries.push({ slug, name: info.name || slug, hasBrief });
+  }
+  return entries;
 }
 
 /**
  * Parse a project brief markdown file into structured data
  */
 export function parseBrief(markdown: string, slug: string, name: string): ProjectBrief {
-  const briefPath = path.join(BRIEFS_DIR, `${slug}.md`);
+  const briefPath = path.join(getBriefsDir(), `${slug}.md`);
 
   return {
     slug,
@@ -66,29 +64,32 @@ export function parseBrief(markdown: string, slug: string, name: string): Projec
 }
 
 /**
- * Read raw markdown content of a project brief
+ * Read raw markdown content of a project brief (remote)
  */
-export function readBriefRaw(slug: string, briefsDir: string = BRIEFS_DIR): string | null {
-  const briefPath = path.join(briefsDir, `${slug}.md`);
-  if (!fs.existsSync(briefPath)) { return null; }
-  return fs.readFileSync(briefPath, 'utf-8');
+export async function readBriefRaw(slug: string, briefsDir?: string): Promise<string | null> {
+  const dir = briefsDir || getBriefsDir();
+  const briefPath = path.join(dir, `${slug}.md`);
+  if (!(await remoteFileExists(briefPath))) { return null; }
+  return readRemoteFile(briefPath);
 }
 
 /**
- * Save raw markdown content to a project brief file
+ * Save raw markdown content to a project brief file (remote)
  */
-export function saveBrief(slug: string, content: string, briefsDir: string = BRIEFS_DIR): void {
-  const briefPath = path.join(briefsDir, `${slug}.md`);
-  fs.writeFileSync(briefPath, content, 'utf-8');
+export async function saveBrief(slug: string, content: string, briefsDir?: string): Promise<void> {
+  const dir = briefsDir || getBriefsDir();
+  const briefPath = path.join(dir, `${slug}.md`);
+  await writeRemoteFile(briefPath, content);
 }
 
 /**
- * Load and parse a single project's brief
+ * Load and parse a single project's brief (remote)
  */
-export function loadProjectBrief(slug: string, name: string, briefsDir: string = BRIEFS_DIR): ProjectBrief | null {
-  const briefPath = path.join(briefsDir, `${slug}.md`);
-  if (!fs.existsSync(briefPath)) { return null; }
-  const markdown = fs.readFileSync(briefPath, 'utf-8');
+export async function loadProjectBrief(slug: string, name: string, briefsDir?: string): Promise<ProjectBrief | null> {
+  const dir = briefsDir || getBriefsDir();
+  const briefPath = path.join(dir, `${slug}.md`);
+  if (!(await remoteFileExists(briefPath))) { return null; }
+  const markdown = await readRemoteFile(briefPath);
   return parseBrief(markdown, slug, name);
 }
 

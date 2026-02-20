@@ -1,5 +1,5 @@
-import * as fs from 'fs';
 import * as path from 'path';
+import { readRemoteFile, remoteFileExists, getOpenclawDir } from './remoteFs';
 
 export interface ToolCall {
   id: string;
@@ -177,22 +177,24 @@ export function parseToolCallsFromJsonl(lines: string[]): ToolCall[] {
   return toolCalls;
 }
 
-const SESSIONS_DIR = path.join(process.env.HOME || '/home/xiko', '.openclaw', 'agents', 'main', 'sessions');
+function getSessionsDir(): string {
+  return path.join(getOpenclawDir(), 'agents', 'main', 'sessions');
+}
 
-export function getToolCallsForSession(sessionKey: string): ToolCall[] {
-  const sessionsPath = path.join(SESSIONS_DIR, 'sessions.json');
+export async function getToolCallsForSession(sessionKey: string): Promise<ToolCall[]> {
+  const sessionsPath = path.join(getSessionsDir(), 'sessions.json');
   try {
-    const sessions = JSON.parse(fs.readFileSync(sessionsPath, 'utf-8'));
+    const sessions = JSON.parse(await readRemoteFile(sessionsPath));
     const session = sessions[sessionKey];
     if (!session) return [];
-    
+
     const sessionId = session.sessionId || session.id;
     if (!sessionId) return [];
-    
-    const jsonlPath = path.join(SESSIONS_DIR, `${sessionId}.jsonl`);
-    if (!fs.existsSync(jsonlPath)) return [];
-    
-    const content = fs.readFileSync(jsonlPath, 'utf-8');
+
+    const jsonlPath = path.join(getSessionsDir(), `${sessionId}.jsonl`);
+    if (!(await remoteFileExists(jsonlPath))) return [];
+
+    const content = await readRemoteFile(jsonlPath);
     const lines = content.split('\n');
     return parseToolCallsFromJsonl(lines);
   } catch {

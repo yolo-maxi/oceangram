@@ -13,7 +13,6 @@
   "activationEvents": [],
   "main": "./out/extension.js",
   "extensionKind": [
-    "workspace",
     "ui"
   ],
   "contributes": {
@@ -70,6 +69,46 @@
         "mac": "cmd+shift+o"
       }
     ],
+    "configuration": {
+      "title": "Oceangram",
+      "properties": {
+        "oceangram.kanbanProjectsPath": {
+          "type": "string",
+          "default": "/home/xiko/kanban-projects",
+          "description": "Absolute path on the remote server to the kanban markdown files directory."
+        },
+        "oceangram.projectsJsonPath": {
+          "type": "string",
+          "default": "/home/xiko/kanban-app/data/projects.json",
+          "description": "Absolute path on the remote server to the projects.json file."
+        },
+        "oceangram.openclawConfigPath": {
+          "type": "string",
+          "default": "/home/xiko/.openclaw",
+          "description": "Absolute path on the remote server to the .openclaw config directory."
+        },
+        "oceangram.briefsPath": {
+          "type": "string",
+          "default": "/home/xiko/clawd/memory/projects",
+          "description": "Absolute path on the remote server to the project briefs directory."
+        },
+        "oceangram.memoryPath": {
+          "type": "string",
+          "default": "/home/xiko/clawd/memory",
+          "description": "Absolute path on the remote server to the memory directory."
+        },
+        "oceangram.remoteHome": {
+          "type": "string",
+          "default": "/home/xiko",
+          "description": "Home directory on the remote server (used to resolve ~ paths)."
+        },
+        "oceangram.gatewayPort": {
+          "type": "number",
+          "default": 4380,
+          "description": "Port of the OpenClaw gateway (access via SSH port forwarding)."
+        }
+      }
+    },
     "themes": [
       {
         "label": "Telegram Dark",

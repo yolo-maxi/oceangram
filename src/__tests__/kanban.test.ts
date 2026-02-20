@@ -1,4 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+const mockReadRemoteFile = vi.fn();
+vi.mock('../services/remoteFs', () => ({
+  readRemoteFile: (...args: any[]) => mockReadRemoteFile(...args),
+  writeRemoteFile: vi.fn(),
+  getProjectsJsonPath: () => '/mock/projects.json',
+}));
+
 import {
   parseKanbanMarkdown,
   parseTask,
@@ -315,9 +323,15 @@ describe('Create Task', () => {
 });
 
 describe('Load Projects', () => {
-  it('loads projects from JSON file', () => {
-    const projects = loadProjects();
-    expect(projects.length).toBeGreaterThan(0);
+  it('loads projects from JSON file', async () => {
+    mockReadRemoteFile.mockResolvedValue(JSON.stringify({
+      projects: {
+        oceangram: { name: 'Oceangram', file: '/kanban/oceangram.md', owner: 'ocean' },
+        rikai: { name: 'Rikai', file: '/kanban/rikai.md', owner: 'ocean' },
+      }
+    }));
+    const projects = await loadProjects();
+    expect(projects.length).toBe(2);
     const oceangram = projects.find(p => p.id === 'oceangram');
     expect(oceangram).toBeTruthy();
     expect(oceangram!.name).toBe('Oceangram');

@@ -1,14 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { parseBrief, maskKey, loadProjectList, readBriefRaw, saveBrief, ProjectBrief } from '../services/resources';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
 
-// Mock fs for loadProjectList tests
-vi.mock('fs', async () => {
-  const actual = await vi.importActual<typeof import('fs')>('fs');
-  return { ...actual };
-});
+// We need to mock remoteFs since vscode.workspace.fs doesn't exist in test env
+const mockReadRemoteFile = vi.fn();
+const mockWriteRemoteFile = vi.fn();
+const mockRemoteFileExists = vi.fn();
+
+vi.mock('../services/remoteFs', () => ({
+  readRemoteFile: (...args: any[]) => mockReadRemoteFile(...args),
+  writeRemoteFile: (...args: any[]) => mockWriteRemoteFile(...args),
+  remoteFileExists: (...args: any[]) => mockRemoteFileExists(...args),
+  getProjectsJsonPath: () => '/home/xiko/kanban-app/data/projects.json',
+  getBriefsDir: () => '/home/xiko/clawd/memory/projects',
+}));
 
 const SAMPLE_BRIEF = `# Project: Rikai
 
@@ -185,53 +189,82 @@ describe('maskKey', () => {
 });
 
 describe('loadProjectList', () => {
-  it('loads projects from a JSON file', () => {
-    // Use the actual projects.json file
-    const projects = loadProjectList('/home/xiko/kanban-app/data/projects.json');
-    expect(projects.length).toBeGreaterThan(0);
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('loads projects from a JSON file', async () => {
+    mockReadRemoteFile.mockResolvedValue(JSON.stringify({
+      projects: {
+        oceangram: { name: 'Oceangram', file: 'oceangram.md' },
+        rikai: { name: 'Rikai', file: 'rikai.md' },
+      }
+    }));
+    mockRemoteFileExists.mockResolvedValue(true);
+
+    const projects = await loadProjectList();
+    expect(projects.length).toBe(2);
     const oceangram = projects.find(p => p.slug === 'oceangram');
     expect(oceangram).toBeDefined();
     expect(oceangram!.name).toBe('Oceangram');
   });
 
-  it('marks projects with existing briefs', () => {
-    const projects = loadProjectList('/home/xiko/kanban-app/data/projects.json');
-    const oceangram = projects.find(p => p.slug === 'oceangram');
-    expect(oceangram!.hasBrief).toBe(true);
+  it('marks projects with existing briefs', async () => {
+    mockReadRemoteFile.mockResolvedValue(JSON.stringify({
+      projects: {
+        oceangram: { name: 'Oceangram', file: 'oceangram.md' },
+        missing: { name: 'Missing', file: 'missing.md' },
+      }
+    }));
+    mockRemoteFileExists
+      .mockResolvedValueOnce(true)   // oceangram brief exists
+      .mockResolvedValueOnce(false); // missing brief doesn't
+
+    const projects = await loadProjectList();
+    expect(projects.find(p => p.slug === 'oceangram')!.hasBrief).toBe(true);
+    expect(projects.find(p => p.slug === 'missing')!.hasBrief).toBe(false);
   });
 });
 
 describe('readBriefRaw / saveBrief roundtrip', () => {
-  let tmpDir: string;
+  const store: Record<string, string> = {};
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oceangram-test-'));
+    vi.clearAllMocks();
+    Object.keys(store).forEach(k => delete store[k]);
+
+    mockReadRemoteFile.mockImplementation(async (path: string) => {
+      if (store[path]) return store[path];
+      throw new Error('File not found');
+    });
+    mockWriteRemoteFile.mockImplementation(async (path: string, content: string) => {
+      store[path] = content;
+    });
+    mockRemoteFileExists.mockImplementation(async (path: string) => {
+      return !!store[path];
+    });
   });
 
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+  it('returns null for non-existent brief', async () => {
+    expect(await readBriefRaw('nonexistent')).toBeNull();
   });
 
-  it('returns null for non-existent brief', () => {
-    expect(readBriefRaw('nonexistent', tmpDir)).toBeNull();
-  });
-
-  it('roundtrips content through save and read', () => {
+  it('roundtrips content through save and read', async () => {
     const content = '# Test Brief\n\n## Status\n- **Phase**: dev\n';
-    saveBrief('testproj', content, tmpDir);
-    const read = readBriefRaw('testproj', tmpDir);
+    await saveBrief('testproj', content);
+    const read = await readBriefRaw('testproj');
     expect(read).toBe(content);
   });
 
-  it('overwrites existing content on save', () => {
-    saveBrief('testproj', 'original', tmpDir);
-    saveBrief('testproj', 'updated', tmpDir);
-    expect(readBriefRaw('testproj', tmpDir)).toBe('updated');
+  it('overwrites existing content on save', async () => {
+    await saveBrief('testproj', 'original');
+    await saveBrief('testproj', 'updated');
+    expect(await readBriefRaw('testproj')).toBe('updated');
   });
 
-  it('preserves unicode and special chars', () => {
+  it('preserves unicode and special chars', async () => {
     const content = '# 🚀 Prøject\n\nCafé résumé naïve';
-    saveBrief('unicode', content, tmpDir);
-    expect(readBriefRaw('unicode', tmpDir)).toBe(content);
+    await saveBrief('unicode', content);
+    expect(await readBriefRaw('unicode')).toBe(content);
   });
 });

@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
 import {
   fetchAgentPanelData,
   getSessionsPath,
@@ -29,16 +28,17 @@ import {
   getUniqueToolNames,
   filterByToolName,
 } from './services/liveTools';
+import { watchRemoteFile, remoteFileExists } from './services/remoteFs';
 
 export class AgentPanel {
   private static instance: AgentPanel | undefined;
   private readonly panel: vscode.WebviewPanel;
   private disposables: vscode.Disposable[] = [];
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
-  private fileWatcher: fs.FSWatcher | undefined;
+  private fileWatcher: vscode.FileSystemWatcher | undefined;
   private currentTab: 'overview' | 'tools' | 'subagents' | 'crons' | 'costs' | 'memory' | 'livetools' = 'overview';
   private liveToolsFilter: string | null = null;
-  private jsonlWatcher: fs.FSWatcher | undefined;
+  private jsonlWatcher: vscode.FileSystemWatcher | undefined;
   private liveToolEntries: ToolCallEntry[] = [];
 
   public static createOrShow(context: vscode.ExtensionContext) {
@@ -63,8 +63,8 @@ export class AgentPanel {
     this.panel.onDidDispose(() => {
       AgentPanel.instance = undefined;
       if (this.refreshTimer) clearInterval(this.refreshTimer);
-      if (this.fileWatcher) this.fileWatcher.close();
-      if (this.jsonlWatcher) this.jsonlWatcher.close();
+      if (this.fileWatcher) this.fileWatcher.dispose();
+      if (this.jsonlWatcher) this.jsonlWatcher.dispose();
       this.disposables.forEach(d => d.dispose());
     }, null, this.disposables);
 
@@ -83,7 +83,7 @@ export class AgentPanel {
             this.refresh();
             break;
           case 'viewMemory':
-            const content = readMemoryFile(msg.path);
+            const content = await readMemoryFile(msg.path);
             this.panel.webview.postMessage({ command: 'memoryContent', path: msg.path, content });
             break;
           case 'killSubAgent':
@@ -100,8 +100,8 @@ export class AgentPanel {
     );
 
     try {
-      const sessionsPath = getSessionsPath();
-      this.fileWatcher = fs.watch(sessionsPath, () => this.refresh());
+      this.fileWatcher = watchRemoteFile(getSessionsPath());
+      this.fileWatcher.onDidChange(() => this.refresh());
     } catch { /* file may not exist yet */ }
 
     this.setupJsonlWatcher();
@@ -109,26 +109,25 @@ export class AgentPanel {
     this.refreshTimer = setInterval(() => this.refresh(), 30000);
   }
 
-  private setupJsonlWatcher() {
+  private async setupJsonlWatcher() {
     try {
-      const sessionId = getActiveSessionId();
+      const sessionId = await getActiveSessionId();
       if (!sessionId) return;
       const jsonlPath = getSessionJsonlPath(sessionId);
-      if (!fs.existsSync(jsonlPath)) return;
-      this.jsonlWatcher = fs.watch(jsonlPath, () => {
-        this.refreshLiveTools();
-      });
+      if (!(await remoteFileExists(jsonlPath))) return;
+      this.jsonlWatcher = watchRemoteFile(jsonlPath);
+      this.jsonlWatcher.onDidChange(() => this.refreshLiveTools());
       // Initial load
-      this.liveToolEntries = readToolCallsFromFile(jsonlPath);
+      this.liveToolEntries = await readToolCallsFromFile(jsonlPath);
     } catch { /* ignore */ }
   }
 
-  private refreshLiveTools() {
+  private async refreshLiveTools() {
     try {
-      const sessionId = getActiveSessionId();
+      const sessionId = await getActiveSessionId();
       if (!sessionId) return;
       const jsonlPath = getSessionJsonlPath(sessionId);
-      this.liveToolEntries = readToolCallsFromFile(jsonlPath);
+      this.liveToolEntries = await readToolCallsFromFile(jsonlPath);
       if (this.currentTab === 'livetools') {
         this.refresh();
       }
@@ -137,7 +136,7 @@ export class AgentPanel {
 
   private async refresh() {
     try {
-      const data = fetchAgentPanelData();
+      const data = await fetchAgentPanelData();
       this.panel.webview.html = this.getHtml(data);
     } catch (e) {
       this.panel.webview.html = this.getErrorHtml(String(e));

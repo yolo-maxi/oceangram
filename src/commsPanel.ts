@@ -967,12 +967,14 @@ export class ChatTab {
 
     // Start OpenClaw session polling if configured
     const openclaw = getOpenClaw();
-    if (openclaw.isConfigured) {
-      const { chatId: rawChatId, topicId } = TelegramService.parseDialogId(chatId);
-      openclaw.startPolling(rawChatId, topicId, (info) => {
-        this.panel.webview.postMessage({ type: 'agentInfo', info });
-      });
-    }
+    openclaw.initialize().then(async () => {
+      if (await openclaw.checkIsConfigured()) {
+        const { chatId: rawChatId, topicId } = TelegramService.parseDialogId(chatId);
+        openclaw.startPolling(rawChatId, topicId, (info) => {
+          this.panel.webview.postMessage({ type: 'agentInfo', info });
+        });
+      }
+    });
 
     // Subscribe to connection state changes
     const tgForState = getTelegram();
@@ -1206,14 +1208,14 @@ export class ChatTab {
           case 'getAgentDetails': {
             const openclaw = getOpenClaw();
             const { chatId: rawChatId, topicId: rawTopicId } = TelegramService.parseDialogId(this.chatId);
-            const details = openclaw.getDetailedSession(rawChatId, rawTopicId);
+            const details = await openclaw.getDetailedSession(rawChatId, rawTopicId);
             this.panel.webview.postMessage({ type: 'agentDetails', data: details });
             break;
           }
           case 'getToolCalls': {
             const oc = getOpenClaw();
             const { chatId: cId, topicId: tId } = TelegramService.parseDialogId(this.chatId);
-            const toolCalls = oc.getSessionToolCalls(cId, tId);
+            const toolCalls = await oc.getSessionToolCalls(cId, tId);
             // Send enriched tool calls with icons and truncated params
             const enriched = toolCalls.map(tc => ({
               ...tc,

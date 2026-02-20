@@ -1,6 +1,7 @@
-import * as fs from 'fs';
 import * as path from 'path';
+import * as vscode from 'vscode';
 import { ToolCall, parseToolCallsFromJsonl } from './toolExecution';
+import { readRemoteFile, remoteFileExists, remoteFileStat, getOpenclawDir, watchRemoteFile } from './remoteFs';
 
 export interface AgentSessionInfo {
   sessionKey: string;
@@ -64,48 +65,61 @@ export interface AgentDetailedInfo extends AgentSessionInfo {
   sandboxed: boolean;
 }
 
-const OPENCLAW_DIR = path.join(process.env.HOME || '/home/xiko', '.openclaw');
-const SESSIONS_PATH = path.join(OPENCLAW_DIR, 'agents', 'main', 'sessions', 'sessions.json');
-const CONFIG_PATH = path.join(OPENCLAW_DIR, 'openclaw.json');
+function getSessionsPath(): string {
+  return path.join(getOpenclawDir(), 'agents', 'main', 'sessions', 'sessions.json');
+}
+
+function getConfigPath(): string {
+  return path.join(getOpenclawDir(), 'openclaw.json');
+}
 
 export class OpenClawService {
   private pollTimers: Map<string, NodeJS.Timeout> = new Map();
   private listeners: Map<string, ((info: AgentSessionInfo | null) => void)[]> = new Map();
-  private watcher: fs.FSWatcher | null = null;
+  private watcher: vscode.FileSystemWatcher | null = null;
   private sessionsCache: Record<string, any> | null = null;
   private lastMtime: number = 0;
   private botUserId: string = '';
+  private initialized: boolean = false;
 
   constructor() {
-    // Extract bot user ID from config (botToken format: "userId:token")
+    // Init is async — call initialize() separately
+  }
+
+  async initialize(): Promise<void> {
+    if (this.initialized) return;
+    this.initialized = true;
     try {
-      const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+      const configContent = await readRemoteFile(getConfigPath());
+      const config = JSON.parse(configContent);
       const token = config.channels?.telegram?.botToken || '';
       const parts = token.split(':');
       if (parts.length >= 2) this.botUserId = parts[0];
     } catch { /* ignore */ }
   }
 
-  get isConfigured(): boolean {
-    return fs.existsSync(SESSIONS_PATH);
+  async checkIsConfigured(): Promise<boolean> {
+    return remoteFileExists(getSessionsPath());
   }
 
-  private loadSessions(): Record<string, any> {
+  private async loadSessions(): Promise<Record<string, any>> {
     try {
-      const stat = fs.statSync(SESSIONS_PATH);
-      if (stat.mtimeMs === this.lastMtime && this.sessionsCache) {
+      const stat = await remoteFileStat(getSessionsPath());
+      if (!stat) return {};
+      if (stat.mtime === this.lastMtime && this.sessionsCache) {
         return this.sessionsCache;
       }
-      this.lastMtime = stat.mtimeMs;
-      this.sessionsCache = JSON.parse(fs.readFileSync(SESSIONS_PATH, 'utf-8'));
+      this.lastMtime = stat.mtime;
+      const content = await readRemoteFile(getSessionsPath());
+      this.sessionsCache = JSON.parse(content);
       return this.sessionsCache!;
     } catch {
       return {};
     }
   }
 
-  findSession(chatId: string, topicId?: number): AgentSessionInfo | null {
-    const sessions = this.loadSessions();
+  async findSession(chatId: string, topicId?: number): Promise<AgentSessionInfo | null> {
+    const sessions = await this.loadSessions();
 
     // Build patterns to match session keys
     const patterns: string[] = [];
@@ -163,8 +177,8 @@ export class OpenClawService {
 
     if (this.pollTimers.has(key)) return;
 
-    const poll = () => {
-      const info = this.findSession(chatId, topicId);
+    const poll = async () => {
+      const info = await this.findSession(chatId, topicId);
       const cbs = this.listeners.get(key) || [];
       for (const cb of cbs) cb(info);
     };
@@ -174,23 +188,24 @@ export class OpenClawService {
     // Watch the sessions file for changes (instant updates)
     if (!this.watcher) {
       try {
-        this.watcher = fs.watch(SESSIONS_PATH, () => {
+        this.watcher = watchRemoteFile(getSessionsPath());
+        const notifyAll = async () => {
           this.sessionsCache = null; // invalidate cache
-          // Notify all listeners
           for (const [k, cbs] of this.listeners) {
             const parts = k.split(':');
             const cId = parts[0];
             const tId = parts.length > 1 ? parseInt(parts[1], 10) : undefined;
-            const info = this.findSession(cId, tId);
+            const info = await this.findSession(cId, tId);
             for (const cb of cbs) cb(info);
           }
-        });
+        };
+        this.watcher.onDidChange(notifyAll);
       } catch {
         // Fallback to interval polling if watch fails
       }
     }
 
-    // Also poll every 15s as fallback (fs.watch can miss events)
+    // Also poll every 15s as fallback
     const timer = setInterval(poll, 15000);
     this.pollTimers.set(key, timer);
   }
@@ -207,17 +222,17 @@ export class OpenClawService {
     for (const timer of this.pollTimers.values()) clearInterval(timer);
     this.pollTimers.clear();
     this.listeners.clear();
-    if (this.watcher) { this.watcher.close(); this.watcher = null; }
+    if (this.watcher) { this.watcher.dispose(); this.watcher = null; }
   }
 
   /**
    * Get detailed session info including context breakdown, skills, tools, and sub-agents
    */
-  getDetailedSession(chatId: string, topicId?: number): AgentDetailedInfo | null {
-    const basicInfo = this.findSession(chatId, topicId);
+  async getDetailedSession(chatId: string, topicId?: number): Promise<AgentDetailedInfo | null> {
+    const basicInfo = await this.findSession(chatId, topicId);
     if (!basicInfo) return null;
 
-    const sessions = this.loadSessions();
+    const sessions = await this.loadSessions();
     const session = sessions[basicInfo.sessionKey];
     if (!session) return null;
 
@@ -326,21 +341,21 @@ export class OpenClawService {
   /**
    * Get tool calls from the JSONL transcript for a session.
    */
-  getSessionToolCalls(chatId: string, topicId?: number): ToolCall[] {
-    const basicInfo = this.findSession(chatId, topicId);
+  async getSessionToolCalls(chatId: string, topicId?: number): Promise<ToolCall[]> {
+    const basicInfo = await this.findSession(chatId, topicId);
     if (!basicInfo) return [];
 
-    const sessions = this.loadSessions();
+    const sessions = await this.loadSessions();
     const session = sessions[basicInfo.sessionKey];
     if (!session) return [];
 
     const sessionId = session.sessionId || session.id;
     if (!sessionId) return [];
 
-    const jsonlPath = path.join(OPENCLAW_DIR, 'agents', 'main', 'sessions', `${sessionId}.jsonl`);
+    const jsonlPath = path.join(getOpenclawDir(), 'agents', 'main', 'sessions', `${sessionId}.jsonl`);
     try {
-      if (!fs.existsSync(jsonlPath)) return [];
-      const content = fs.readFileSync(jsonlPath, 'utf-8');
+      if (!(await remoteFileExists(jsonlPath))) return [];
+      const content = await readRemoteFile(jsonlPath);
       return parseToolCallsFromJsonl(content.split('\n'));
     } catch {
       return [];

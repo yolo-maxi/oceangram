@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
 import {
   loadProjects,
   readBoard,
@@ -10,6 +9,7 @@ import {
   KanbanTask,
   ProjectInfo,
 } from './services/kanban';
+import { remoteFileExists, watchRemoteFile } from './services/remoteFs';
 
 export class KanbanPanel {
   private static current: KanbanPanel | undefined;
@@ -18,7 +18,7 @@ export class KanbanPanel {
   private projects: ProjectInfo[] = [];
   private currentProject: ProjectInfo | undefined;
   private board: KanbanBoard | undefined;
-  private watcher: fs.FSWatcher | undefined;
+  private watcher: vscode.FileSystemWatcher | undefined;
 
   static createOrShow(context: vscode.ExtensionContext) {
     if (KanbanPanel.current) {
@@ -46,19 +46,18 @@ export class KanbanPanel {
       try {
         switch (msg.type) {
           case 'init':
-            this.projects = loadProjects();
+            this.projects = await loadProjects();
             this.panel.webview.postMessage({
               type: 'projects',
               projects: this.projects.map(p => ({ id: p.id, name: p.name })),
             });
-            // Auto-select first project
             if (this.projects.length > 0) {
-              this.selectProject(this.projects[0].id);
+              await this.selectProject(this.projects[0].id);
             }
             break;
 
           case 'selectProject':
-            this.selectProject(msg.projectId);
+            await this.selectProject(msg.projectId);
             break;
 
           case 'moveTask':
@@ -66,7 +65,7 @@ export class KanbanPanel {
               const position = typeof msg.position === 'number' ? msg.position : undefined;
               const ok = moveTask(this.board, msg.taskId, msg.targetColumn, position);
               if (ok) {
-                writeBoard(this.currentProject.file, this.board);
+                await writeBoard(this.currentProject.file, this.board);
                 this.sendBoard();
               }
             }
@@ -80,7 +79,7 @@ export class KanbanPanel {
                 msg.assigned || '', msg.tags || [], msg.description || ''
               );
               if (task) {
-                writeBoard(this.currentProject.file, this.board);
+                await writeBoard(this.currentProject.file, this.board);
                 this.sendBoard();
               }
             }
@@ -96,7 +95,7 @@ export class KanbanPanel {
                 else if (msg.field === 'assigned') found.assigned = msg.value;
                 else if (msg.field === 'tags') found.tags = msg.value;
                 else if (msg.field === 'description') found.description = msg.value;
-                writeBoard(this.currentProject.file, this.board);
+                await writeBoard(this.currentProject.file, this.board);
                 this.sendBoard();
               }
             }
@@ -107,7 +106,7 @@ export class KanbanPanel {
               const t = this.findTask(msg.taskId);
               if (t && t.subtasks && t.subtasks[msg.index] !== undefined) {
                 t.subtasks[msg.index].done = !t.subtasks[msg.index].done;
-                writeBoard(this.currentProject.file, this.board);
+                await writeBoard(this.currentProject.file, this.board);
                 this.sendBoard();
               }
             }
@@ -117,7 +116,7 @@ export class KanbanPanel {
             if (this.board && this.currentProject) {
               const ok = moveTask(this.board, msg.taskId, msg.targetColumn);
               if (ok) {
-                writeBoard(this.currentProject.file, this.board);
+                await writeBoard(this.currentProject.file, this.board);
                 this.sendBoard();
               }
             }
@@ -138,14 +137,14 @@ export class KanbanPanel {
     return undefined;
   }
 
-  private selectProject(projectId: string) {
+  private async selectProject(projectId: string) {
     this.currentProject = this.projects.find(p => p.id === projectId);
     if (!this.currentProject) return;
 
     this.stopWatching();
 
-    if (fs.existsSync(this.currentProject.file)) {
-      this.board = readBoard(this.currentProject.file);
+    if (await remoteFileExists(this.currentProject.file)) {
+      this.board = await readBoard(this.currentProject.file);
       this.sendBoard();
       this.startWatching(this.currentProject.file);
     } else {
@@ -165,11 +164,12 @@ export class KanbanPanel {
 
   private startWatching(filePath: string) {
     try {
-      this.watcher = fs.watch(filePath, (event) => {
-        if (event === 'change' && this.currentProject) {
-          setTimeout(() => {
+      this.watcher = watchRemoteFile(filePath);
+      this.watcher.onDidChange(async () => {
+        if (this.currentProject) {
+          setTimeout(async () => {
             try {
-              this.board = readBoard(this.currentProject!.file);
+              this.board = await readBoard(this.currentProject!.file);
               this.sendBoard();
             } catch (e) {
               // File might be mid-write
@@ -184,7 +184,7 @@ export class KanbanPanel {
 
   private stopWatching() {
     if (this.watcher) {
-      this.watcher.close();
+      this.watcher.dispose();
       this.watcher = undefined;
     }
   }

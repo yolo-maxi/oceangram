@@ -2,8 +2,8 @@ import * as vscode from 'vscode';
 import { loadProjectList, loadProjectBrief, readBriefRaw, saveBrief, ProjectBrief, ProjectListEntry } from './services/resources';
 import { renderMarkdown } from './services/markdownRenderer';
 import { extractAllUrls, parsePm2Json, parseGitLog, parseGitRemote, formatUptime, Pm2Process, GitLogInfo, GitRemote } from './services/resourceHelpers';
-import { execSync } from 'child_process';
 import { fetchPM2Processes, enrichProcesses, pm2Action, pm2Logs, PM2ProcessDisplay } from './services/pm2';
+import { getRemoteHome } from './services/remoteFs';
 
 export class ResourcePanel {
   private static instance: ResourcePanel | undefined;
@@ -35,19 +35,15 @@ export class ResourcePanel {
 
   private constructor(panel: vscode.WebviewPanel, context: vscode.ExtensionContext) {
     this.panel = panel;
-    this.projects = loadProjectList();
 
-    // Load first project with a brief
-    const first = this.projects.find(p => p.hasBrief);
-    if (first) {
-      this.currentBrief = loadProjectBrief(first.slug, first.name);
-      this.briefRaw = readBriefRaw(first.slug) || '';
-    }
+    // Async init
+    this.initAsync();
 
     this.refreshPM2();
-    this.loadDeploymentData();
     this.panel.webview.html = this.getHtml();
     this.startHealthChecks();
+
+    this.loadDeploymentData();
 
     // Auto-refresh PM2 every 30s
     this.refreshTimer = setInterval(() => {
@@ -69,6 +65,20 @@ export class ResourcePanel {
     }, null, this.disposables);
   }
 
+  private async initAsync() {
+    try {
+      this.projects = await loadProjectList();
+      const first = this.projects.find(p => p.hasBrief);
+      if (first) {
+        this.currentBrief = await loadProjectBrief(first.slug, first.name);
+        this.briefRaw = (await readBriefRaw(first.slug)) || '';
+      }
+      this.panel.webview.html = this.getHtml();
+    } catch (e) {
+      // Will show empty state
+    }
+  }
+
   private refreshPM2() {
     this.pm2Processes = enrichProcesses(fetchPM2Processes());
   }
@@ -80,7 +90,7 @@ export class ResourcePanel {
 
       let git: GitLogInfo | null = null;
       let remotes: GitRemote[] = [];
-      const projectPath = this.currentBrief?.resources.localPaths[0]?.path.replace(/^~/, process.env.HOME || '/home/xiko');
+      const projectPath = this.currentBrief?.resources.localPaths[0]?.path.replace(/^~/, getRemoteHome());
       if (projectPath) {
         try {
           const gitLog = execSync(`cd "${projectPath}" && git log -1 --format="%h%n%ai%n%an%n%s" 2>/dev/null || echo ""`, { encoding: 'utf-8', timeout: 5000 });
@@ -127,13 +137,13 @@ export class ResourcePanel {
     });
   }
 
-  private handleMessage(msg: any) {
+  private async handleMessage(msg: any) {
     switch (msg.type) {
       case 'selectProject': {
         const proj = this.projects.find(p => p.slug === msg.slug);
         if (proj) {
-          this.currentBrief = loadProjectBrief(proj.slug, proj.name);
-          this.briefRaw = readBriefRaw(proj.slug) || '';
+          this.currentBrief = await loadProjectBrief(proj.slug, proj.name);
+          this.briefRaw = (await readBriefRaw(proj.slug)) || '';
           this.briefMode = 'view';
           this.loadDeploymentData();
           this.urlHealthStatus.clear();
@@ -144,7 +154,7 @@ export class ResourcePanel {
         break;
       }
       case 'openFile': {
-        const uri = vscode.Uri.file(msg.path.replace(/^~/, process.env.HOME || '/home/xiko'));
+        const uri = vscode.Uri.file(msg.path.replace(/^~/, getRemoteHome()));
         vscode.commands.executeCommand('vscode.open', uri);
         break;
       }
@@ -169,9 +179,9 @@ export class ResourcePanel {
       }
       case 'saveBrief': {
         if (this.currentBrief && msg.content != null) {
-          saveBrief(this.currentBrief.slug, msg.content);
+          await saveBrief(this.currentBrief.slug, msg.content);
           this.briefRaw = msg.content;
-          this.currentBrief = loadProjectBrief(this.currentBrief.slug, this.currentBrief.name);
+          this.currentBrief = await loadProjectBrief(this.currentBrief.slug, this.currentBrief.name);
           this.briefMode = 'view';
           this.panel.webview.html = this.getHtml();
           vscode.window.showInformationMessage('Brief saved');
@@ -180,9 +190,9 @@ export class ResourcePanel {
       }
       case 'autoSaveBrief': {
         if (this.currentBrief && msg.content != null) {
-          saveBrief(this.currentBrief.slug, msg.content);
+          await saveBrief(this.currentBrief.slug, msg.content);
           this.briefRaw = msg.content;
-          this.currentBrief = loadProjectBrief(this.currentBrief.slug, this.currentBrief.name);
+          this.currentBrief = await loadProjectBrief(this.currentBrief.slug, this.currentBrief.name);
         }
         break;
       }

@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config';
+import path from 'path';
 
 export default defineConfig({
   test: {
@@ -9,6 +10,9 @@ export default defineConfig({
       provider: 'v8',
       include: ['src/**/*.ts'],
       exclude: ['src/**/__tests__/**', 'src/**/__mocks__/**'],
+    },
+    alias: {
+      vscode: path.resolve(__dirname, 'src/__mocks__/vscode.ts'),
     },
   },
 });

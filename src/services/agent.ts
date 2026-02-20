@@ -1,7 +1,6 @@
-import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
-import { execSync } from 'child_process';
+import * as vscode from 'vscode';
+import { readRemoteFile, readRemoteDir, remoteFileExists, remoteFileStat, getOpenclawDir, getMemoryDir } from './remoteFs';
 
 // --- Types ---
 
@@ -110,13 +109,15 @@ export interface AgentPanelData {
 
 // --- Paths ---
 
-const SESSIONS_PATH = path.join(os.homedir(), '.openclaw/agents/main/sessions/sessions.json');
-const CONFIG_PATH = path.join(os.homedir(), '.openclaw/openclaw.json');
-const MEMORY_DIR = path.join(os.homedir(), 'clawd/memory');
-
-export function getSessionsPath(): string {
-  return SESSIONS_PATH;
+function getSessionsPath(): string {
+  return path.join(getOpenclawDir(), 'agents', 'main', 'sessions', 'sessions.json');
 }
+
+function getConfigPath(): string {
+  return path.join(getOpenclawDir(), 'openclaw.json');
+}
+
+export { getSessionsPath };
 
 // --- Friendly name resolution ---
 
@@ -187,8 +188,7 @@ export function estimateCost(s: SessionEntry): number {
 
 // --- Get tools from system prompt report ---
 
-function getToolsFromConfig(): ToolInfo[] {
-  // Default tools available in OpenClaw
+async function getToolsFromConfig(): Promise<ToolInfo[]> {
   const defaultTools: ToolInfo[] = [
     { name: 'read', enabled: true },
     { name: 'write', enabled: true },
@@ -215,52 +215,52 @@ function getToolsFromConfig(): ToolInfo[] {
     { name: 'memory_get', enabled: true },
   ];
 
-  // Try to get tool usage stats from session files (rough heuristic)
   try {
-    const sessionsDir = path.dirname(SESSIONS_PATH);
-    const files = fs.readdirSync(sessionsDir).filter(f => f.endsWith('.jsonl'));
-    const recentFiles = files.slice(0, 5); // Check last 5 session files
-    
+    const sessionsDir = path.dirname(getSessionsPath());
+    const entries = await readRemoteDir(sessionsDir);
+    const jsonlFiles = entries
+      .filter(([name, type]) => name.endsWith('.jsonl') && type === vscode.FileType.File)
+      .map(([name]) => name)
+      .slice(0, 5);
+
     const toolUsage: Record<string, number> = {};
-    
-    for (const file of recentFiles) {
+    for (const file of jsonlFiles) {
       try {
-        const content = fs.readFileSync(path.join(sessionsDir, file), 'utf8');
+        const content = await readRemoteFile(path.join(sessionsDir, file));
         const lines = content.split('\n').filter(l => l.trim());
-        for (const line of lines.slice(-50)) { // Last 50 lines
+        for (const line of lines.slice(-50)) {
           try {
             const entry = JSON.parse(line);
             if (entry.role === 'assistant' && entry.tool_calls) {
               for (const tc of entry.tool_calls) {
                 const name = tc.function?.name || tc.name;
-                if (name) {
-                  toolUsage[name] = Date.now(); // Use current time as approximation
-                }
+                if (name) toolUsage[name] = Date.now();
               }
             }
-          } catch { /* skip invalid lines */ }
+          } catch { /* skip */ }
         }
-      } catch { /* skip unreadable files */ }
+      } catch { /* skip */ }
     }
 
-    // Update tools with usage info
     for (const tool of defaultTools) {
-      if (toolUsage[tool.name]) {
-        tool.lastUsedAt = toolUsage[tool.name];
-      }
+      if (toolUsage[tool.name]) tool.lastUsedAt = toolUsage[tool.name];
     }
-  } catch { /* ignore errors */ }
+  } catch { /* ignore */ }
 
   return defaultTools;
 }
 
 // --- Get cron jobs ---
+// Note: getCronJobs uses HTTP to the OpenClaw gateway since execSync won't work
+// on the remote from a UI extension. Falls back to reading cron state file.
 
-function getCronJobs(): CronJobInfo[] {
+async function getCronJobs(): Promise<CronJobInfo[]> {
   try {
-    const output = execSync('openclaw cron list --json 2>/dev/null', { encoding: 'utf8', timeout: 5000 });
-    const data = JSON.parse(output);
-    
+    const gatewayPort = vscode.workspace.getConfiguration('oceangram').get<number>('gatewayPort', 4380);
+    const resp = await fetch(`http://localhost:${gatewayPort}/api/cron/list`);
+    if (!resp.ok) return [];
+    const data = await resp.json() as any;
+
     return (data.jobs || []).map((job: any) => {
       let scheduleDisplay = '';
       if (job.schedule?.kind === 'cron') {
@@ -326,36 +326,39 @@ function getSubAgents(sessions: SessionEntry[]): SubAgentInfo[] {
 
 // --- Get memory files ---
 
-function getMemoryFiles(dir: string = MEMORY_DIR, depth: number = 0): MemoryFile[] {
-  if (depth > 2) return []; // Max depth
-  
+async function getMemoryFiles(dir?: string, depth: number = 0): Promise<MemoryFile[]> {
+  if (depth > 2) return [];
+  const memDir = dir || getMemoryDir();
+
   try {
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
-    return entries
-      .filter(e => !e.name.startsWith('.'))
-      .map(entry => {
-        const fullPath = path.join(dir, entry.name);
-        const stats = fs.statSync(fullPath);
-        
-        const file: MemoryFile = {
-          name: entry.name,
-          path: fullPath,
-          size: stats.size,
-          modifiedAt: stats.mtimeMs,
-          isDirectory: entry.isDirectory(),
-        };
-        
-        if (entry.isDirectory() && depth < 2) {
-          file.children = getMemoryFiles(fullPath, depth + 1);
-        }
-        
-        return file;
-      })
-      .sort((a, b) => {
-        // Directories first, then by modified time descending
-        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
-        return b.modifiedAt - a.modifiedAt;
-      });
+    const entries = await readRemoteDir(memDir);
+    const results: MemoryFile[] = [];
+
+    for (const [name, type] of entries) {
+      if (name.startsWith('.')) continue;
+      const fullPath = path.join(memDir, name);
+      const stat = await remoteFileStat(fullPath);
+      const isDir = type === vscode.FileType.Directory;
+
+      const file: MemoryFile = {
+        name,
+        path: fullPath,
+        size: stat?.size || 0,
+        modifiedAt: stat?.mtime || 0,
+        isDirectory: isDir,
+      };
+
+      if (isDir && depth < 2) {
+        file.children = await getMemoryFiles(fullPath, depth + 1);
+      }
+
+      results.push(file);
+    }
+
+    return results.sort((a, b) => {
+      if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+      return b.modifiedAt - a.modifiedAt;
+    });
   } catch {
     return [];
   }
@@ -399,7 +402,7 @@ function getSessionCosts(sessions: SessionEntry[]): SessionCosts {
 
 // --- Get agent config ---
 
-function getAgentConfig(): AgentConfig {
+async function getAgentConfig(): Promise<AgentConfig> {
   let model = 'unknown';
   let thinkingLevel = 'default';
   let reasoningMode = 'off';
@@ -408,26 +411,26 @@ function getAgentConfig(): AgentConfig {
     'claude-opus-4-5',
     'claude-sonnet-4-20250514',
   ];
-  
+
   try {
-    const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+    const config = JSON.parse(await readRemoteFile(getConfigPath()));
     model = config?.agents?.defaults?.model?.primary?.replace(/^anthropic\//, '') || 'unknown';
     thinkingLevel = config?.agents?.defaults?.thinking?.level || 'default';
     reasoningMode = config?.agents?.defaults?.reasoning?.mode || 'off';
   } catch { /* ignore */ }
-  
+
   return { model, thinkingLevel, reasoningMode, availableModels };
 }
 
 // --- Data fetching ---
 
-export function fetchAgentPanelData(): AgentPanelData {
+export async function fetchAgentPanelData(): Promise<AgentPanelData> {
   const now = Date.now();
   const fiveMinAgo = now - 5 * 60 * 1000;
 
   let sessions: SessionEntry[] = [];
   try {
-    const raw = JSON.parse(fs.readFileSync(SESSIONS_PATH, 'utf8'));
+    const raw = JSON.parse(await readRemoteFile(getSessionsPath()));
     sessions = Object.entries(raw).map(([key, val]: [string, any]) => ({
       key,
       model: val.model || null,
@@ -448,7 +451,7 @@ export function fetchAgentPanelData(): AgentPanelData {
 
   let defaultModel = 'unknown';
   try {
-    const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+    const config = JSON.parse(await readRemoteFile(getConfigPath()));
     defaultModel = config?.agents?.defaults?.model?.primary || 'unknown';
   } catch { /* empty */ }
 
@@ -489,12 +492,12 @@ export function fetchAgentPanelData(): AgentPanelData {
     updatedAtMs: now,
     totalCostEstimate,
     // New data for TASK-115 to TASK-120
-    config: getAgentConfig(),
-    tools: getToolsFromConfig(),
+    config: await getAgentConfig(),
+    tools: await getToolsFromConfig(),
     subAgents: getSubAgents(sessions),
-    cronJobs: getCronJobs(),
+    cronJobs: await getCronJobs(),
     costs: getSessionCosts(sessions),
-    memoryFiles: getMemoryFiles(),
+    memoryFiles: await getMemoryFiles(),
   };
 }
 
@@ -502,9 +505,10 @@ export function fetchAgentPanelData(): AgentPanelData {
 
 export async function toggleCronJob(jobId: string, enable: boolean): Promise<boolean> {
   try {
+    const gatewayPort = vscode.workspace.getConfiguration('oceangram').get<number>('gatewayPort', 4380);
     const cmd = enable ? 'enable' : 'disable';
-    execSync(`openclaw cron ${cmd} ${jobId} 2>/dev/null`, { encoding: 'utf8', timeout: 5000 });
-    return true;
+    const resp = await fetch(`http://localhost:${gatewayPort}/api/cron/${cmd}/${jobId}`, { method: 'POST' });
+    return resp.ok;
   } catch {
     return false;
   }
@@ -517,14 +521,14 @@ export async function killSubAgent(sessionId: string): Promise<boolean> {
   return false;
 }
 
-export function readMemoryFile(filePath: string): string {
+export async function readMemoryFile(filePath: string): Promise<string> {
   try {
-    // Security: ensure path is within memory directory
+    const memDir = getMemoryDir();
     const resolved = path.resolve(filePath);
-    if (!resolved.startsWith(MEMORY_DIR)) {
+    if (!resolved.startsWith(memDir)) {
       return 'Access denied: Path outside memory directory';
     }
-    return fs.readFileSync(resolved, 'utf8');
+    return await readRemoteFile(resolved);
   } catch (e: any) {
     return `Error reading file: ${e.message}`;
   }
@@ -605,7 +609,7 @@ export function formatUptime(startMs: number): string {
   return `${d}d ${h % 24}h`;
 }
 export async function fetchAgentData(): Promise<AgentData> {
-  const data = fetchAgentPanelData();
+  const data = await fetchAgentPanelData();
   return {
     model: data.defaultModel,
     context: { used: 0, max: 200000, percentage: 0 },

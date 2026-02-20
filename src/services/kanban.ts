@@ -1,5 +1,5 @@
-import * as fs from 'fs';
 import * as path from 'path';
+import { readRemoteFile, writeRemoteFile, getProjectsJsonPath } from './remoteFs';
 
 export interface Subtask {
   text: string;
@@ -36,13 +36,11 @@ export interface ProjectInfo {
   owner: string;
 }
 
-const PROJECTS_JSON = '/home/xiko/kanban-app/data/projects.json';
-
 /**
- * Load project list from projects.json
+ * Load project list from projects.json (remote)
  */
-export function loadProjects(): ProjectInfo[] {
-  const raw = fs.readFileSync(PROJECTS_JSON, 'utf-8');
+export async function loadProjects(): Promise<ProjectInfo[]> {
+  const raw = await readRemoteFile(getProjectsJsonPath());
   const data = JSON.parse(raw);
   return Object.entries(data.projects).map(([id, p]: [string, any]) => ({
     id,
@@ -356,16 +354,16 @@ export function createTask(
 }
 
 /**
- * Read and parse a kanban file
+ * Read and parse a kanban file (remote)
  */
-export function readBoard(filePath: string): KanbanBoard {
-  const content = fs.readFileSync(filePath, 'utf-8');
+export async function readBoard(filePath: string): Promise<KanbanBoard> {
+  const content = await readRemoteFile(filePath);
   return parseKanbanMarkdown(content);
 }
 
 /**
- * Write board back to file
+ * Write board back to file (remote)
  */
-export function writeBoard(filePath: string, board: KanbanBoard): void {
-  fs.writeFileSync(filePath, serializeBoard(board), 'utf-8');
+export async function writeBoard(filePath: string, board: KanbanBoard): Promise<void> {
+  await writeRemoteFile(filePath, serializeBoard(board));
 }
