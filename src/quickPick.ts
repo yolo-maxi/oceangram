@@ -29,33 +29,48 @@ export async function showQuickPick(context: vscode.ExtensionContext) {
     const pinnedIds = new Set(tg.getPinnedIds());
     const cached = tg.getCachedDialogs();
     const dialogs: DialogInfo[] = cached && cached.length > 0 ? cached : [];
+    const dialogMap = new Map(dialogs.map(d => [d.id, d]));
 
-    // pinned first, then by lastMessageTime
-    const sorted = [...dialogs].sort((a, b) => {
-      const ap = pinnedIds.has(a.id) ? 1 : 0;
-      const bp = pinnedIds.has(b.id) ? 1 : 0;
-      if (ap !== bp) return bp - ap;
-      return (b.lastMessageTime || 0) - (a.lastMessageTime || 0);
-    });
+    // Helper to create chat item
+    const makeChatItem = (d: DialogInfo, showPin: boolean): QuickPickActionItem => {
+      const pin = showPin && pinnedIds.has(d.id) ? '$(pin) ' : '';
+      const unread = d.unreadCount > 0 ? ` · ${d.unreadCount} unread` : '';
+      const desc = `💬 ${d.lastMessage || ''}${unread}`;
+      return {
+        label: `${pin}${d.name}`,
+        description: desc,
+        action: () => {
+          vscode.commands.executeCommand('oceangram.openComms');
+          // Small delay to let panel init, then open the chat
+          setTimeout(() => {
+            vscode.commands.executeCommand('oceangram.openChat', d.id);
+          }, 300);
+        },
+      };
+    };
 
-    const chatItems = sorted.slice(0, 20);
-    if (chatItems.length > 0) {
-      items.push({ label: 'Chats', kind: vscode.QuickPickItemKind.Separator });
-      for (const d of chatItems) {
-        const pin = pinnedIds.has(d.id) ? '$(pin) ' : '';
-        const unread = d.unreadCount > 0 ? ` · ${d.unreadCount} unread` : '';
-        const desc = `💬 ${d.lastMessage || ''}${unread}`;
-        items.push({
-          label: `${pin}${d.name}`,
-          description: desc,
-          action: () => {
-            vscode.commands.executeCommand('oceangram.openComms');
-            // Small delay to let panel init, then open the chat
-            setTimeout(() => {
-              vscode.commands.executeCommand('oceangram.openChat', d.id);
-            }, 300);
-          },
-        });
+    // Get pinned chats
+    const pinnedChats = dialogs.filter(d => pinnedIds.has(d.id));
+    if (pinnedChats.length > 0) {
+      items.push({ label: 'Pinned', kind: vscode.QuickPickItemKind.Separator });
+      for (const d of pinnedChats) {
+        items.push(makeChatItem(d, true));
+      }
+    }
+
+    // Get recently opened chats (excluding pinned)
+    const recentEntries = tg.getRecentChats();
+    const recentChats: DialogInfo[] = [];
+    for (const entry of recentEntries) {
+      if (pinnedIds.has(entry.id)) continue; // Skip pinned (already shown)
+      const dialog = dialogMap.get(entry.id);
+      if (dialog) recentChats.push(dialog);
+    }
+
+    if (recentChats.length > 0) {
+      items.push({ label: 'Recent', kind: vscode.QuickPickItemKind.Separator });
+      for (const d of recentChats.slice(0, 10)) {
+        items.push(makeChatItem(d, false));
       }
     }
   } catch {

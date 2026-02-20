@@ -2068,6 +2068,112 @@ input.addEventListener('keydown', (e) => {
       // Silently ignore typing errors
     }
   }
+
+  // --- Group Members for Mention Autocomplete ---
+
+  private groupMembersCache: Map<string, { members: GroupMember[]; ts: number }> = new Map();
+  private static GROUP_MEMBERS_TTL = 60_000; // 1 minute
+
+  /**
+   * Get members of a group/channel for mention autocomplete.
+   * Returns user IDs, names, usernames, and profile photo URLs.
+   */
+  async getGroupMembers(chatId: string, limit: number = 50): Promise<GroupMember[]> {
+    if (!this.client) throw new Error('Not connected');
+
+    // Check cache
+    const cached = this.groupMembersCache.get(chatId);
+    if (cached && Date.now() - cached.ts < TelegramService.GROUP_MEMBERS_TTL) {
+      return cached.members;
+    }
+
+    try {
+      const entity = await this.client.getEntity(chatId);
+      let participants: any[] = [];
+
+      // For channels/supergroups
+      if (entity.className === 'Channel') {
+        const result = await this.client.invoke(
+          new Api.channels.GetParticipants({
+            channel: entity as any,
+            filter: new Api.ChannelParticipantsRecent(),
+            offset: 0,
+            limit,
+            hash: BigInt(0),
+          })
+        );
+        if (result.className === 'channels.ChannelParticipants') {
+          participants = result.users || [];
+        }
+      }
+      // For basic groups
+      else if (entity.className === 'Chat') {
+        const fullChat = await this.client.invoke(
+          new Api.messages.GetFullChat({ chatId: (entity as Api.Chat).id })
+        );
+        if (fullChat.users) {
+          participants = fullChat.users;
+        }
+      }
+      // For user DMs, just return the user
+      else if (entity.className === 'User') {
+        const user = entity as Api.User;
+        const member: GroupMember = {
+          id: user.id.toString(),
+          name: [user.firstName, user.lastName].filter(Boolean).join(' ') || 'Unknown',
+          username: user.username,
+          initials: this.getInitials([user.firstName, user.lastName].filter(Boolean).join(' ') || '?'),
+        };
+        // Get profile photo
+        const cachedPhoto = this.getProfilePhoto(member.id);
+        if (cachedPhoto) member.photo = cachedPhoto;
+        return [member];
+      }
+
+      // Convert to GroupMember array
+      const members: GroupMember[] = [];
+      for (const p of participants) {
+        if (p.className !== 'User') continue;
+        const user = p as Api.User;
+        if (user.bot || user.deleted) continue; // Skip bots and deleted accounts
+
+        const member: GroupMember = {
+          id: user.id.toString(),
+          name: [user.firstName, user.lastName].filter(Boolean).join(' ') || 'Unknown',
+          username: user.username,
+          initials: this.getInitials([user.firstName, user.lastName].filter(Boolean).join(' ') || '?'),
+        };
+
+        // Use cached profile photo if available
+        const cachedPhoto = this.getProfilePhoto(member.id);
+        if (cachedPhoto) member.photo = cachedPhoto;
+
+        members.push(member);
+      }
+
+      // Cache results
+      this.groupMembersCache.set(chatId, { members, ts: Date.now() });
+
+      // Fetch profile photos in background for members without photos
+      const needPhotos = members.filter(m => !m.photo).map(m => m.id);
+      if (needPhotos.length > 0) {
+        this.fetchProfilePhotos(needPhotos).catch(() => {});
+      }
+
+      return members;
+    } catch (err) {
+      console.error('[Oceangram] Failed to get group members:', err);
+      return [];
+    }
+  }
+}
+
+export interface GroupMember {
+  id: string;
+  name: string;
+  username?: string;
+  initials: string;
+  photo?: string;
 }
 
 // --- Event types ---

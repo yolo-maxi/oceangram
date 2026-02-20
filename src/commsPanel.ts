@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { TelegramService, ChatEvent, DialogInfo, ConnectionState, UserStatus } from './services/telegram';
+import { TelegramService, ChatEvent, DialogInfo, ConnectionState, UserStatus, GroupMember } from './services/telegram';
 import { OpenClawService, AgentSessionInfo, AgentDetailedInfo } from './services/openclaw';
 import { highlightMessageCodeBlocks, disposeHighlighter } from './services/highlighter';
 
@@ -928,6 +928,18 @@ export class ChatTab {
             const { chatId: rawChatId, topicId: rawTopicId } = TelegramService.parseDialogId(this.chatId);
             const details = openclaw.getDetailedSession(rawChatId, rawTopicId);
             this.panel.webview.postMessage({ type: 'agentDetails', data: details });
+            break;
+          }
+          case 'getGroupMembers': {
+            await tg.connect();
+            const { chatId: rawChatId } = TelegramService.parseDialogId(this.chatId);
+            const members = await tg.getGroupMembers(rawChatId, 100);
+            // Include cached profile photos
+            const membersWithPhotos = members.map(m => ({
+              ...m,
+              photo: m.photo || tg.getProfilePhoto(m.id) || undefined,
+            }));
+            this.panel.webview.postMessage({ type: 'groupMembers', members: membersWithPhotos });
             break;
           }
         }
