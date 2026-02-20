@@ -170,17 +170,17 @@ describe('Brief Parser — edge cases', () => {
 });
 
 describe('maskKey', () => {
-  it('masks long keys showing first 3 and last 4', () => {
-    expect(maskKey('sk_live_abc123def456')).toBe('sk_...f456');
+  it('masks long keys showing first 4 and last 4', () => {
+    expect(maskKey('sk_live_abc123def456')).toBe('sk_l****f456');
   });
 
   it('masks short keys completely', () => {
-    expect(maskKey('abc')).toBe('••••••••');
-    expect(maskKey('12345678')).toBe('••••••••');
+    expect(maskKey('abc')).toBe('********');
+    expect(maskKey('12345678')).toBe('********');
   });
 
   it('masks 9-char key correctly', () => {
-    expect(maskKey('123456789')).toBe('123...6789');
+    expect(maskKey('123456789')).toBe('1234****6789');
   });
 });
 
