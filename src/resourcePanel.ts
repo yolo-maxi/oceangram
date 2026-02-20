@@ -18,23 +18,26 @@ export class ResourcePanel {
   private deploymentData: { pm2: Pm2Process[]; git: GitLogInfo | null; remotes: GitRemote[] } | null = null;
   private pm2Processes: PM2ProcessDisplay[] = [];
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
+  private context: vscode.ExtensionContext;
 
   public static createOrShow(context: vscode.ExtensionContext) {
     if (ResourcePanel.instance) {
       ResourcePanel.instance.panel.reveal(vscode.ViewColumn.One);
       return;
     }
+    const mediaUri = vscode.Uri.joinPath(context.extensionUri, 'media');
     const panel = vscode.window.createWebviewPanel(
       'oceangram.resources',
       '📦 Resources',
       vscode.ViewColumn.One,
-      { enableScripts: true, retainContextWhenHidden: true }
+      { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [mediaUri] }
     );
     ResourcePanel.instance = new ResourcePanel(panel, context);
   }
 
   private constructor(panel: vscode.WebviewPanel, context: vscode.ExtensionContext) {
     this.panel = panel;
+    this.context = context;
 
     // Async init
     this.initAsync();
