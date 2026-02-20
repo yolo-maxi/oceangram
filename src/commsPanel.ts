@@ -2433,6 +2433,11 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
+.code-header-actions {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
 .copy-code-btn {
   background: transparent;
   border: none;
@@ -2449,6 +2454,44 @@ body {
 }
 .copy-code-btn.copied {
   color: #4ec9b0;
+}
+.line-nums-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255,255,255,0.5);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  transition: all 0.15s;
+}
+.line-nums-btn:hover {
+  background: rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.9);
+}
+.line-nums-btn.active {
+  color: #6ab2f2;
+}
+.code-line-numbered {
+  display: table;
+  width: 100%;
+}
+.code-line-numbered .code-line {
+  display: table-row;
+}
+.code-line-numbered .code-line-num {
+  display: table-cell;
+  text-align: right;
+  padding-right: 12px;
+  user-select: none;
+  color: rgba(255,255,255,0.25);
+  min-width: 28px;
+  font-size: 11px;
+  vertical-align: top;
+}
+.code-line-numbered .code-line-content {
+  display: table-cell;
+  white-space: pre;
 }
 
 /* Image lightbox overlay */
@@ -3856,14 +3899,15 @@ function applyEntities(text, entities, msg) {
       case 'code': replacement = '<code>' + slice + '</code>'; break;
       case 'pre': {
         var hlKey = String(i);
+        var headerBtns = '<span class="code-header-actions"><button class="line-nums-btn" onclick="toggleLineNumbers(this)" title="Toggle line numbers">#</button><button class="copy-code-btn" onclick="copyCodeBlock(this)" title="Copy code">📋</button></span>';
         if (msg && msg.highlightedCodeBlocks && msg.highlightedCodeBlocks[hlKey]) {
           replacement = '<div class="code-block-wrapper">' +
-            '<div class="code-block-header"><span class="code-lang">' + esc(e.language || '') + '</span><button class="copy-code-btn" onclick="copyCodeBlock(this)" title="Copy code">📋</button></div>' +
+            '<div class="code-block-header"><span class="code-lang">' + esc(e.language || '') + '</span>' + headerBtns + '</div>' +
             msg.highlightedCodeBlocks[hlKey] +
             '</div>';
         } else {
           replacement = '<div class="code-block-wrapper">' +
-            '<div class="code-block-header"><span class="code-lang">' + esc(e.language || '') + '</span><button class="copy-code-btn" onclick="copyCodeBlock(this)" title="Copy code">📋</button></div>' +
+            '<div class="code-block-header"><span class="code-lang">' + esc(e.language || '') + '</span>' + headerBtns + '</div>' +
             '<pre><code' + (e.language ? ' class="language-' + esc(e.language) + '"' : '') + '>' + slice + '</code></pre>' +
             '</div>';
         }
@@ -5579,6 +5623,46 @@ function copyCodeBlock(btn) {
       btn.classList.remove('copied');
     }, 2000);
   });
+}
+
+function toggleLineNumbers(btn) {
+  var wrapper = btn.closest('.code-block-wrapper');
+  if (!wrapper) return;
+  var pre = wrapper.querySelector('pre');
+  if (!pre) return;
+  var code = pre.querySelector('code');
+  if (!code) return;
+  var existing = code.querySelector('.code-line-numbered');
+  if (existing) {
+    // Remove line numbers - restore original
+    code.textContent = existing.textContent;
+    btn.classList.remove('active');
+    try { localStorage.setItem('oceangram-line-numbers', 'off'); } catch(e){}
+  } else {
+    // Add line numbers
+    var text = code.textContent || '';
+    var lines = text.split('\\n');
+    if (lines[lines.length - 1] === '') lines.pop();
+    var container = document.createElement('div');
+    container.className = 'code-line-numbered';
+    lines.forEach(function(line, idx) {
+      var row = document.createElement('div');
+      row.className = 'code-line';
+      var num = document.createElement('span');
+      num.className = 'code-line-num';
+      num.textContent = String(idx + 1);
+      var content = document.createElement('span');
+      content.className = 'code-line-content';
+      content.textContent = line;
+      row.appendChild(num);
+      row.appendChild(content);
+      container.appendChild(row);
+    });
+    code.textContent = '';
+    code.appendChild(container);
+    btn.classList.add('active');
+    try { localStorage.setItem('oceangram-line-numbers', 'on'); } catch(e){}
+  }
 }
 
 /* Voice player */
