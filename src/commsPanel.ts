@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { TelegramService, ChatEvent, DialogInfo, ConnectionState, UserStatus, GroupMember } from './services/telegram';
+import { TelegramService, ChatEvent, DialogInfo, ConnectionState, UserStatus, GroupMember, ChatInfoResult, ChatMember, SharedMediaItem } from './services/telegram';
 import { OpenClawService, AgentSessionInfo, AgentDetailedInfo } from './services/openclaw';
 import { highlightMessageCodeBlocks, disposeHighlighter } from './services/highlighter';
 
@@ -122,7 +122,11 @@ export class CommsPicker {
     const all = await tg.getDialogs(200);
     const pinned = all.filter(d => pinnedIds.includes(d.id));
     pinned.forEach(d => d.isPinned = true);
-    this.panel.webview.postMessage({ type: 'dialogs', dialogs: pinned });
+    // TASK-108: Sort by most recent message time
+    pinned.sort((a, b) => (b.lastMessageTime || 0) - (a.lastMessageTime || 0));
+    // TASK-109: Group forum topics under their parent for collapsible tree
+    const grouped = this.groupForumTopics(pinned, all);
+    this.panel.webview.postMessage({ type: 'dialogs', dialogs: grouped });
   }
 
   private sendPinnedDialogsFrom(dialogs: DialogInfo[]): void {
@@ -134,22 +138,106 @@ export class CommsPicker {
     }
     const pinned = dialogs.filter(d => pinnedIds.includes(d.id));
     pinned.forEach(d => d.isPinned = true);
-    this.panel.webview.postMessage({ type: 'dialogs', dialogs: pinned });
+    // TASK-108: Sort by most recent message time
+    pinned.sort((a, b) => (b.lastMessageTime || 0) - (a.lastMessageTime || 0));
+    // TASK-109: Group forum topics under their parent for collapsible tree
+    const grouped = this.groupForumTopics(pinned, dialogs);
+    this.panel.webview.postMessage({ type: 'dialogs', dialogs: grouped });
   }
 
   private sendRecentChats(allDialogs?: DialogInfo[]): void {
     const tg = getTelegram();
     const recentEntries = tg.getRecentChats();
-    if (recentEntries.length === 0) return;
+    if (recentEntries.length === 0) {
+      this.panel.webview.postMessage({ type: 'recentChats', dialogs: [] });
+      return;
+    }
     const dialogs = allDialogs || tg.getCachedDialogs() || [];
-    const recentIds = new Set(recentEntries.map(r => r.id));
     const pinnedIds = new Set(tg.getPinnedIds());
     // Filter: recent but not pinned (pinned already shown)
+    // TASK-108: Sort by lastMessageTime (recent entries already ordered by access time, 
+    // but we also sort by last message for better UX)
     const recent = recentEntries
       .filter(r => !pinnedIds.has(r.id))
       .map(r => dialogs.find(d => d.id === r.id))
       .filter(Boolean) as DialogInfo[];
-    this.panel.webview.postMessage({ type: 'recentChats', dialogs: recent });
+    // Sort by last message time
+    recent.sort((a, b) => (b.lastMessageTime || 0) - (a.lastMessageTime || 0));
+    // TASK-109: Group forum topics for collapsible tree
+    const grouped = this.groupForumTopics(recent, dialogs);
+    this.panel.webview.postMessage({ type: 'recentChats', dialogs: grouped });
+  }
+
+  /**
+   * TASK-109: Group forum topics under their parent group for collapsible tree view.
+   * Each forum group gets a _topics array with its child topics.
+   * Aggregates unread counts on parent when topics exist.
+   */
+  private groupForumTopics(dialogs: DialogInfo[], allDialogs: DialogInfo[]): DialogInfo[] {
+    const forumGroups = new Map<string, { parent: DialogInfo & { _topics?: DialogInfo[]; _isForumParent?: boolean; _totalUnread?: number }, topics: DialogInfo[] }>();
+    const result: DialogInfo[] = [];
+
+    for (const d of dialogs) {
+      // If it's a forum topic (has topicId), group it under its parent
+      if (d.isForum && d.topicId && d.groupName) {
+        const key = d.chatId;
+        if (!forumGroups.has(key)) {
+          // Find or create parent group entry
+          const parentDialog = allDialogs.find(ad => ad.chatId === d.chatId && !ad.topicId);
+          const parent: DialogInfo & { _topics?: DialogInfo[]; _isForumParent?: boolean; _totalUnread?: number } = parentDialog
+            ? { ...parentDialog }
+            : {
+                id: d.chatId,
+                chatId: d.chatId,
+                name: d.groupName,
+                lastMessage: '',
+                lastMessageTime: d.lastMessageTime || 0,
+                unreadCount: 0,
+                initials: d.initials,
+                isPinned: false,
+                isForum: true,
+              };
+          parent._topics = [];
+          parent._isForumParent = true;
+          parent._totalUnread = 0;
+          forumGroups.set(key, { parent, topics: [] });
+        }
+        const entry = forumGroups.get(key)!;
+        entry.topics.push(d);
+        entry.parent._totalUnread! += d.unreadCount || 0;
+        // Update parent's lastMessageTime to most recent topic
+        if ((d.lastMessageTime || 0) > (entry.parent.lastMessageTime || 0)) {
+          entry.parent.lastMessageTime = d.lastMessageTime;
+        }
+      } else if (d.isForum && !d.topicId) {
+        // Forum group without topic - might have topics added later
+        const key = d.chatId;
+        if (!forumGroups.has(key)) {
+          const parent: DialogInfo & { _topics?: DialogInfo[]; _isForumParent?: boolean; _totalUnread?: number } = { ...d };
+          parent._topics = [];
+          parent._isForumParent = true;
+          parent._totalUnread = d.unreadCount || 0;
+          forumGroups.set(key, { parent, topics: [] });
+        }
+      } else {
+        // Regular chat, not a forum
+        result.push(d);
+      }
+    }
+
+    // Add forum groups with their topics
+    for (const [, entry] of forumGroups) {
+      // Sort topics by last message time
+      entry.topics.sort((a, b) => (b.lastMessageTime || 0) - (a.lastMessageTime || 0));
+      entry.parent._topics = entry.topics;
+      entry.parent.unreadCount = entry.parent._totalUnread || 0;
+      result.push(entry.parent);
+    }
+
+    // Final sort by lastMessageTime
+    result.sort((a, b) => (b.lastMessageTime || 0) - (a.lastMessageTime || 0));
+
+    return result;
   }
 
   /** Collapse forum topics into group-level entries for search results */
@@ -299,6 +387,36 @@ input[type="text"]:focus { background: var(--tg-hover); }
 }
 .topic-count {
   font-size: 11px; color: var(--tg-text-secondary); flex-shrink: 0;
+}
+/* TASK-109: Collapsible forum topics tree */
+.forum-parent { position: relative; }
+.forum-parent .expand-toggle {
+  cursor: pointer; padding: 4px 6px; border-radius: 4px;
+  flex-shrink: 0; font-size: 14px; color: var(--tg-text-secondary);
+  transition: transform 0.2s;
+}
+.forum-parent .expand-toggle:hover { background: var(--tg-surface); color: var(--tg-text); }
+.forum-parent.expanded .expand-toggle { transform: rotate(90deg); }
+.forum-topics-container {
+  display: none;
+  padding-left: 20px;
+  border-left: 2px solid var(--tg-surface);
+  margin-left: 34px;
+}
+.forum-parent.expanded + .forum-topics-container { display: block; }
+.forum-topics-container .chat-item {
+  padding: 6px 10px;
+}
+.forum-topics-container .avatar {
+  width: 36px; height: 36px; font-size: 18px;
+}
+.section-header {
+  padding: 10px 12px 6px;
+  font-size: 12px;
+  color: var(--tg-text-secondary);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 .back-btn {
   display: flex; align-items: center; gap: 6px; padding: 10px 12px;
@@ -940,6 +1058,24 @@ export class ChatTab {
               photo: m.photo || tg.getProfilePhoto(m.id) || undefined,
             }));
             this.panel.webview.postMessage({ type: 'groupMembers', members: membersWithPhotos });
+            break;
+          }
+          case 'getChatInfo': {
+            await tg.connect();
+            const chatInfo = await tg.getChatInfo(this.chatId);
+            this.panel.webview.postMessage({ type: 'chatInfo', info: chatInfo });
+            break;
+          }
+          case 'getChatMembers': {
+            await tg.connect();
+            const chatMembers = await tg.getChatMembersForInfo(this.chatId, msg.limit || 50);
+            this.panel.webview.postMessage({ type: 'chatMembers', members: chatMembers });
+            break;
+          }
+          case 'getSharedMedia': {
+            await tg.connect();
+            const media = await tg.getSharedMedia(this.chatId, msg.mediaType || 'photo', msg.limit || 20);
+            this.panel.webview.postMessage({ type: 'sharedMedia', mediaType: msg.mediaType, media: media });
             break;
           }
         }
@@ -2043,6 +2179,83 @@ body {
 .emoji-btn:hover { background: rgba(106,178,242,0.1); color: var(--tg-accent); }
 .emoji-btn.active { color: var(--tg-accent); }
 
+/* Mention autocomplete dropdown */
+.mention-dropdown {
+  position: absolute;
+  bottom: 100%;
+  left: 12px;
+  right: 12px;
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--tg-bg-secondary);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  box-shadow: 0 -4px 16px rgba(0,0,0,0.4);
+  z-index: 300;
+  display: none;
+  animation: mentionSlideUp 0.12s ease-out;
+}
+.mention-dropdown.visible { display: block; }
+@keyframes mentionSlideUp {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.mention-dropdown::-webkit-scrollbar { width: 4px; }
+.mention-dropdown::-webkit-scrollbar-thumb { background: var(--tg-scrollbar); border-radius: 2px; }
+.mention-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.mention-item:hover, .mention-item.selected { background: rgba(106,178,242,0.15); }
+.mention-item:first-child { border-radius: 9px 9px 0 0; }
+.mention-item:last-child { border-radius: 0 0 9px 9px; }
+.mention-item:only-child { border-radius: 9px; }
+.mention-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+}
+.mention-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+}
+.mention-info { flex: 1; min-width: 0; }
+.mention-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--tg-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mention-username {
+  font-size: 12px;
+  color: var(--tg-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mention-empty {
+  padding: 12px;
+  text-align: center;
+  color: var(--tg-text-secondary);
+  font-size: 13px;
+}
+
 /* Emoji picker */
 .emoji-picker {
   position: absolute;
@@ -2783,6 +2996,7 @@ body {
     <div class="emoji-tabs" id="emojiTabs"></div>
     <div class="emoji-grid-wrap" id="emojiGridWrap"></div>
   </div>
+  <div class="mention-dropdown" id="mentionDropdown"></div>
   <div class="composer">
     <textarea id="msgInput" rows="1" placeholder="Message ${name}…" autofocus></textarea>
     <button class="emoji-btn" id="emojiBtn" title="Emoji">😊</button>

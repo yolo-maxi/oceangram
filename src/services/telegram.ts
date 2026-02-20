@@ -2166,6 +2166,271 @@ input.addEventListener('keydown', (e) => {
       return [];
     }
   }
+
+  // --- Chat Info Panel ---
+
+  /** Get chat info (description, member count, photo) */
+  async getChatInfo(dialogId: string): Promise<ChatInfoResult> {
+    if (!this.client) throw new Error('Not connected');
+    const { chatId } = TelegramService.parseDialogId(dialogId);
+    const entity = await this.client.getEntity(chatId);
+
+    const result: ChatInfoResult = {
+      type: 'user',
+      title: this.getEntityName(entity),
+    };
+
+    if (entity instanceof Api.User) {
+      result.type = 'user';
+      result.username = entity.username;
+      result.isVerified = entity.verified || false;
+      // Get full user for bio
+      try {
+        const fullUser = await this.client.invoke(new Api.users.GetFullUser({ id: entity }));
+        if (fullUser.fullUser?.about) {
+          result.description = fullUser.fullUser.about;
+        }
+      } catch { /* ignore */ }
+      // Profile photo
+      try {
+        const photoBuffer = await this.client.downloadProfilePhoto(entity, { isBig: true });
+        if (photoBuffer && Buffer.isBuffer(photoBuffer) && photoBuffer.length > 0) {
+          result.photo = `data:image/jpeg;base64,${photoBuffer.toString('base64')}`;
+        }
+      } catch { /* ignore */ }
+    } else if (entity instanceof Api.Chat) {
+      result.type = 'group';
+      result.memberCount = entity.participantsCount || 0;
+      // Get full chat for description
+      try {
+        const fullChat = await this.client.invoke(new Api.messages.GetFullChat({ chatId: entity.id }));
+        if ((fullChat.fullChat as any)?.about) {
+          result.description = (fullChat.fullChat as any).about;
+        }
+      } catch { /* ignore */ }
+    } else if (entity instanceof Api.Channel) {
+      result.type = entity.megagroup ? 'group' : 'channel';
+      result.username = entity.username;
+      result.isVerified = entity.verified || false;
+      result.isForum = entity.forum || false;
+      result.memberCount = entity.participantsCount || 0;
+      // Get full channel for description and more accurate member count
+      try {
+        const fullChannel = await this.client.invoke(new Api.channels.GetFullChannel({ channel: entity }));
+        if ((fullChannel.fullChat as any)?.about) {
+          result.description = (fullChannel.fullChat as any).about;
+        }
+        if ((fullChannel.fullChat as any)?.participantsCount) {
+          result.memberCount = (fullChannel.fullChat as any).participantsCount;
+        }
+      } catch { /* ignore */ }
+      // Channel photo
+      try {
+        const photoBuffer = await this.client.downloadProfilePhoto(entity, { isBig: true });
+        if (photoBuffer && Buffer.isBuffer(photoBuffer) && photoBuffer.length > 0) {
+          result.photo = `data:image/jpeg;base64,${photoBuffer.toString('base64')}`;
+        }
+      } catch { /* ignore */ }
+    }
+
+    return result;
+  }
+
+  /** Get members of a group/channel for info panel */
+  async getChatMembersForInfo(dialogId: string, limit: number = 50): Promise<ChatMember[]> {
+    if (!this.client) throw new Error('Not connected');
+    const { chatId } = TelegramService.parseDialogId(dialogId);
+    const entity = await this.client.getEntity(chatId);
+
+    const members: ChatMember[] = [];
+
+    try {
+      if (entity instanceof Api.Chat) {
+        // Basic group
+        const fullChat = await this.client.invoke(new Api.messages.GetFullChat({ chatId: entity.id }));
+        const participants = (fullChat as any).users || [];
+        for (const user of participants.slice(0, limit)) {
+          if (!(user instanceof Api.User)) continue;
+          const member: ChatMember = {
+            id: user.id.toString(),
+            name: [user.firstName, user.lastName].filter(Boolean).join(' ') || 'Unknown',
+            username: user.username,
+          };
+          if (user.status) {
+            const statusName = user.status.className;
+            if (statusName === 'UserStatusOnline') member.status = 'online';
+            else if (statusName === 'UserStatusRecently') member.status = 'recently';
+            else if (statusName === 'UserStatusLastWeek') member.status = 'lastWeek';
+            else if (statusName === 'UserStatusLastMonth') member.status = 'lastMonth';
+            else member.status = 'offline';
+          }
+          members.push(member);
+        }
+      } else if (entity instanceof Api.Channel) {
+        const result = await this.client.invoke(new Api.channels.GetParticipants({
+          channel: entity,
+          filter: new Api.ChannelParticipantsRecent(),
+          offset: 0,
+          limit,
+          hash: BigInt(0),
+        }));
+        if (result instanceof Api.channels.ChannelParticipants) {
+          for (const user of result.users.slice(0, limit)) {
+            if (!(user instanceof Api.User)) continue;
+            const member: ChatMember = {
+              id: user.id.toString(),
+              name: [user.firstName, user.lastName].filter(Boolean).join(' ') || 'Unknown',
+              username: user.username,
+            };
+            if (user.status) {
+              const statusName = user.status.className;
+              if (statusName === 'UserStatusOnline') member.status = 'online';
+              else if (statusName === 'UserStatusRecently') member.status = 'recently';
+              else if (statusName === 'UserStatusLastWeek') member.status = 'lastWeek';
+              else if (statusName === 'UserStatusLastMonth') member.status = 'lastMonth';
+              else member.status = 'offline';
+            }
+            members.push(member);
+          }
+          // Mark admins/owners
+          for (const p of result.participants) {
+            const userId = (p as any).userId?.toString();
+            if (!userId) continue;
+            const m = members.find(mm => mm.id === userId);
+            if (!m) continue;
+            if (p instanceof Api.ChannelParticipantCreator) m.isOwner = true;
+            if (p instanceof Api.ChannelParticipantAdmin) m.isAdmin = true;
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[Oceangram] Failed to get chat members:', err);
+    }
+
+    // Fetch profile photos (limited batch)
+    const photoIds = members.slice(0, 20).map(m => m.id);
+    const photos = await this.fetchProfilePhotos(photoIds);
+    for (const m of members) {
+      const photo = photos.get(m.id);
+      if (photo) m.photo = photo;
+    }
+
+    return members;
+  }
+
+  /** Get shared media (photos, videos, files, links) */
+  async getSharedMedia(dialogId: string, mediaType: 'photo' | 'video' | 'file' | 'link', limit: number = 20): Promise<SharedMediaItem[]> {
+    if (!this.client) throw new Error('Not connected');
+    const { chatId, topicId } = TelegramService.parseDialogId(dialogId);
+    const entity = await this.client.getEntity(chatId);
+
+    let filter: Api.TypeMessagesFilter;
+    switch (mediaType) {
+      case 'photo': filter = new Api.InputMessagesFilterPhotos(); break;
+      case 'video': filter = new Api.InputMessagesFilterVideo(); break;
+      case 'file': filter = new Api.InputMessagesFilterDocument(); break;
+      case 'link': filter = new Api.InputMessagesFilterUrl(); break;
+      default: filter = new Api.InputMessagesFilterPhotos();
+    }
+
+    const opts: any = { filter, limit };
+    if (topicId) opts.replyTo = topicId;
+
+    const msgs = await this.client.getMessages(entity, opts);
+    const results: SharedMediaItem[] = [];
+
+    for (const msg of msgs) {
+      const item: SharedMediaItem = {
+        messageId: msg.id,
+        type: mediaType,
+        timestamp: msg.date || 0,
+      };
+
+      if (mediaType === 'photo') {
+        try {
+          const buffer = await this.client.downloadMedia(msg, {});
+          if (buffer && Buffer.isBuffer(buffer)) {
+            item.thumbnailUrl = `data:image/jpeg;base64,${buffer.toString('base64')}`;
+          }
+        } catch { /* ignore */ }
+      } else if (mediaType === 'video') {
+        const media = msg.media as any;
+        const doc = media?.document;
+        if (doc) {
+          const attrs = doc.attributes || [];
+          const filenameAttr = attrs.find((a: any) => a.className === 'DocumentAttributeFilename');
+          if (filenameAttr) item.fileName = filenameAttr.fileName;
+          if (doc.size) item.fileSize = typeof doc.size === 'number' ? doc.size : Number(doc.size);
+          if (doc.thumbs && doc.thumbs.length > 0) {
+            try {
+              const thumb = doc.thumbs[doc.thumbs.length - 1];
+              const thumbBuffer = await this.client.downloadMedia(msg, { thumb });
+              if (thumbBuffer && Buffer.isBuffer(thumbBuffer)) {
+                item.thumbnailUrl = `data:image/jpeg;base64,${thumbBuffer.toString('base64')}`;
+              }
+            } catch { /* ignore */ }
+          }
+        }
+      } else if (mediaType === 'file') {
+        const media = msg.media as any;
+        const doc = media?.document;
+        if (doc) {
+          const attrs = doc.attributes || [];
+          const filenameAttr = attrs.find((a: any) => a.className === 'DocumentAttributeFilename');
+          if (filenameAttr) item.fileName = filenameAttr.fileName;
+          if (doc.size) item.fileSize = typeof doc.size === 'number' ? doc.size : Number(doc.size);
+        }
+      } else if (mediaType === 'link') {
+        const media = msg.media as any;
+        if (media?.webpage && media.webpage.className === 'WebPage') {
+          item.url = media.webpage.url;
+          item.title = media.webpage.title || media.webpage.url;
+        } else if (msg.message) {
+          const urlMatch = msg.message.match(/(https?:\/\/[^\s]+)/);
+          if (urlMatch) {
+            item.url = urlMatch[1];
+            item.title = urlMatch[1];
+          }
+        }
+      }
+
+      results.push(item);
+    }
+
+    return results;
+  }
+}
+
+export interface ChatInfoResult {
+  type: 'user' | 'group' | 'channel';
+  title: string;
+  description?: string;
+  memberCount?: number;
+  photo?: string;
+  username?: string;
+  isVerified?: boolean;
+  isForum?: boolean;
+}
+
+export interface ChatMember {
+  id: string;
+  name: string;
+  username?: string;
+  photo?: string;
+  isAdmin?: boolean;
+  isOwner?: boolean;
+  status?: 'online' | 'offline' | 'recently' | 'lastWeek' | 'lastMonth';
+}
+
+export interface SharedMediaItem {
+  messageId: number;
+  type: 'photo' | 'video' | 'file' | 'link';
+  thumbnailUrl?: string;
+  fileName?: string;
+  fileSize?: number;
+  url?: string;
+  title?: string;
+  timestamp: number;
 }
 
 export interface GroupMember {

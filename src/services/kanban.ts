@@ -240,17 +240,28 @@ export function serializeBoard(board: KanbanBoard): string {
 }
 
 /**
- * Move a task from one column to another in the board
+ * Move a task from one column to another in the board, optionally at a specific position
+ * @param board The kanban board
+ * @param taskId ID of the task to move
+ * @param targetColumnTitle Title of the target column
+ * @param position Optional position index in the target column (defaults to end)
  */
-export function moveTask(board: KanbanBoard, taskId: string, targetColumnTitle: string): boolean {
+export function moveTask(
+  board: KanbanBoard,
+  taskId: string,
+  targetColumnTitle: string,
+  position?: number
+): boolean {
   let task: KanbanTask | undefined;
   let sourceCol: KanbanColumn | undefined;
+  let sourceIdx: number = -1;
 
   for (const col of board.columns) {
     const idx = col.tasks.findIndex(t => t.id === taskId);
     if (idx !== -1) {
       task = col.tasks[idx];
       sourceCol = col;
+      sourceIdx = idx;
       col.tasks.splice(idx, 1);
       break;
     }
@@ -261,11 +272,23 @@ export function moveTask(board: KanbanBoard, taskId: string, targetColumnTitle: 
   const targetCol = board.columns.find(c => c.title === targetColumnTitle);
   if (!targetCol) {
     // Put it back
-    sourceCol!.tasks.push(task);
+    sourceCol!.tasks.splice(sourceIdx, 0, task);
     return false;
   }
 
-  targetCol.tasks.push(task);
+  // Calculate actual insert position
+  let insertAt = position ?? targetCol.tasks.length;
+  
+  // If moving within the same column and the original position was before the target,
+  // we need to adjust since we already removed the task
+  if (sourceCol === targetCol && sourceIdx < insertAt) {
+    insertAt = Math.max(0, insertAt - 1);
+  }
+  
+  // Clamp to valid range
+  insertAt = Math.max(0, Math.min(insertAt, targetCol.tasks.length));
+  
+  targetCol.tasks.splice(insertAt, 0, task);
   return true;
 }
 

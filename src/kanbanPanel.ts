@@ -62,7 +62,8 @@ export class KanbanPanel {
 
           case 'moveTask':
             if (this.board && this.currentProject) {
-              const ok = moveTask(this.board, msg.taskId, msg.targetColumn);
+              const position = typeof msg.position === 'number' ? msg.position : undefined;
+              const ok = moveTask(this.board, msg.taskId, msg.targetColumn, position);
               if (ok) {
                 writeBoard(this.currentProject.file, this.board);
                 this.sendBoard();
@@ -252,9 +253,31 @@ body {
   overflow-y: auto;
   padding: 6px;
   flex: 1;
+  min-height: 60px;
+  position: relative;
 }
 .column-body.drag-over {
   background: rgba(106, 178, 242, 0.08);
+}
+.column-body.drag-over-empty::after {
+  content: 'Drop here';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--tg-accent);
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.7;
+  pointer-events: none;
+}
+/* Drop indicator for empty columns or end of column */
+.drop-indicator {
+  height: 3px;
+  background: var(--tg-accent);
+  border-radius: 2px;
+  margin: 2px 0;
+  animation: dropIndicatorPulse 0.8s ease-in-out infinite;
 }
 
 /* Card */
@@ -265,14 +288,47 @@ body {
   padding: 8px 10px;
   margin-bottom: 6px;
   cursor: grab;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.2s ease, opacity 0.2s ease;
   font-size: 12px;
+  position: relative;
 }
 .card:hover {
   border-color: var(--tg-accent);
   box-shadow: 0 1px 4px rgba(0,0,0,0.3);
 }
-.card.dragging { opacity: 0.4; }
+.card:active {
+  cursor: grabbing;
+}
+.card.dragging {
+  opacity: 0.4;
+  transform: scale(0.98);
+}
+.card.drag-over-above::before {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--tg-accent);
+  border-radius: 2px;
+  animation: dropIndicatorPulse 0.8s ease-in-out infinite;
+}
+.card.drag-over-below::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--tg-accent);
+  border-radius: 2px;
+  animation: dropIndicatorPulse 0.8s ease-in-out infinite;
+}
+@keyframes dropIndicatorPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
 .card-title {
   font-weight: 600;
   font-size: 12.5px;
@@ -531,35 +587,153 @@ function submitCreate(btn) {
 }
 
 /* Drag & Drop */
+let draggedTaskId = null;
+let dropPosition = null;
+let dropTargetColumn = null;
+
 function initDragDrop() {
   document.querySelectorAll('.card').forEach(card => {
     card.addEventListener('dragstart', (e) => {
+      draggedTaskId = card.dataset.taskId;
       e.dataTransfer.setData('text/plain', card.dataset.taskId);
-      card.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      // Delay adding class so drag image captures properly
+      requestAnimationFrame(() => card.classList.add('dragging'));
     });
+    
     card.addEventListener('dragend', () => {
       card.classList.remove('dragging');
-      document.querySelectorAll('.column-body').forEach(cb => cb.classList.remove('drag-over'));
+      clearAllDropIndicators();
+      draggedTaskId = null;
+      dropPosition = null;
+      dropTargetColumn = null;
+    });
+    
+    card.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      // Don't show indicator on the card being dragged
+      if (card.dataset.taskId === draggedTaskId) return;
+      
+      const rect = card.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+      const isAbove = e.clientY < midY;
+      
+      clearAllDropIndicators();
+      card.classList.add(isAbove ? 'drag-over-above' : 'drag-over-below');
+      
+      // Calculate position
+      const colBody = card.closest('.column-body');
+      const cards = Array.from(colBody.querySelectorAll('.card:not(.dragging)'));
+      const cardIndex = cards.indexOf(card);
+      dropPosition = isAbove ? cardIndex : cardIndex + 1;
+      dropTargetColumn = colBody.dataset.column;
+    });
+    
+    card.addEventListener('dragleave', (e) => {
+      // Only clear if actually leaving this card
+      if (!card.contains(e.relatedTarget)) {
+        card.classList.remove('drag-over-above', 'drag-over-below');
+      }
+    });
+    
+    card.addEventListener('drop', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const taskId = e.dataTransfer.getData('text/plain');
+      const colBody = card.closest('.column-body');
+      const targetColumn = colBody.dataset.column;
+      
+      const rect = card.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+      const isAbove = e.clientY < midY;
+      
+      const cards = Array.from(colBody.querySelectorAll('.card:not(.dragging)'));
+      const cardIndex = cards.indexOf(card);
+      const position = isAbove ? cardIndex : cardIndex + 1;
+      
+      clearAllDropIndicators();
+      
+      if (taskId && targetColumn) {
+        vscode.postMessage({ type: 'moveTask', taskId, targetColumn, position });
+      }
     });
   });
 
   document.querySelectorAll('.column-body').forEach(colBody => {
     colBody.addEventListener('dragover', (e) => {
       e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
       colBody.classList.add('drag-over');
-    });
-    colBody.addEventListener('dragleave', () => {
-      colBody.classList.remove('drag-over');
-    });
-    colBody.addEventListener('drop', (e) => {
-      e.preventDefault();
-      colBody.classList.remove('drag-over');
-      const taskId = e.dataTransfer.getData('text/plain');
-      const targetColumn = colBody.dataset.column;
-      if (taskId && targetColumn) {
-        vscode.postMessage({ type: 'moveTask', taskId, targetColumn });
+      
+      // If dragging over empty space (not over a card), show end-of-list indicator
+      const target = e.target;
+      if (target === colBody || target.classList.contains('column-body')) {
+        const cards = colBody.querySelectorAll('.card:not(.dragging)');
+        if (cards.length === 0) {
+          colBody.classList.add('drag-over-empty');
+          dropPosition = 0;
+        } else {
+          // Check if we're below all cards
+          const lastCard = cards[cards.length - 1];
+          const lastRect = lastCard.getBoundingClientRect();
+          if (e.clientY > lastRect.bottom) {
+            clearAllDropIndicators();
+            lastCard.classList.add('drag-over-below');
+            dropPosition = cards.length;
+          }
+        }
+        dropTargetColumn = colBody.dataset.column;
       }
     });
+    
+    colBody.addEventListener('dragleave', (e) => {
+      // Only remove if actually leaving the column body
+      if (!colBody.contains(e.relatedTarget)) {
+        colBody.classList.remove('drag-over', 'drag-over-empty');
+      }
+    });
+    
+    colBody.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const taskId = e.dataTransfer.getData('text/plain');
+      const targetColumn = colBody.dataset.column;
+      
+      // Calculate position based on where we dropped
+      let position = null;
+      const cards = Array.from(colBody.querySelectorAll('.card:not(.dragging)'));
+      
+      if (cards.length === 0) {
+        position = 0;
+      } else {
+        // Find position based on y coordinate
+        const y = e.clientY;
+        position = cards.length; // Default to end
+        for (let i = 0; i < cards.length; i++) {
+          const rect = cards[i].getBoundingClientRect();
+          if (y < rect.top + rect.height / 2) {
+            position = i;
+            break;
+          }
+        }
+      }
+      
+      clearAllDropIndicators();
+      colBody.classList.remove('drag-over', 'drag-over-empty');
+      
+      if (taskId && targetColumn) {
+        vscode.postMessage({ type: 'moveTask', taskId, targetColumn, position });
+      }
+    });
+  });
+}
+
+function clearAllDropIndicators() {
+  document.querySelectorAll('.card').forEach(c => {
+    c.classList.remove('drag-over-above', 'drag-over-below');
+  });
+  document.querySelectorAll('.column-body').forEach(cb => {
+    cb.classList.remove('drag-over', 'drag-over-empty');
   });
 }
 
