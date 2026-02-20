@@ -476,6 +476,14 @@ export class AgentPanel {
     return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
+  private getGatewayBadge(): string {
+    const gw = getGatewayClient();
+    if (gw?.connected) {
+      return '<span style="font-size:10px;background:#4caf50;color:#fff;padding:2px 6px;border-radius:4px;margin-left:8px;vertical-align:middle">WS Live</span>';
+    }
+    return '<span style="font-size:10px;background:#555;color:#aaa;padding:2px 6px;border-radius:4px;margin-left:8px;vertical-align:middle">File</span>';
+  }
+
   private getHtml(data: AgentPanelData): string {
     const tabs = [
       { id: 'overview', label: '📊 Overview' },
@@ -1045,7 +1053,7 @@ body {
 </head>
 <body>
 <div class="header">
-  <h1>🤖 Agent Status</h1>
+  <h1>🤖 Agent Status ${this.getGatewayBadge()}</h1>
   <button class="refresh-btn" onclick="vscode.postMessage({command:'refresh'})">↻ Refresh</button>
 </div>
 
