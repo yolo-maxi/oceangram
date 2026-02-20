@@ -3521,6 +3521,79 @@ body {
   0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
   30% { opacity: 1; transform: translateY(-2px); }
 }
+
+/* TASK-037: Tool execution timeline */
+.tool-timeline {
+  margin-top: 6px;
+  border-left: 2px solid var(--tg-accent);
+  padding-left: 8px;
+  font-size: 11px;
+}
+.tool-timeline-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  color: var(--tg-text-secondary);
+  padding: 3px 0;
+  user-select: none;
+}
+.tool-timeline-header:hover { color: var(--tg-text); }
+.tool-timeline-header .chevron {
+  font-size: 10px;
+  transition: transform 0.15s;
+  display: inline-block;
+}
+.tool-timeline-header.expanded .chevron { transform: rotate(90deg); }
+.tool-timeline-items { display: none; }
+.tool-timeline-header.expanded + .tool-timeline-items { display: block; }
+.tool-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 2px 0;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.tool-item:hover { background: rgba(255,255,255,0.04); }
+.tool-item .tool-icon { flex-shrink: 0; font-size: 12px; width: 16px; text-align: center; }
+.tool-item .tool-name { font-weight: 500; color: var(--tg-accent); min-width: 55px; }
+.tool-item .tool-params {
+  color: var(--tg-text-secondary);
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 10px;
+}
+.tool-item .tool-duration {
+  flex-shrink: 0;
+  color: var(--tg-text-secondary);
+  font-size: 10px;
+}
+.tool-item .tool-status {
+  flex-shrink: 0;
+  font-size: 10px;
+}
+.tool-item .tool-status.ok { color: var(--tg-green); }
+.tool-item .tool-status.err { color: #e06c75; }
+.tool-item-detail {
+  display: none;
+  margin: 2px 0 4px 22px;
+  padding: 6px 8px;
+  background: rgba(0,0,0,0.2);
+  border-radius: 6px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 10px;
+  color: var(--tg-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.tool-item-detail.visible { display: block; }
 </style>
 </head>
 <body>

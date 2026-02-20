@@ -385,6 +385,54 @@ export class AgentPanel {
     </div>`;
   }
 
+  private renderLiveToolsTab(): string {
+    const entries = filterByToolName(this.liveToolEntries, this.liveToolsFilter);
+    const toolNames = getUniqueToolNames(this.liveToolEntries);
+    const currentFilter = this.liveToolsFilter || 'all';
+
+    const filterButtons = [
+      `<button class="filter-btn ${currentFilter === 'all' ? 'active' : ''}" onclick="filterLiveTools('all')">All</button>`,
+      ...toolNames.map(name =>
+        `<button class="filter-btn ${currentFilter === name ? 'active' : ''}" onclick="filterLiveTools('${this.esc(name)}')">${this.esc(name)}</button>`
+      ),
+    ].join('');
+
+    const rows = entries.map((e, i) => {
+      const statusIcon = e.status === 'success' ? '✅' : e.status === 'error' ? '❌' : '⏳';
+      const durationStr = e.durationMs != null ? formatDuration(e.durationMs) : '…';
+      const expandId = `tool-expand-${i}`;
+
+      return `
+      <div class="tool-entry ${e.status}" onclick="toggleExpand('${expandId}')">
+        <div class="tool-entry-row">
+          <span class="tool-icon">${e.icon}</span>
+          <span class="tool-entry-name">${this.esc(e.toolName)}</span>
+          <span class="tool-entry-params">${this.esc(e.paramsTruncated)}</span>
+          <span class="tool-entry-duration">${durationStr}</span>
+          <span class="tool-entry-status">${statusIcon}</span>
+        </div>
+        <div id="${expandId}" class="tool-expand hidden">
+          <div class="expand-section">
+            <div class="expand-label">Parameters:</div>
+            <pre class="expand-content">${this.esc(e.parameters || '(none)')}</pre>
+          </div>
+          ${e.result ? `
+          <div class="expand-section">
+            <div class="expand-label">Result:</div>
+            <pre class="expand-content">${this.esc(e.result.substring(0, 2000))}${e.result.length > 2000 ? '\n…truncated' : ''}</pre>
+          </div>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+
+    return `
+    <div class="section-title">⚡ Live Tool Execution Feed (${entries.length})</div>
+    <div class="filter-bar">${filterButtons}</div>
+    <div class="live-tools-feed">
+      ${rows || '<div class="empty-state">No tool calls yet</div>'}
+    </div>`;
+  }
+
   private esc(str: string): string {
     return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }

@@ -214,6 +214,44 @@ export class ResourcePanel {
     }
   }
 
+  private getDeploymentHtml(): string {
+    if (!this.deploymentData) return '';
+    const { git, remotes } = this.deploymentData;
+    let html = '<div class="card"><div class="card-header">🚀 Deployment Status</div>';
+
+    if (git) {
+      html += `<div class="deploy-section">
+        <div class="deploy-row"><span class="deploy-label">Last commit</span><code>${escHtml(git.hash)}</code> ${escHtml(git.message)}</div>
+        <div class="deploy-row"><span class="deploy-label">Author</span>${escHtml(git.author)}</div>
+        <div class="deploy-row"><span class="deploy-label">Date</span>${escHtml(git.date)}</div>
+      </div>`;
+    }
+
+    if (remotes.length) {
+      html += `<div class="deploy-section">${remotes.map(r =>
+        `<div class="deploy-row"><span class="deploy-label">${escHtml(r.name)}</span><span class="url-text">${escHtml(r.url)}</span></div>`
+      ).join('')}</div>`;
+    }
+
+    // Show PM2 processes relevant to this project
+    const projectPm2 = this.currentBrief?.resources.pm2Processes || [];
+    const relevantProcs = this.deploymentData.pm2.filter(p => projectPm2.includes(p.name));
+    if (relevantProcs.length) {
+      html += `<div class="deploy-section">${relevantProcs.map(p => {
+        const statusColor = p.status === 'online' ? '#4caf50' : p.status === 'stopped' ? '#f44336' : '#ff9800';
+        return `<div class="deploy-row">
+          <span class="deploy-label">${escHtml(p.name)}</span>
+          <span class="pm2-status-dot" style="background:${statusColor}"></span>
+          <span>${escHtml(p.status)}</span>
+          <span class="url-text">up ${formatUptime(p.uptimeMs)} · ${escHtml(p.env)} · ${p.restarts} restarts</span>
+        </div>`;
+      }).join('')}</div>`;
+    }
+
+    html += '</div>';
+    return html;
+  }
+
   private getHtml(): string {
     const brief = this.currentBrief;
     const projectOptions = this.projects
@@ -402,6 +440,14 @@ ul { padding-left: 20px; font-size: 13px; }
 li { padding: 2px 0; }
 .empty { color: var(--vscode-descriptionForeground, #888); font-size: 13px; font-style: italic; }
 .section-title { font-weight: 600; font-size: 13px; color: var(--vscode-descriptionForeground, #888); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+.health-dot { font-size: 10px; }
+.key-label { color: var(--vscode-descriptionForeground, #888); min-width: 100px; }
+.reveal-btn { color: var(--vscode-foreground, #ccc); }
+.deploy-section { margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--vscode-editorWidget-border, #454545); }
+.deploy-section:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+.deploy-row { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 2px 0; }
+.deploy-label { color: var(--vscode-descriptionForeground, #888); min-width: 90px; font-size: 12px; }
+.pm2-status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .pm2-card { background: var(--vscode-editor-background, #1e1e1e); border: 1px solid var(--vscode-editorWidget-border, #454545); border-radius: 6px; padding: 10px 14px; margin-bottom: 8px; }
 .pm2-card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .pm2-name { font-weight: 600; font-size: 13px; }
@@ -518,6 +564,26 @@ li { padding: 2px 0; }
   function escapeHtml(s) {
     return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   }
+  function saveBrief() {
+    var ta = document.getElementById('briefTextarea');
+    if (ta) vscode.postMessage({type:'saveBrief', content: ta.value});
+  }
+  var autoSaveTimer = null;
+  document.addEventListener('focusout', function(e) {
+    if (e.target && e.target.id === 'briefTextarea') {
+      if (autoSaveTimer) clearTimeout(autoSaveTimer);
+      autoSaveTimer = setTimeout(function() {
+        var ta = document.getElementById('briefTextarea');
+        if (ta) vscode.postMessage({type:'autoSaveBrief', content: ta.value});
+      }, 2000);
+    }
+  });
+  document.addEventListener('focusin', function(e) {
+    if (e.target && e.target.id === 'briefTextarea' && autoSaveTimer) {
+      clearTimeout(autoSaveTimer);
+      autoSaveTimer = null;
+    }
+  });
 </script>
 </body>
 </html>`;
