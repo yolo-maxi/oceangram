@@ -5521,6 +5521,184 @@ filePreviewSend.addEventListener('click', function() {
   renderFilePreview();
 });
 
+// ── Chat Info Panel ──
+var chatInfoPanel = document.getElementById('chatInfoPanel');
+var chatInfoOverlay = document.getElementById('chatInfoOverlay');
+var infoPanelContent = document.getElementById('infoPanelContent');
+var infoPanelOpen = false;
+var chatInfoData = null;
+var chatMembersData = null;
+var sharedMediaData = { photo: null, video: null, file: null, link: null };
+var currentMediaTab = 'photo';
+
+function openInfoPanel() {
+  infoPanelOpen = true;
+  chatInfoPanel.classList.add('open');
+  chatInfoOverlay.classList.add('open');
+  if (!chatInfoData) {
+    vscode.postMessage({ type: 'getChatInfo' });
+  }
+}
+
+function closeInfoPanel() {
+  infoPanelOpen = false;
+  chatInfoPanel.classList.remove('open');
+  chatInfoOverlay.classList.remove('open');
+}
+
+function renderInfoPanel() {
+  if (!chatInfoData) {
+    infoPanelContent.innerHTML = '<div class="info-loading">Loading...</div>';
+    return;
+  }
+  var html = '';
+  var avatarColor = avatarColors[Math.abs(Date.now()) % avatarColors.length];
+  var initials = (chatInfoData.title || '?').split(' ').map(function(w) { return w[0]; }).join('').slice(0, 2).toUpperCase();
+  var avatarHtml = chatInfoData.photo
+    ? '<img src="' + chatInfoData.photo + '" alt="" />'
+    : '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:' + avatarColor + ';border-radius:50%">' + esc(initials) + '</div>';
+  var verifiedBadge = chatInfoData.isVerified ? '<span class="verified">✓</span>' : '';
+  var metaText = chatInfoData.type === 'channel' ? ((chatInfoData.memberCount || 0) + ' subscribers')
+    : chatInfoData.type === 'group' ? ((chatInfoData.memberCount || 0) + ' members')
+    : 'Private chat';
+
+  html += '<div class="info-profile">';
+  html += '<div class="info-avatar">' + avatarHtml + '</div>';
+  html += '<div class="info-name">' + esc(chatInfoData.title) + verifiedBadge + '</div>';
+  if (chatInfoData.username) html += '<div class="info-username">@' + esc(chatInfoData.username) + '</div>';
+  html += '<div class="info-meta">' + esc(metaText) + '</div>';
+  if (chatInfoData.description) html += '<div class="info-description">' + esc(chatInfoData.description) + '</div>';
+  html += '</div>';
+
+  // Members section (for groups)
+  if (chatInfoData.type === 'group') {
+    html += '<div class="info-section">';
+    html += '<div class="info-section-header"><span class="info-section-title">Members</span>';
+    if (chatMembersData) html += '<span class="info-section-count">' + chatMembersData.length + '</span>';
+    html += '</div><div class="info-members-list" id="infoMembersList">';
+    if (chatMembersData && chatMembersData.length > 0) {
+      chatMembersData.forEach(function(m) {
+        var mColor = avatarColors[Math.abs(parseInt(m.id || '0', 10)) % avatarColors.length];
+        var mInit = (m.name || '?').split(' ').map(function(w) { return w ? w[0] : ''; }).join('').slice(0, 2).toUpperCase();
+        var mAvatar = m.photo
+          ? '<img src="' + m.photo + '" alt="" />'
+          : '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:' + mColor + ';border-radius:50%;font-size:14px">' + esc(mInit) + '</div>';
+        var roleHtml = m.isOwner ? '<span class="role">Owner</span>' : m.isAdmin ? '<span class="role">Admin</span>' : '';
+        var statusText = m.status === 'online' ? 'online' : m.status === 'recently' ? 'recently' : '';
+        var statusClass = m.status === 'online' ? ' online' : '';
+        html += '<div class="info-member-item" data-id="' + esc(m.id) + '">';
+        html += '<div class="info-member-avatar">' + mAvatar + '</div>';
+        html += '<div class="info-member-info">';
+        html += '<div class="info-member-name">' + esc(m.name) + roleHtml + '</div>';
+        if (statusText) html += '<div class="info-member-status' + statusClass + '">' + statusText + '</div>';
+        else if (m.username) html += '<div class="info-member-status">@' + esc(m.username) + '</div>';
+        html += '</div></div>';
+      });
+    } else if (chatMembersData === null) {
+      html += '<div class="info-loading">Loading members...</div>';
+    } else {
+      html += '<div class="info-media-empty">No members found</div>';
+    }
+    html += '</div></div>';
+    if (chatMembersData === null) vscode.postMessage({ type: 'getChatMembers', limit: 50 });
+  }
+
+  // Shared media section
+  html += '<div class="info-section">';
+  html += '<div class="info-section-header"><span class="info-section-title">Shared Media</span></div>';
+  html += '<div class="info-media-tabs">';
+  html += '<button class="info-media-tab' + (currentMediaTab === 'photo' ? ' active' : '') + '" onclick="switchMediaTab(\\'photo\\')">📷</button>';
+  html += '<button class="info-media-tab' + (currentMediaTab === 'video' ? ' active' : '') + '" onclick="switchMediaTab(\\'video\\')">🎬</button>';
+  html += '<button class="info-media-tab' + (currentMediaTab === 'file' ? ' active' : '') + '" onclick="switchMediaTab(\\'file\\')">📄</button>';
+  html += '<button class="info-media-tab' + (currentMediaTab === 'link' ? ' active' : '') + '" onclick="switchMediaTab(\\'link\\')">🔗</button>';
+  html += '</div><div id="infoMediaContent">' + renderMediaContent(currentMediaTab) + '</div></div>';
+  infoPanelContent.innerHTML = html;
+}
+
+function renderMediaContent(mediaType) {
+  var items = sharedMediaData[mediaType];
+  if (items === null) {
+    vscode.postMessage({ type: 'getSharedMedia', mediaType: mediaType, limit: 20 });
+    return '<div class="info-loading">Loading...</div>';
+  }
+  if (!items || items.length === 0) return '<div class="info-media-empty">No ' + mediaType + 's shared</div>';
+
+  if (mediaType === 'photo' || mediaType === 'video') {
+    var h = '<div class="info-media-grid">';
+    items.forEach(function(item) {
+      var icon = mediaType === 'video' ? '🎬' : '🖼️';
+      h += item.thumbnailUrl
+        ? '<div class="info-media-item" onclick="scrollToMessage(' + item.messageId + ')"><img src="' + item.thumbnailUrl + '" alt="" /></div>'
+        : '<div class="info-media-item" onclick="scrollToMessage(' + item.messageId + ')"><span class="media-icon">' + icon + '</span></div>';
+    });
+    return h + '</div>';
+  }
+  if (mediaType === 'link') {
+    var h = '<div class="info-links-list">';
+    items.forEach(function(item) {
+      h += '<div class="info-link-item"><span class="info-link-icon">🔗</span><div class="info-link-content">';
+      h += '<div class="info-link-title">' + esc(item.title || item.url || 'Link') + '</div>';
+      if (item.url) h += '<div class="info-link-url">' + esc(item.url) + '</div>';
+      h += '</div></div>';
+    });
+    return h + '</div>';
+  }
+  if (mediaType === 'file') {
+    var h = '<div class="info-files-list">';
+    items.forEach(function(item) {
+      var icon = getFileIcon(item.fileName || 'file', '');
+      var size = item.fileSize ? formatFileSize(item.fileSize) : '';
+      h += '<div class="info-file-item" onclick="downloadFile(' + item.messageId + ')">';
+      h += '<span class="info-file-icon">' + icon + '</span><div class="info-file-info">';
+      h += '<div class="info-file-name">' + esc(item.fileName || 'File') + '</div>';
+      if (size) h += '<div class="info-file-meta">' + size + '</div>';
+      h += '</div></div>';
+    });
+    return h + '</div>';
+  }
+  return '';
+}
+
+function switchMediaTab(tab) {
+  currentMediaTab = tab;
+  document.querySelectorAll('.info-media-tab').forEach(function(btn, i) {
+    btn.classList.toggle('active', ['photo', 'video', 'file', 'link'][i] === tab);
+  });
+  var el = document.getElementById('infoMediaContent');
+  if (el) el.innerHTML = renderMediaContent(tab);
+}
+
+function scrollToMessage(msgId) {
+  closeInfoPanel();
+  var el = messagesList.querySelector('.msg[data-msg-id="' + msgId + '"]');
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('msg-highlight');
+    setTimeout(function() { el.classList.remove('msg-highlight'); }, 1500);
+  }
+}
+
+// Handle info panel messages in the main message handler
+(function() {
+  var origHandler = window.onmessage;
+  window.addEventListener('message', function(event) {
+    var msg = event.data;
+    if (msg.type === 'chatInfo') {
+      chatInfoData = msg.info;
+      renderInfoPanel();
+    } else if (msg.type === 'chatMembers') {
+      chatMembersData = msg.members || [];
+      renderInfoPanel();
+    } else if (msg.type === 'sharedMedia') {
+      sharedMediaData[msg.mediaType] = msg.media || [];
+      if (currentMediaTab === msg.mediaType) {
+        var el = document.getElementById('infoMediaContent');
+        if (el) el.innerHTML = renderMediaContent(msg.mediaType);
+      }
+    }
+  });
+})();
+
 // --- Mention Autocomplete (@user) ---
 (function() {
   var mentionDropdown = document.getElementById('mentionDropdown');
