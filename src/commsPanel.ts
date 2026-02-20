@@ -497,9 +497,23 @@ function showView(view) {
   searchResults.style.display = view === 'search' ? 'block' : 'none';
   topicsList.style.display = view === 'topics' ? 'block' : 'none';
   backBar.style.display = view === 'topics' ? 'flex' : 'none';
+  // Show/hide recent list based on view
   var recentEl = document.getElementById('recentList');
   if (recentEl) recentEl.style.display = view === 'main' ? 'block' : 'none';
   if (view !== 'topics') currentForumGroup = null;
+  // Restore expanded state for forum parents when switching to main view
+  if (view === 'main') {
+    document.querySelectorAll('.forum-parent').forEach(el => {
+      const chatId = el.dataset.chatId;
+      if (expandedForums.has(chatId)) {
+        el.classList.add('expanded');
+        const topicsContainer = el.nextElementSibling;
+        if (topicsContainer && topicsContainer.classList.contains('forum-topics-container')) {
+          topicsContainer.style.display = 'block';
+        }
+      }
+    });
+  }
 }
 
 function exitTopicsView() {
@@ -521,61 +535,125 @@ function enterForumGroup(chatId, groupName) {
   vscode.postMessage({ type: 'getTopics', groupChatId: chatId, groupName: groupName });
 }
 
+// Track expanded forum groups (persisted across renders)
+const expandedForums = new Set();
+
 function renderDialogs(dialogs, container, showPinBtn) {
   selectedIndex = -1;
   if (!dialogs.length) {
     container.innerHTML = '<div class="empty">No pinned chats yet.<br>Search to find and pin chats.</div>';
     return;
   }
-  container.innerHTML = dialogs.map(d => {
-    const isForumGroup = d._isForumGroup;
-    const actionBtn = isForumGroup ? '' : (showPinBtn
-      ? (d.isPinned ? '' : '<span class="pin-btn" data-id="' + d.id + '">\ud83d\udccc</span>')
-      : '<span class="unpin-btn" data-id="' + d.id + '" title="Unpin">\u2715</span>');
 
+  let html = '';
+  for (const d of dialogs) {
+    const isForumParent = d._isForumParent && d._topics && d._topics.length > 0;
+    const isForumGroup = d._isForumGroup; // Legacy collapsed group (for search results)
     const hasUnread = d.unreadCount > 0;
-    const isTopic = d.groupName && d.topicName;
+    const isTopic = d.groupName && d.topicName && !isForumParent;
     const color = pickColor(d.chatId || d.id);
+    const isExpanded = expandedForums.has(d.chatId);
 
-    let avatarHtml;
-    if (isForumGroup) {
-      avatarHtml = '<div class="avatar" style="background:' + color + '">' + esc(d.initials) + '<span class="topic-badge">\u2317</span></div>';
-    } else if (isTopic) {
-      avatarHtml = '<div class="avatar" style="background:' + color + '">' + esc(d.initials) + '<span class="topic-badge">#</span></div>';
-    } else {
-      avatarHtml = '<div class="avatar" style="background:' + color + '">' + esc(d.initials) + '</div>';
+    // TASK-109: Forum parent with collapsible topics
+    if (isForumParent) {
+      const topicCount = d._topics.length;
+      const countLabel = topicCount + ' topic' + (topicCount !== 1 ? 's' : '');
+      const timeStr = relativeTime(d.lastMessageTime);
+      const timeClass = 'chat-time' + (hasUnread ? ' has-unread' : '');
+      const unreadHtml = hasUnread ? '<span class="unread-badge">' + d.unreadCount + '</span>' : '';
+
+      html += '<div class="chat-item forum-parent' + (isExpanded ? ' expanded' : '') + '" data-forum-parent="1" data-chat-id="' + d.chatId + '" data-group-name="' + esc(d.name) + '">' +
+        '<div class="avatar" style="background:' + color + '">' + esc(d.initials) + '<span class="topic-badge">\u2317</span></div>' +
+        '<div class="chat-info">' +
+          '<div class="chat-name-row"><span class="chat-name">' + esc(d.name) + '</span><span class="' + timeClass + '">' + timeStr + '</span></div>' +
+          '<div class="chat-preview-row"><span class="topic-count">' + countLabel + '</span>' + unreadHtml + '</div>' +
+        '</div>' +
+        '<span class="expand-toggle" title="Expand/collapse topics">\u203a</span>' +
+      '</div>';
+
+      // TASK-109: Collapsible topics container
+      html += '<div class="forum-topics-container" data-parent-chat="' + d.chatId + '">';
+      for (const topic of d._topics) {
+        const tHasUnread = topic.unreadCount > 0;
+        const tTimeStr = relativeTime(topic.lastMessageTime);
+        const tTimeClass = 'chat-time' + (tHasUnread ? ' has-unread' : '');
+        const tUnreadHtml = tHasUnread ? '<span class="unread-badge">' + topic.unreadCount + '</span>' : '';
+        const tEmoji = topic.topicEmoji || '\u2317';
+        const tPreview = topic.lastMessage ? esc(topic.lastMessage.slice(0, 60)) : '';
+        const pinBtn = showPinBtn && !topic.isPinned ? '<span class="pin-btn" data-id="' + topic.id + '">\ud83d\udccc</span>' : '';
+
+        html += '<div class="chat-item" data-id="' + topic.id + '" data-name="' + esc(topic.name) + '">' +
+          '<div class="avatar" style="background:transparent;font-size:18px">' + esc(tEmoji) + '</div>' +
+          '<div class="chat-info">' +
+            '<div class="chat-name-row"><span class="chat-name">' + esc(topic.topicName || topic.name) + '</span><span class="' + tTimeClass + '">' + tTimeStr + '</span></div>' +
+            '<div class="chat-preview-row"><span class="chat-preview">' + tPreview + '</span>' + tUnreadHtml + '</div>' +
+          '</div>' +
+          pinBtn +
+        '</div>';
+      }
+      html += '</div>';
+      continue;
     }
 
+    // Legacy forum group (collapsed, for search results)
+    if (isForumGroup) {
+      const countLabel = d._topicCount + ' topic' + (d._topicCount !== 1 ? 's' : '');
+      const timeStr = relativeTime(d.lastMessageTime);
+      const timeClass = 'chat-time' + (hasUnread ? ' has-unread' : '');
+      const unreadHtml = hasUnread ? '<span class="unread-badge">' + d.unreadCount + '</span>' : '';
+
+      html += '<div class="chat-item" data-forum-group="1" data-chat-id="' + d.chatId + '" data-group-name="' + esc(d.name) + '">' +
+        '<div class="avatar" style="background:' + color + '">' + esc(d.initials) + '<span class="topic-badge">\u2317</span></div>' +
+        '<div class="chat-info">' +
+          '<div class="chat-name-row"><span class="chat-name">' + esc(d.name) + '</span><span class="' + timeClass + '">' + timeStr + '</span></div>' +
+          '<div class="chat-preview-row"><span class="topic-count">' + countLabel + '</span>' + unreadHtml + '<span class="forum-chevron">\u203a</span></div>' +
+        '</div>' +
+      '</div>';
+      continue;
+    }
+
+    // Individual topic (pinned topic shown separately)
+    if (isTopic) {
+      const timeStr = relativeTime(d.lastMessageTime);
+      const timeClass = 'chat-time' + (hasUnread ? ' has-unread' : '');
+      const unreadHtml = hasUnread ? '<span class="unread-badge">' + d.unreadCount + '</span>' : '';
+      const preview = d.lastMessage ? esc(d.lastMessage.slice(0, 80)) : '';
+      const actionBtn = showPinBtn
+        ? (d.isPinned ? '' : '<span class="pin-btn" data-id="' + d.id + '">\ud83d\udccc</span>')
+        : '<span class="unpin-btn" data-id="' + d.id + '" title="Unpin">\u2715</span>';
+
+      html += '<div class="chat-item" data-id="' + d.id + '" data-name="' + esc(d.name) + '">' +
+        '<div class="avatar" style="background:' + color + '">' + esc(d.initials) + '<span class="topic-badge">#</span></div>' +
+        '<div class="chat-info">' +
+          '<div class="chat-name-row"><div class="chat-group-name">\u2317 ' + esc(d.groupName) + '</div><span class="' + timeClass + '">' + timeStr + '</span></div>' +
+          '<div class="chat-name-row"><div class="chat-topic-name">' + esc(d.topicEmoji || '') + ' ' + esc(d.topicName) + '</div></div>' +
+          '<div class="chat-preview-row"><span class="chat-preview">' + preview + '</span>' + unreadHtml + '</div>' +
+        '</div>' +
+        actionBtn +
+      '</div>';
+      continue;
+    }
+
+    // Regular chat
     const preview = d.lastMessage ? esc(d.lastMessage.slice(0, 80)) : '';
     const timeStr = relativeTime(d.lastMessageTime);
     const timeClass = 'chat-time' + (hasUnread ? ' has-unread' : '');
     const unreadHtml = hasUnread ? '<span class="unread-badge">' + d.unreadCount + '</span>' : '';
+    const actionBtn = showPinBtn
+      ? (d.isPinned ? '' : '<span class="pin-btn" data-id="' + d.id + '">\ud83d\udccc</span>')
+      : '<span class="unpin-btn" data-id="' + d.id + '" title="Unpin">\u2715</span>';
 
-    let infoHtml;
-    if (isForumGroup) {
-      const countLabel = d._topicCount + ' topic' + (d._topicCount !== 1 ? 's' : '');
-      infoHtml = '<div class="chat-info">' +
-        '<div class="chat-name-row"><span class="chat-name">' + esc(d.name) + '</span><span class="' + timeClass + '">' + timeStr + '</span></div>' +
-        '<div class="chat-preview-row"><span class="topic-count">' + countLabel + '</span>' + unreadHtml + '<span class="forum-chevron">\u203a</span></div>' +
-      '</div>';
-    } else if (isTopic) {
-      infoHtml = '<div class="chat-info">' +
-        '<div class="chat-name-row"><div class="chat-group-name">\u2317 ' + esc(d.groupName) + '</div><span class="' + timeClass + '">' + timeStr + '</span></div>' +
-        '<div class="chat-name-row"><div class="chat-topic-name">' + esc(d.topicEmoji || '') + ' ' + esc(d.topicName) + '</div></div>' +
-        '<div class="chat-preview-row"><span class="chat-preview">' + preview + '</span>' + unreadHtml + '</div>' +
-      '</div>';
-    } else {
-      infoHtml = '<div class="chat-info">' +
+    html += '<div class="chat-item" data-id="' + d.id + '" data-name="' + esc(d.name) + '">' +
+      '<div class="avatar" style="background:' + color + '">' + esc(d.initials) + '</div>' +
+      '<div class="chat-info">' +
         '<div class="chat-name-row"><span class="chat-name">' + esc(d.name) + '</span><span class="' + timeClass + '">' + timeStr + '</span></div>' +
         '<div class="chat-preview-row"><span class="chat-preview">' + preview + '</span>' + unreadHtml + '</div>' +
-      '</div>';
-    }
+      '</div>' +
+      actionBtn +
+    '</div>';
+  }
 
-    const extraData = isForumGroup ? ' data-forum-group="1" data-chat-id="' + d.chatId + '" data-group-name="' + esc(d.name) + '"' : '';
-    return '<div class="chat-item" data-id="' + d.id + '" data-name="' + esc(d.name) + '"' + extraData + '>' +
-      avatarHtml + infoHtml + actionBtn + '</div>';
-  }).join('');
-
+  container.innerHTML = html;
   bindChatItemEvents(container);
 }
 
@@ -606,21 +684,74 @@ function renderTopics(dialogs, container) {
 }
 
 function bindChatItemEvents(container) {
-  container.querySelectorAll('.chat-item').forEach(el => {
+  // TASK-109: Handle forum parent expand/collapse
+  container.querySelectorAll('.chat-item.forum-parent').forEach(el => {
+    const toggle = el.querySelector('.expand-toggle');
+    if (toggle) {
+      toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const chatId = el.dataset.chatId;
+        const isExpanded = el.classList.toggle('expanded');
+        if (isExpanded) {
+          expandedForums.add(chatId);
+        } else {
+          expandedForums.delete(chatId);
+        }
+        // Toggle visibility of topics container
+        const topicsContainer = el.nextElementSibling;
+        if (topicsContainer && topicsContainer.classList.contains('forum-topics-container')) {
+          topicsContainer.style.display = isExpanded ? 'block' : 'none';
+        }
+      });
+    }
+    // Clicking the parent row (not toggle) expands if collapsed, or opens General topic
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('.expand-toggle')) return;
+      const isExpanded = el.classList.contains('expanded');
+      if (!isExpanded) {
+        // Expand on first click
+        el.classList.add('expanded');
+        expandedForums.add(el.dataset.chatId);
+        const topicsContainer = el.nextElementSibling;
+        if (topicsContainer && topicsContainer.classList.contains('forum-topics-container')) {
+          topicsContainer.style.display = 'block';
+        }
+      }
+    });
+  });
+
+  // Regular chat items and topics
+  container.querySelectorAll('.chat-item:not(.forum-parent)').forEach(el => {
     el.addEventListener('click', (e) => {
       if (e.target.closest('.pin-btn') || e.target.closest('.unpin-btn')) return;
       if (el.dataset.forumGroup) {
+        // Legacy: navigate to topics view for search results
         enterForumGroup(el.dataset.chatId, el.dataset.groupName);
       } else {
         vscode.postMessage({ type: 'openChat', chatId: el.dataset.id, chatName: el.dataset.name });
       }
     });
   });
+
+  // Also bind events in forum topics containers
+  container.querySelectorAll('.forum-topics-container .chat-item').forEach(el => {
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('.pin-btn') || e.target.closest('.unpin-btn')) return;
+      vscode.postMessage({ type: 'openChat', chatId: el.dataset.id, chatName: el.dataset.name });
+    });
+  });
+
   container.querySelectorAll('.pin-btn').forEach(el => {
-    el.addEventListener('click', () => vscode.postMessage({ type: 'pin', chatId: el.dataset.id }));
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      vscode.postMessage({ type: 'pin', chatId: el.dataset.id });
+    });
   });
   container.querySelectorAll('.unpin-btn').forEach(el => {
-    el.addEventListener('click', () => vscode.postMessage({ type: 'unpin', chatId: el.dataset.id }));
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      vscode.postMessage({ type: 'unpin', chatId: el.dataset.id });
+    });
   });
 }
 
@@ -686,19 +817,32 @@ document.addEventListener('keydown', (e) => {
 window.addEventListener('message', (event) => {
   const msg = event.data;
   switch (msg.type) {
-    case 'dialogs': renderDialogs(msg.dialogs, chatList, false); break;
-    case 'recentChats':
+    case 'dialogs':
+      // Add Pinned header if there are pinned chats
       if (msg.dialogs && msg.dialogs.length > 0) {
-        var recentDiv = document.getElementById('recentList');
+        chatList.innerHTML = '<div class="section-header">Pinned</div>';
+        var pinnedContainer = document.createElement('div');
+        chatList.appendChild(pinnedContainer);
+        renderDialogs(msg.dialogs, pinnedContainer, false);
+      } else {
+        chatList.innerHTML = '<div class="empty">No pinned chats yet.<br>Search to find and pin chats.</div>';
+      }
+      break;
+    case 'recentChats':
+      var recentDiv = document.getElementById('recentList');
+      if (msg.dialogs && msg.dialogs.length > 0) {
         if (!recentDiv) {
           recentDiv = document.createElement('div');
           recentDiv.id = 'recentList';
-          chatList.parentNode.insertBefore(recentDiv, chatList);
+          // Insert after chatList
+          chatList.parentNode.insertBefore(recentDiv, chatList.nextSibling);
         }
-        recentDiv.innerHTML = '<div style="padding:6px 12px;font-size:12px;color:var(--tg-text-secondary);font-weight:600;text-transform:uppercase;letter-spacing:0.5px">Recent</div>';
+        recentDiv.innerHTML = '<div class="section-header">Recent</div>';
         var recentContainer = document.createElement('div');
         recentDiv.appendChild(recentContainer);
         renderDialogs(msg.dialogs, recentContainer, true);
+      } else if (recentDiv) {
+        recentDiv.innerHTML = '';
       }
       break;
     case 'searchResultsLocal':
@@ -1199,6 +1343,398 @@ body {
 }
 .status-dot.offline {
   background: #6d7f8f;
+}
+
+/* Chat header - clickable */
+.chat-header-bar {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.chat-header-bar:hover {
+  background: var(--tg-hover);
+}
+.chat-header-info-btn {
+  margin-left: auto;
+  font-size: 16px;
+  color: var(--tg-text-secondary);
+  padding: 4px;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+.chat-header-bar:hover .chat-header-info-btn {
+  color: var(--tg-accent);
+}
+
+/* Chat info panel - slide out from right */
+.chat-info-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 320px;
+  background: var(--tg-bg-secondary);
+  border-left: 1px solid rgba(255,255,255,0.08);
+  transform: translateX(100%);
+  transition: transform 0.25s ease;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.chat-info-panel.open {
+  transform: translateX(0);
+}
+.chat-info-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.4);
+  z-index: 199;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s;
+}
+.chat-info-overlay.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+.info-panel-header {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  gap: 12px;
+  flex-shrink: 0;
+}
+.info-panel-close {
+  font-size: 18px;
+  color: var(--tg-text-secondary);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  background: none;
+  border: none;
+  transition: color 0.15s, background 0.15s;
+}
+.info-panel-close:hover {
+  color: var(--tg-text);
+  background: rgba(255,255,255,0.06);
+}
+.info-panel-title {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--tg-text);
+}
+.info-panel-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0;
+}
+.info-panel-content::-webkit-scrollbar { width: 4px; }
+.info-panel-content::-webkit-scrollbar-thumb { background: var(--tg-scrollbar); border-radius: 2px; }
+
+/* Profile section */
+.info-profile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px 16px;
+  text-align: center;
+}
+.info-avatar {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  overflow: hidden;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 36px;
+  font-weight: 600;
+  color: #fff;
+}
+.info-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.info-name {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--tg-text);
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.info-name .verified {
+  color: var(--tg-accent);
+  font-size: 14px;
+}
+.info-username {
+  font-size: 14px;
+  color: var(--tg-accent);
+  margin-bottom: 4px;
+}
+.info-meta {
+  font-size: 13px;
+  color: var(--tg-text-secondary);
+}
+.info-description {
+  font-size: 14px;
+  color: var(--tg-text);
+  margin-top: 12px;
+  padding: 0 8px;
+  line-height: 1.4;
+  max-height: 80px;
+  overflow-y: auto;
+}
+
+/* Info sections */
+.info-section {
+  border-top: 1px solid rgba(255,255,255,0.06);
+  padding: 12px 16px;
+}
+.info-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.info-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tg-accent);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.info-section-count {
+  font-size: 12px;
+  color: var(--tg-text-secondary);
+}
+
+/* Members list */
+.info-members-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.info-member-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.info-member-item:hover {
+  background: rgba(255,255,255,0.05);
+}
+.info-member-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  flex-shrink: 0;
+}
+.info-member-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.info-member-info {
+  flex: 1;
+  min-width: 0;
+}
+.info-member-name {
+  font-size: 14px;
+  color: var(--tg-text);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.info-member-name .role {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(106,178,242,0.15);
+  color: var(--tg-accent);
+  font-weight: 600;
+}
+.info-member-status {
+  font-size: 12px;
+  color: var(--tg-text-secondary);
+}
+.info-member-status.online {
+  color: #4dcd5e;
+}
+
+/* Shared media grid */
+.info-media-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.info-media-tab {
+  flex: 1;
+  padding: 6px 8px;
+  font-size: 12px;
+  text-align: center;
+  background: rgba(255,255,255,0.04);
+  border: none;
+  border-radius: 6px;
+  color: var(--tg-text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.info-media-tab:hover {
+  background: rgba(255,255,255,0.08);
+  color: var(--tg-text);
+}
+.info-media-tab.active {
+  background: rgba(106,178,242,0.15);
+  color: var(--tg-accent);
+}
+.info-media-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+.info-media-item {
+  aspect-ratio: 1;
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+  background: rgba(255,255,255,0.04);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s;
+}
+.info-media-item:hover {
+  transform: scale(1.02);
+}
+.info-media-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.info-media-item .media-icon {
+  font-size: 24px;
+  color: var(--tg-text-secondary);
+}
+.info-media-empty {
+  grid-column: 1 / -1;
+  padding: 20px;
+  text-align: center;
+  color: var(--tg-text-secondary);
+  font-size: 13px;
+}
+
+/* Links list */
+.info-links-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.info-link-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+  background: rgba(255,255,255,0.03);
+}
+.info-link-item:hover {
+  background: rgba(255,255,255,0.06);
+}
+.info-link-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.info-link-content {
+  flex: 1;
+  min-width: 0;
+}
+.info-link-title {
+  font-size: 13px;
+  color: var(--tg-text);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.info-link-url {
+  font-size: 12px;
+  color: var(--tg-accent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Files list */
+.info-files-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.info-file-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+  background: rgba(255,255,255,0.03);
+}
+.info-file-item:hover {
+  background: rgba(255,255,255,0.06);
+}
+.info-file-icon {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+.info-file-info {
+  flex: 1;
+  min-width: 0;
+}
+.info-file-name {
+  font-size: 13px;
+  color: var(--tg-text);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.info-file-meta {
+  font-size: 11px;
+  color: var(--tg-text-secondary);
+}
+
+/* Info loading state */
+.info-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  color: var(--tg-text-secondary);
+  font-size: 13px;
 }
 
 /* Scrollable message area */
@@ -2896,11 +3432,24 @@ body {
 </style>
 </head>
 <body>
-<!-- Chat header bar -->
-<div class="chat-header-bar" id="chatHeaderBar">
+<!-- Chat header bar - clickable to open info panel -->
+<div class="chat-header-bar" id="chatHeaderBar" onclick="openInfoPanel()">
   <div>
     <div class="chat-header-name" id="chatHeaderName">${name}</div>
     <div class="chat-header-status" id="chatHeaderStatus"></div>
+  </div>
+  <span class="chat-header-info-btn">ℹ️</span>
+</div>
+<!-- Chat info panel overlay -->
+<div class="chat-info-overlay" id="chatInfoOverlay" onclick="closeInfoPanel()"></div>
+<!-- Chat info panel - slides in from right -->
+<div class="chat-info-panel" id="chatInfoPanel">
+  <div class="info-panel-header">
+    <button class="info-panel-close" onclick="closeInfoPanel()">✕</button>
+    <span class="info-panel-title">Chat Info</span>
+  </div>
+  <div class="info-panel-content" id="infoPanelContent">
+    <div class="info-loading">Loading...</div>
   </div>
 </div>
 <!-- Reconnecting banner -->
@@ -4971,6 +5520,191 @@ filePreviewSend.addEventListener('click', function() {
   pendingFiles = [];
   renderFilePreview();
 });
+
+// --- Mention Autocomplete (@user) ---
+(function() {
+  var mentionDropdown = document.getElementById('mentionDropdown');
+  var groupMembers = []; // Cached members for this chat
+  var membersLoaded = false;
+  var mentionActive = false;
+  var mentionQuery = '';
+  var mentionStart = -1; // cursor position where @ was typed
+  var mentionSelectedIdx = 0;
+  var filteredMembers = [];
+
+  // Request group members on init (after a short delay)
+  setTimeout(function() {
+    vscode.postMessage({ type: 'getGroupMembers' });
+  }, 500);
+
+  // Handle groupMembers response
+  window.addEventListener('message', function(event) {
+    var msg = event.data;
+    if (msg.type === 'groupMembers' && msg.members) {
+      groupMembers = msg.members;
+      membersLoaded = true;
+    }
+  });
+
+  function pickMentionColor(id) {
+    var colors = ['#e17076','#eda86c','#a695e7','#7bc862','#6ec9cb','#65aadd','#ee7aae','#6bb2f2'];
+    return colors[Math.abs(parseInt(id || '0', 10)) % colors.length];
+  }
+
+  function renderMentionDropdown() {
+    if (filteredMembers.length === 0) {
+      mentionDropdown.innerHTML = '<div class="mention-empty">No members found</div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < filteredMembers.length; i++) {
+      var m = filteredMembers[i];
+      var selectedCls = i === mentionSelectedIdx ? ' selected' : '';
+      var avatarHtml;
+      if (m.photo) {
+        avatarHtml = '<img src="' + esc(m.photo) + '" />';
+      } else {
+        avatarHtml = '<span style="width:32px;height:32px;border-radius:50%;background:' + pickMentionColor(m.id) + ';display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#fff">' + esc(m.initials || '?') + '</span>';
+      }
+      html += '<div class="mention-item' + selectedCls + '" data-idx="' + i + '">';
+      html += '<div class="mention-avatar">' + avatarHtml + '</div>';
+      html += '<div class="mention-info">';
+      html += '<div class="mention-name">' + esc(m.name) + '</div>';
+      if (m.username) html += '<div class="mention-username">@' + esc(m.username) + '</div>';
+      html += '</div></div>';
+    }
+    mentionDropdown.innerHTML = html;
+    // Bind click handlers
+    mentionDropdown.querySelectorAll('.mention-item').forEach(function(el) {
+      el.addEventListener('click', function() {
+        selectMention(parseInt(el.dataset.idx));
+      });
+    });
+  }
+
+  function showMentionDropdown() {
+    mentionDropdown.classList.add('visible');
+    mentionActive = true;
+    mentionSelectedIdx = 0;
+    filterMembers();
+  }
+
+  function hideMentionDropdown() {
+    mentionDropdown.classList.remove('visible');
+    mentionActive = false;
+    mentionQuery = '';
+    mentionStart = -1;
+    filteredMembers = [];
+  }
+
+  function filterMembers() {
+    var q = mentionQuery.toLowerCase();
+    if (!q) {
+      filteredMembers = groupMembers.slice(0, 10);
+    } else {
+      filteredMembers = groupMembers.filter(function(m) {
+        return (m.name && m.name.toLowerCase().indexOf(q) !== -1) ||
+               (m.username && m.username.toLowerCase().indexOf(q) !== -1);
+      }).slice(0, 10);
+    }
+    if (mentionSelectedIdx >= filteredMembers.length) {
+      mentionSelectedIdx = Math.max(0, filteredMembers.length - 1);
+    }
+    renderMentionDropdown();
+  }
+
+  function selectMention(idx) {
+    if (idx < 0 || idx >= filteredMembers.length) return;
+    var m = filteredMembers[idx];
+    var ta = document.getElementById('msgInput');
+    var val = ta.value;
+    // Replace @query with @username or @name
+    var insertText = m.username ? '@' + m.username : '@' + m.name.replace(/\\s+/g, '_');
+    var before = val.slice(0, mentionStart);
+    var after = val.slice(ta.selectionStart);
+    ta.value = before + insertText + ' ' + after;
+    var newPos = before.length + insertText.length + 1;
+    ta.selectionStart = ta.selectionEnd = newPos;
+    ta.focus();
+    ta.dispatchEvent(new Event('input'));
+    hideMentionDropdown();
+  }
+
+  // Listen for input in the composer to detect @ mentions
+  msgInput.addEventListener('input', function() {
+    var val = msgInput.value;
+    var pos = msgInput.selectionStart;
+    // Find the nearest @ before cursor
+    var atIdx = -1;
+    for (var i = pos - 1; i >= 0; i--) {
+      var c = val[i];
+      if (c === '@') { atIdx = i; break; }
+      if (c === ' ' || c === '\\n') break; // stop at whitespace
+    }
+    if (atIdx !== -1 && membersLoaded) {
+      // Check if this @ is at start or preceded by whitespace
+      if (atIdx === 0 || /\\s/.test(val[atIdx - 1])) {
+        mentionStart = atIdx;
+        mentionQuery = val.slice(atIdx + 1, pos);
+        if (!mentionActive) {
+          showMentionDropdown();
+        } else {
+          filterMembers();
+        }
+        return;
+      }
+    }
+    // No valid @ found — hide dropdown
+    if (mentionActive) hideMentionDropdown();
+  });
+
+  // Keyboard navigation for mention dropdown
+  msgInput.addEventListener('keydown', function(e) {
+    if (!mentionActive) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      mentionSelectedIdx = (mentionSelectedIdx + 1) % Math.max(1, filteredMembers.length);
+      renderMentionDropdown();
+      scrollMentionIntoView();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      mentionSelectedIdx = (mentionSelectedIdx - 1 + Math.max(1, filteredMembers.length)) % Math.max(1, filteredMembers.length);
+      renderMentionDropdown();
+      scrollMentionIntoView();
+    } else if (e.key === 'Enter' && filteredMembers.length > 0) {
+      e.preventDefault();
+      e.stopPropagation();
+      selectMention(mentionSelectedIdx);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      hideMentionDropdown();
+    } else if (e.key === 'Tab' && filteredMembers.length > 0) {
+      e.preventDefault();
+      selectMention(mentionSelectedIdx);
+    }
+  });
+
+  function scrollMentionIntoView() {
+    var selected = mentionDropdown.querySelector('.mention-item.selected');
+    if (selected) {
+      selected.scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  // Close dropdown on blur (with small delay for click handling)
+  msgInput.addEventListener('blur', function() {
+    setTimeout(function() {
+      if (!mentionDropdown.matches(':hover')) {
+        hideMentionDropdown();
+      }
+    }, 150);
+  });
+
+  // Re-focus textarea after clicking mention
+  mentionDropdown.addEventListener('mousedown', function(e) {
+    e.preventDefault(); // Prevent blur
+  });
+})();
 
 vscode.postMessage({ type: 'init' });
 </script>
