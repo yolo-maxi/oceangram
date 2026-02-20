@@ -1,18 +1,24 @@
 import * as vscode from 'vscode';
 import { TelegramService, DialogInfo } from './services/telegram';
+import { TelegramApiClient } from './services/telegramApi';
+import { getTelegramApi } from './extension';
 
 interface QuickPickActionItem extends vscode.QuickPickItem {
   action?: () => void;
 }
 
-let sharedTelegram: TelegramService | undefined;
-function getTelegram(): TelegramService {
-  if (!sharedTelegram) sharedTelegram = new TelegramService();
+let sharedTelegram: TelegramService | TelegramApiClient | undefined;
+function getTelegram(): TelegramService | TelegramApiClient {
+  const apiClient = getTelegramApi();
+  if (apiClient) { sharedTelegram = apiClient; return apiClient; }
+  if (!sharedTelegram || sharedTelegram instanceof TelegramApiClient) {
+    sharedTelegram = new TelegramService();
+  }
   return sharedTelegram;
 }
 
 /** Set a shared TelegramService instance (called from extension.ts to reuse the singleton) */
-export function setQuickPickTelegram(tg: TelegramService) {
+export function setQuickPickTelegram(tg: TelegramService | TelegramApiClient) {
   sharedTelegram = tg;
 }
 

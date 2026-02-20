@@ -2,7 +2,7 @@
   "name": "oceangram",
   "displayName": "Oceangram",
   "description": "Telegram + AI agent cockpit for OpenClaw users. Chat, kanban, and agent status — all in your editor.",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "publisher": "oceangram",
   "engines": {
     "vscode": "^1.85.0"
@@ -106,6 +106,11 @@
           "type": "number",
           "default": 4380,
           "description": "Port of the OpenClaw gateway (access via SSH port forwarding)."
+        },
+        "oceangram.daemonPort": {
+          "type": "number",
+          "default": 7777,
+          "description": "Port for the Oceangram Telegram daemon (auto-spawned on activate)."
         }
       }
     },
@@ -129,6 +134,7 @@
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.18.1",
     "@vitest/coverage-v8": "^4.0.18",
     "esbuild": "^0.27.3",
     "typescript": "^5.3.0",
@@ -137,7 +143,8 @@
   "packageManager": "pnpm@9.15.4",
   "dependencies": {
     "shiki": "^3.22.0",
-    "telegram": "^2.26.22"
+    "telegram": "^2.26.22",
+    "ws": "^8.19.0"
   },
   "icon": "icon.png",
   "repository": {

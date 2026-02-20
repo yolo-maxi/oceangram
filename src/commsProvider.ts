@@ -1,13 +1,15 @@
 import * as vscode from 'vscode';
 import { TelegramService, DialogInfo, MessageInfo } from './services/telegram';
+import { TelegramApiClient } from './services/telegramApi';
+import { getTelegramApi } from './extension';
 
 export class CommsWebviewProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
-  private telegram: TelegramService;
+  private telegram: TelegramService | TelegramApiClient;
   private connecting = false;
 
   constructor(private readonly extensionUri: vscode.Uri) {
-    this.telegram = new TelegramService();
+    this.telegram = getTelegramApi() || new TelegramService();
   }
 
   resolveWebviewView(

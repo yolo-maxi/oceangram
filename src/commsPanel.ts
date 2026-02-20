@@ -1,13 +1,27 @@
 import * as vscode from 'vscode';
 import { TelegramService, ChatEvent, DialogInfo, ConnectionState, UserStatus, GroupMember, ChatInfoResult, ChatMember, SharedMediaItem } from './services/telegram';
+import { TelegramApiClient } from './services/telegramApi';
+import { getTelegramApi } from './extension';
 import { OpenClawService, AgentSessionInfo, AgentDetailedInfo } from './services/openclaw';
 import { ToolCall, getToolIcon, truncateParams, formatDuration, groupToolCallsByMessage, parseToolCallsFromText, messageHasToolCalls, EmbeddedToolCall, truncateString } from './services/toolExecution';
 import { highlightMessageCodeBlocks, disposeHighlighter } from './services/highlighter';
 
-// Shared telegram service across all panels
-let sharedTelegram: TelegramService | undefined;
-function getTelegram(): TelegramService {
-  if (!sharedTelegram) sharedTelegram = new TelegramService();
+/** Union type for either direct gramjs or daemon API client */
+type TelegramBackend = TelegramService | TelegramApiClient;
+
+// Shared telegram service — prefers daemon API client, falls back to direct gramjs
+let sharedTelegram: TelegramBackend | undefined;
+function getTelegram(): TelegramBackend {
+  // Try daemon API client first
+  const apiClient = getTelegramApi();
+  if (apiClient) {
+    sharedTelegram = apiClient;
+    return apiClient;
+  }
+  // Fallback to direct gramjs
+  if (!sharedTelegram || sharedTelegram instanceof TelegramApiClient) {
+    sharedTelegram = new TelegramService();
+  }
   return sharedTelegram;
 }
 
@@ -1266,7 +1280,7 @@ export class ChatTab {
   /**
    * Fetch profile photos for unique senders in messages and send to webview.
    */
-  private async fetchAndSendProfilePhotos(tg: TelegramService, messages: any[]): Promise<void> {
+  private async fetchAndSendProfilePhotos(tg: TelegramBackend, messages: any[]): Promise<void> {
     const senderIds = [...new Set(
       messages
         .filter((m: any) => m.senderId && !m.isOutgoing)
