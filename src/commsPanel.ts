@@ -890,7 +890,7 @@ window.addEventListener('message', (event) => {
     case 'error':
       errorBox.textContent = msg.message;
       errorBox.style.display = 'block';
-      setTimeout(() => errorBox.style.display = 'none', 5000);
+      setTimeout(() => errorBox.style.display = 'none', 30000);
       break;
   }
 });
@@ -1020,10 +1020,12 @@ export class ChatTab {
             await tg.connect();
             let messages: any[];
             try {
+              console.log('[Oceangram] Loading messages for', this.chatId, 'using', tg.constructor.name);
               messages = await addSyntaxHighlighting(await tg.getMessages(this.chatId, 20));
+              console.log('[Oceangram] Loaded', messages.length, 'messages');
             } catch (initErr: any) {
-              console.error('Failed to load messages:', initErr);
-              this.panel.webview.postMessage({ type: 'messages', messages: [], error: initErr.message || 'Failed to load messages' });
+              console.error('[Oceangram] Failed to load messages:', initErr);
+              this.panel.webview.postMessage({ type: 'messages', messages: [], error: `${initErr.message || 'Failed to load messages'} (${tg.constructor.name})` });
               break;
             }
             this.panel.webview.postMessage({ type: 'messages', messages });
@@ -5350,7 +5352,7 @@ window.addEventListener('message', (event) => {
     case 'error':
       errorBox.textContent = msg.message;
       errorBox.style.display = 'block';
-      setTimeout(() => errorBox.style.display = 'none', 5000);
+      setTimeout(() => errorBox.style.display = 'none', 30000);
       break;
   }
 });

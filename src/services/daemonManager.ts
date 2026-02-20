@@ -67,7 +67,8 @@ export class DaemonManager {
     // Find the daemon entry point
     // Try local node_modules first (pnpm link), then fallback to relative path
     const candidates = [
-      path.resolve(__dirname, '../daemon/daemon-bundle.js'),  // bundled in .vsix (single file)
+      path.resolve(__dirname, 'daemon/daemon-bundle.js'),  // bundled in .vsix (out/daemon/)
+      path.resolve(__dirname, '../daemon/daemon-bundle.js'),  // fallback
       path.resolve(__dirname, '../../node_modules/oceangram-daemon/dist/cli.js'),
       '/home/xiko/oceangram-daemon/dist/cli.js',
     ];
