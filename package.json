@@ -2,7 +2,7 @@
   "name": "oceangram",
   "displayName": "Oceangram",
   "description": "Telegram + AI agent cockpit for OpenClaw users. Chat, kanban, and agent status — all in your editor.",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "publisher": "oceangram",
   "engines": {
     "vscode": "^1.85.0"
@@ -119,7 +119,10 @@
         "oceangram.theme": {
           "type": "string",
           "default": "telegram-dark",
-          "enum": ["telegram-dark", "auto"],
+          "enum": [
+            "telegram-dark",
+            "auto"
+          ],
           "enumDescriptions": [
             "Use the bundled Telegram Dark theme",
             "Follow the current VS Code theme"
