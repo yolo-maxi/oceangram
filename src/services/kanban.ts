@@ -305,6 +305,8 @@ export function createTask(
   tags: string[] = [],
   description: string = ''
 ): KanbanTask | null {
+  if (!title || !title.trim()) return null;
+
   const col = board.columns.find(c => c.title === columnTitle);
   if (!col) return null;
 

@@ -282,6 +282,13 @@ describe('Create Task', () => {
     expect(second!.id).toBe('TASK-007');
   });
 
+  it('rejects empty title', () => {
+    const board = parseKanbanMarkdown(SAMPLE_MARKDOWN);
+    expect(createTask(board, '📋 Backlog', '')).toBeNull();
+    expect(createTask(board, '📋 Backlog', '   ')).toBeNull();
+    expect(board.lastTaskId).toBe(5); // ID not incremented
+  });
+
   it('returns null for invalid column', () => {
     const board = parseKanbanMarkdown(SAMPLE_MARKDOWN);
     expect(createTask(board, 'Fake Column', 'Nope')).toBeNull();
