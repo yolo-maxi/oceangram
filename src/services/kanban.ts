@@ -1,6 +1,11 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+export interface Subtask {
+  text: string;
+  done: boolean;
+}
+
 export interface KanbanTask {
   id: string;
   title: string;
@@ -10,6 +15,7 @@ export interface KanbanTask {
   tags: string[];
   description: string;
   created: string;
+  subtasks: Subtask[];
 }
 
 export interface KanbanColumn {
@@ -122,6 +128,18 @@ export function parseTask(block: string): KanbanTask | null {
     }
   }
 
+  // Extract subtasks (checkbox lines) from description
+  const subtasks: Subtask[] = [];
+  const nonSubtaskLines: string[] = [];
+  for (const line of descLines) {
+    const checkMatch = line.match(/^- \[([ x])\] (.+)/);
+    if (checkMatch) {
+      subtasks.push({ text: checkMatch[2].trim(), done: checkMatch[1] === 'x' });
+    } else {
+      nonSubtaskLines.push(line);
+    }
+  }
+
   return {
     id,
     title,
@@ -129,8 +147,9 @@ export function parseTask(block: string): KanbanTask | null {
     category,
     assigned,
     tags,
-    description: descLines.join('\n').trim(),
+    description: nonSubtaskLines.join('\n').trim(),
     created,
+    subtasks,
   };
 }
 
@@ -205,9 +224,15 @@ export function serializeTask(task: KanbanTask): string {
   lines.push(`**Priority**: ${task.priority} | **Category**: ${task.category} | **Assigned**: ${task.assigned}`);
   if (task.created) lines.push(`**Created**: ${task.created}`);
   if (task.tags.length > 0) lines.push(`**Tags**: ${task.tags.join(' ')}`);
-  if (task.description) {
+  if (task.description || (task.subtasks && task.subtasks.length > 0)) {
     lines.push('');
-    lines.push(task.description);
+    if (task.description) lines.push(task.description);
+    if (task.subtasks && task.subtasks.length > 0) {
+      if (task.description) lines.push('');
+      for (const st of task.subtasks) {
+        lines.push(`- [${st.done ? 'x' : ' '}] ${st.text}`);
+      }
+    }
   }
   return lines.join('\n');
 }
@@ -323,6 +348,7 @@ export function createTask(
     tags,
     description,
     created: today,
+    subtasks: [],
   };
 
   col.tasks.push(task);

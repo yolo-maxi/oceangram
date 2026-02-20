@@ -7,6 +7,7 @@ import {
   moveTask,
   createTask,
   KanbanBoard,
+  KanbanTask,
   ProjectInfo,
 } from './services/kanban';
 
@@ -84,11 +85,57 @@ export class KanbanPanel {
               }
             }
             break;
+
+          case 'updateTask':
+            if (this.board && this.currentProject) {
+              const found = this.findTask(msg.taskId);
+              if (found) {
+                if (msg.field === 'title') found.title = msg.value;
+                else if (msg.field === 'priority') found.priority = msg.value;
+                else if (msg.field === 'category') found.category = msg.value;
+                else if (msg.field === 'assigned') found.assigned = msg.value;
+                else if (msg.field === 'tags') found.tags = msg.value;
+                else if (msg.field === 'description') found.description = msg.value;
+                writeBoard(this.currentProject.file, this.board);
+                this.sendBoard();
+              }
+            }
+            break;
+
+          case 'toggleSubtask':
+            if (this.board && this.currentProject) {
+              const t = this.findTask(msg.taskId);
+              if (t && t.subtasks && t.subtasks[msg.index] !== undefined) {
+                t.subtasks[msg.index].done = !t.subtasks[msg.index].done;
+                writeBoard(this.currentProject.file, this.board);
+                this.sendBoard();
+              }
+            }
+            break;
+
+          case 'moveTaskToColumn':
+            if (this.board && this.currentProject) {
+              const ok = moveTask(this.board, msg.taskId, msg.targetColumn);
+              if (ok) {
+                writeBoard(this.currentProject.file, this.board);
+                this.sendBoard();
+              }
+            }
+            break;
         }
       } catch (e: any) {
         this.panel.webview.postMessage({ type: 'error', message: e.message });
       }
     }, null, this.disposables);
+  }
+
+  private findTask(taskId: string): KanbanTask | undefined {
+    if (!this.board) return undefined;
+    for (const col of this.board.columns) {
+      const t = col.tasks.find(t => t.id === taskId);
+      if (t) return t;
+    }
+    return undefined;
   }
 
   private selectProject(projectId: string) {
@@ -442,6 +489,127 @@ body {
 .card[data-priority="P2"] { border-left: 3px solid #61afef; }
 .card[data-priority="P3"] { border-left: 3px solid #5a6e7e; }
 
+/* Detail Slide-out Panel */
+.detail-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 100;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+.detail-overlay.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+.detail-panel {
+  position: fixed;
+  top: 0; right: 0; bottom: 0;
+  width: 380px;
+  max-width: 90vw;
+  background: var(--tg-bg-secondary);
+  border-left: 1px solid var(--tg-border);
+  z-index: 101;
+  transform: translateX(100%);
+  transition: transform 0.25s ease;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+.detail-panel.open {
+  transform: translateX(0);
+}
+.detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--tg-border);
+  flex-shrink: 0;
+}
+.detail-header .task-id {
+  font-size: 12px;
+  color: var(--tg-text-secondary);
+}
+.detail-close {
+  background: none;
+  border: none;
+  color: var(--tg-text-secondary);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+.detail-close:hover { color: var(--tg-text); }
+.detail-body {
+  padding: 16px;
+  flex: 1;
+  overflow-y: auto;
+}
+.detail-body .field-group {
+  margin-bottom: 14px;
+}
+.detail-body .field-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--tg-text-secondary);
+  margin-bottom: 4px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+.detail-body input, .detail-body select, .detail-body textarea {
+  width: 100%;
+  background: var(--tg-bg);
+  color: var(--tg-text);
+  border: 1px solid var(--tg-border);
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+}
+.detail-body input:focus, .detail-body select:focus, .detail-body textarea:focus {
+  border-color: var(--tg-accent);
+}
+.detail-body textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+.detail-body .title-input {
+  font-size: 15px;
+  font-weight: 600;
+  padding: 8px;
+}
+.detail-body .field-row {
+  display: flex;
+  gap: 8px;
+}
+.detail-body .field-row .field-group { flex: 1; }
+.subtask-list {
+  list-style: none;
+}
+.subtask-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+  cursor: pointer;
+}
+.subtask-item:hover { color: var(--tg-accent); }
+.subtask-item input[type="checkbox"] {
+  width: auto;
+  accent-color: var(--tg-accent);
+  cursor: pointer;
+}
+.subtask-item.done {
+  text-decoration: line-through;
+  color: var(--tg-text-secondary);
+}
+.move-column-select {
+  margin-top: 8px;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -457,6 +625,8 @@ body {
 <div class="board" id="board">
   <div class="status">Loading projects...</div>
 </div>
+<div class="detail-overlay" id="detailOverlay"></div>
+<div class="detail-panel" id="detailPanel"></div>
 
 <script>
 const vscode = acquireVsCodeApi();
@@ -530,7 +700,7 @@ function renderColumn(col) {
 function renderCard(t) {
   const expanded = expandedTasks.has(t.id);
   return '<div class="card" draggable="true" data-task-id="' + t.id + '" data-priority="' + t.priority + '">' +
-    '<div class="card-title" onclick="toggleDesc(\\'' + t.id + '\\')">' + escHtml(t.title) + '</div>' +
+    '<div class="card-title" onclick="openTaskDetail(\\'' + t.id + '\\')">' + escHtml(t.title) + '</div>' +
     '<div class="card-meta">' +
       '<span class="badge badge-' + t.priority + '">' + t.priority + '</span>' +
       '<span class="card-id">' + t.id + '</span>' +
@@ -736,6 +906,138 @@ function clearAllDropIndicators() {
     cb.classList.remove('drag-over', 'drag-over-empty');
   });
 }
+
+/* Task Detail Panel */
+let detailTaskId = null;
+
+function openTaskDetail(taskId) {
+  detailTaskId = taskId;
+  const task = findTaskInBoard(taskId);
+  if (!task) return;
+
+  const overlay = document.getElementById('detailOverlay');
+  const panel = document.getElementById('detailPanel');
+
+  // Find current column
+  let currentColumn = '';
+  for (const col of board.columns) {
+    if (col.tasks.find(t => t.id === taskId)) {
+      currentColumn = col.title;
+      break;
+    }
+  }
+
+  panel.innerHTML =
+    '<div class="detail-header">' +
+      '<span class="task-id">' + escHtml(task.id) + '</span>' +
+      '<button class="detail-close" onclick="closeTaskDetail()">✕</button>' +
+    '</div>' +
+    '<div class="detail-body">' +
+      '<div class="field-group">' +
+        '<div class="field-label">Title</div>' +
+        '<input class="title-input" value="' + escAttr(task.title) + '" onchange="updateField(\\'' + task.id + '\\', \\'title\\', this.value)">' +
+      '</div>' +
+      '<div class="field-row">' +
+        '<div class="field-group">' +
+          '<div class="field-label">Priority</div>' +
+          '<select onchange="updateField(\\'' + task.id + '\\', \\'priority\\', this.value)">' +
+            ['P0','P1','P2','P3'].map(p => '<option value="' + p + '"' + (p === task.priority ? ' selected' : '') + '>' + p + '</option>').join('') +
+          '</select>' +
+        '</div>' +
+        '<div class="field-group">' +
+          '<div class="field-label">Category</div>' +
+          '<select onchange="updateField(\\'' + task.id + '\\', \\'category\\', this.value)">' +
+            ['Feature','Bug','Infra','Research','Task','Polish','Reliability','Review'].map(c => '<option value="' + c + '"' + (c === task.category ? ' selected' : '') + '>' + c + '</option>').join('') +
+          '</select>' +
+        '</div>' +
+      '</div>' +
+      '<div class="field-group">' +
+        '<div class="field-label">Assigned</div>' +
+        '<input value="' + escAttr(task.assigned) + '" onchange="updateField(\\'' + task.id + '\\', \\'assigned\\', this.value)">' +
+      '</div>' +
+      '<div class="field-group">' +
+        '<div class="field-label">Tags</div>' +
+        '<input value="' + escAttr((task.tags || []).join(' ')) + '" onchange="updateField(\\'' + task.id + '\\', \\'tags\\', this.value.trim().split(/\\\\s+/).filter(t=>t))">' +
+      '</div>' +
+      '<div class="field-group">' +
+        '<div class="field-label">Description</div>' +
+        '<textarea onchange="updateField(\\'' + task.id + '\\', \\'description\\', this.value)">' + escHtml(task.description) + '</textarea>' +
+      '</div>' +
+      (task.subtasks && task.subtasks.length > 0 ?
+        '<div class="field-group">' +
+          '<div class="field-label">Subtasks (' + task.subtasks.filter(s=>s.done).length + '/' + task.subtasks.length + ')</div>' +
+          '<ul class="subtask-list">' +
+            task.subtasks.map((st, i) =>
+              '<li class="subtask-item' + (st.done ? ' done' : '') + '" onclick="toggleSubtask(\\'' + task.id + '\\', ' + i + ')">' +
+                '<input type="checkbox"' + (st.done ? ' checked' : '') + '>' +
+                '<span>' + escHtml(st.text) + '</span>' +
+              '</li>'
+            ).join('') +
+          '</ul>' +
+        '</div>'
+      : '') +
+      '<div class="field-group">' +
+        '<div class="field-label">Move to Column</div>' +
+        '<select class="move-column-select" onchange="moveToColumn(\\'' + task.id + '\\', this.value)">' +
+          board.columns.map(col =>
+            '<option value="' + escAttr(col.title) + '"' + (col.title === currentColumn ? ' selected' : '') + '>' + escHtml(col.title) + '</option>'
+          ).join('') +
+        '</select>' +
+      '</div>' +
+    '</div>';
+
+  requestAnimationFrame(() => {
+    overlay.classList.add('open');
+    panel.classList.add('open');
+  });
+}
+
+function closeTaskDetail() {
+  detailTaskId = null;
+  const overlay = document.getElementById('detailOverlay');
+  const panel = document.getElementById('detailPanel');
+  overlay.classList.remove('open');
+  panel.classList.remove('open');
+}
+
+function findTaskInBoard(taskId) {
+  if (!board) return null;
+  for (const col of board.columns) {
+    const t = col.tasks.find(t => t.id === taskId);
+    if (t) return t;
+  }
+  return null;
+}
+
+function updateField(taskId, field, value) {
+  vscode.postMessage({ type: 'updateTask', taskId, field, value });
+}
+
+function toggleSubtask(taskId, index) {
+  vscode.postMessage({ type: 'toggleSubtask', taskId, index });
+}
+
+function moveToColumn(taskId, targetColumn) {
+  vscode.postMessage({ type: 'moveTaskToColumn', taskId, targetColumn });
+}
+
+// Close on overlay click
+document.getElementById('detailOverlay').addEventListener('click', closeTaskDetail);
+
+// Close on Escape
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && detailTaskId) {
+    closeTaskDetail();
+  }
+});
+
+// Re-open detail if board refreshes while detail is open
+window.addEventListener('message', (e) => {
+  if (e.data.type === 'board' && detailTaskId) {
+    // Board was updated, refresh the detail panel
+    setTimeout(() => openTaskDetail(detailTaskId), 50);
+  }
+});
 
 function escHtml(s) {
   return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');

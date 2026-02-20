@@ -1,5 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { parseBrief, maskKey, loadProjectList, ProjectBrief } from '../services/resources';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { parseBrief, maskKey, loadProjectList, readBriefRaw, saveBrief, ProjectBrief } from '../services/resources';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 // Mock fs for loadProjectList tests
 vi.mock('fs', async () => {
@@ -195,5 +198,40 @@ describe('loadProjectList', () => {
     const projects = loadProjectList('/home/xiko/kanban-app/data/projects.json');
     const oceangram = projects.find(p => p.slug === 'oceangram');
     expect(oceangram!.hasBrief).toBe(true);
+  });
+});
+
+describe('readBriefRaw / saveBrief roundtrip', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oceangram-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns null for non-existent brief', () => {
+    expect(readBriefRaw('nonexistent', tmpDir)).toBeNull();
+  });
+
+  it('roundtrips content through save and read', () => {
+    const content = '# Test Brief\n\n## Status\n- **Phase**: dev\n';
+    saveBrief('testproj', content, tmpDir);
+    const read = readBriefRaw('testproj', tmpDir);
+    expect(read).toBe(content);
+  });
+
+  it('overwrites existing content on save', () => {
+    saveBrief('testproj', 'original', tmpDir);
+    saveBrief('testproj', 'updated', tmpDir);
+    expect(readBriefRaw('testproj', tmpDir)).toBe('updated');
+  });
+
+  it('preserves unicode and special chars', () => {
+    const content = '# 🚀 Prøject\n\nCafé résumé naïve';
+    saveBrief('unicode', content, tmpDir);
+    expect(readBriefRaw('unicode', tmpDir)).toBe(content);
   });
 });

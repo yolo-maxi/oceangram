@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { TelegramService, ChatEvent, DialogInfo, ConnectionState, UserStatus, GroupMember, ChatInfoResult, ChatMember, SharedMediaItem } from './services/telegram';
 import { OpenClawService, AgentSessionInfo, AgentDetailedInfo } from './services/openclaw';
+import { ToolCall, getToolIcon, truncateParams, formatDuration, groupToolCallsByMessage } from './services/toolExecution';
 import { highlightMessageCodeBlocks, disposeHighlighter } from './services/highlighter';
 
 // Shared telegram service across all panels
@@ -1097,6 +1098,16 @@ export class ChatTab {
               this.panel.webview.postMessage({ type: 'fileSendFailed', tempId: msg.tempId, error: fileErr.message || 'File send failed' });
             }
             break;
+          case 'sendVoice':
+            await tg.connect();
+            try {
+              const voiceBuffer = Buffer.from(msg.data, 'base64');
+              await tg.sendVoice(this.chatId, voiceBuffer, msg.duration, msg.waveform);
+              this.panel.webview.postMessage({ type: 'voiceSendSuccess', tempId: msg.tempId });
+            } catch (voiceErr: any) {
+              this.panel.webview.postMessage({ type: 'voiceSendFailed', tempId: msg.tempId, error: voiceErr.message || 'Voice send failed' });
+            }
+            break;
           case 'downloadFile':
             await tg.connect();
             try {
@@ -1190,6 +1201,20 @@ export class ChatTab {
             const { chatId: rawChatId, topicId: rawTopicId } = TelegramService.parseDialogId(this.chatId);
             const details = openclaw.getDetailedSession(rawChatId, rawTopicId);
             this.panel.webview.postMessage({ type: 'agentDetails', data: details });
+            break;
+          }
+          case 'getToolCalls': {
+            const oc = getOpenClaw();
+            const { chatId: cId, topicId: tId } = TelegramService.parseDialogId(this.chatId);
+            const toolCalls = oc.getSessionToolCalls(cId, tId);
+            // Send enriched tool calls with icons and truncated params
+            const enriched = toolCalls.map(tc => ({
+              ...tc,
+              icon: getToolIcon(tc.name),
+              paramsSummary: truncateParams(tc.arguments),
+              durationLabel: formatDuration(tc.durationMs),
+            }));
+            this.panel.webview.postMessage({ type: 'toolCalls', data: enriched });
             break;
           }
           case 'getGroupMembers': {
@@ -2227,6 +2252,30 @@ body {
 .reaction-emoji { font-size: 15px; }
 .reaction-count { font-size: 12px; color: var(--tg-text-secondary); }
 
+/* TASK-040: Inline approval buttons */
+.approval-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 2px 0;
+}
+.approval-btn {
+  padding: 5px 16px;
+  border-radius: 16px;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s, filter 0.2s;
+  color: #fff;
+  user-select: none;
+}
+.approval-btn:hover:not(:disabled) { filter: brightness(1.15); }
+.approval-btn:disabled { opacity: 0.5; cursor: default; }
+.approval-btn.approve { background: #4caf50; }
+.approval-btn.reject { background: #e05d5d; }
+.approval-btn.chosen { opacity: 1 !important; outline: 2px solid var(--tg-accent); }
+
 /* New messages indicator */
 .new-msgs-btn {
   position: sticky;
@@ -2577,6 +2626,49 @@ body {
 .send-btn:hover { background: rgba(106,178,242,0.1); }
 .send-btn:active { transform: scale(0.92); }
 .send-btn svg { width: 20px; height: 20px; fill: currentColor; }
+
+/* Voice recording */
+.mic-btn {
+  width: 36px; height: 36px; border-radius: 50%; border: none;
+  background: transparent; color: var(--tg-text-secondary);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; transition: background 0.15s, color 0.15s;
+}
+.mic-btn:hover { background: rgba(106,178,242,0.1); color: var(--tg-accent); }
+.mic-btn svg { width: 20px; height: 20px; fill: currentColor; }
+
+.voice-recording-bar {
+  display: none; align-items: center; gap: 10px;
+  padding: 8px 12px; background: var(--tg-composer-bg);
+  flex-shrink: 0;
+}
+.voice-recording-bar.active { display: flex; }
+.voice-rec-dot { width: 10px; height: 10px; border-radius: 50%; background: #e05d5d; animation: pulse-dot 1s infinite; flex-shrink: 0; }
+@keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+.voice-rec-timer { font-size: 14px; color: var(--tg-text); font-variant-numeric: tabular-nums; min-width: 36px; }
+.voice-rec-waveform { flex: 1; height: 28px; display: flex; align-items: center; gap: 1px; }
+.voice-rec-waveform .bar { width: 3px; border-radius: 2px; background: var(--tg-accent); min-height: 3px; transition: height 0.1s; }
+.voice-rec-cancel { background: none; border: none; color: var(--tg-text-secondary); cursor: pointer; font-size: 18px; padding: 4px 8px; }
+.voice-rec-cancel:hover { color: var(--tg-danger); }
+.voice-rec-stop { width: 36px; height: 36px; border-radius: 50%; border: none; background: #e05d5d; color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.voice-rec-stop svg { width: 16px; height: 16px; fill: currentColor; }
+
+.voice-preview-bar {
+  display: none; align-items: center; gap: 8px;
+  padding: 8px 12px; background: var(--tg-composer-bg);
+  flex-shrink: 0;
+}
+.voice-preview-bar.active { display: flex; }
+.voice-play-btn { width: 32px; height: 32px; border-radius: 50%; border: none; background: var(--tg-accent); color: #0e1621; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.voice-play-btn svg { width: 14px; height: 14px; fill: currentColor; }
+.voice-preview-waveform { flex: 1; height: 28px; display: flex; align-items: center; gap: 1px; }
+.voice-preview-waveform .bar { width: 3px; border-radius: 2px; background: var(--tg-accent); min-height: 3px; opacity: 0.5; }
+.voice-preview-waveform .bar.played { opacity: 1; }
+.voice-preview-duration { font-size: 13px; color: var(--tg-text-secondary); font-variant-numeric: tabular-nums; }
+.voice-preview-cancel { background: none; border: none; color: var(--tg-text-secondary); cursor: pointer; font-size: 18px; padding: 4px 8px; }
+.voice-preview-cancel:hover { color: var(--tg-danger); }
+.voice-preview-send { width: 36px; height: 36px; border-radius: 50%; border: none; background: var(--tg-accent); color: #0e1621; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.voice-preview-send svg { width: 20px; height: 20px; fill: currentColor; }
 
 /* Drop zone overlay */
 .drop-zone-overlay {
@@ -3546,9 +3638,32 @@ body {
     <div class="emoji-grid-wrap" id="emojiGridWrap"></div>
   </div>
   <div class="mention-dropdown" id="mentionDropdown"></div>
+  <div class="voice-recording-bar" id="voiceRecordingBar">
+    <span class="voice-rec-dot"></span>
+    <span class="voice-rec-timer" id="voiceRecTimer">0:00</span>
+    <div class="voice-rec-waveform" id="voiceRecWaveform"></div>
+    <button class="voice-rec-cancel" id="voiceRecCancel" title="Cancel">✕</button>
+    <button class="voice-rec-stop" id="voiceRecStop" title="Stop">
+      <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+    </button>
+  </div>
+  <div class="voice-preview-bar" id="voicePreviewBar">
+    <button class="voice-play-btn" id="voicePlayBtn" title="Play">
+      <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+    </button>
+    <div class="voice-preview-waveform" id="voicePreviewWaveform"></div>
+    <span class="voice-preview-duration" id="voicePreviewDuration">0:00</span>
+    <button class="voice-preview-cancel" id="voicePreviewCancel" title="Discard">✕</button>
+    <button class="voice-preview-send" id="voicePreviewSend" title="Send voice message">
+      <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+    </button>
+  </div>
   <div class="composer">
     <textarea id="msgInput" rows="1" placeholder="Message ${name}…" autofocus></textarea>
     <button class="emoji-btn" id="emojiBtn" title="Emoji">😊</button>
+    <button class="mic-btn" id="micBtn" title="Voice message">
+      <svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5zm6 6c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
+    </button>
     <button class="send-btn" id="sendBtn" title="Send">
       <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
     </button>
@@ -3673,6 +3788,27 @@ function isEmojiOnly(text) {
   const stripped = text.replace(/[\\s]/g, '');
   const emojiRe = /^(?:[\\u{1F600}-\\u{1F64F}\\u{1F300}-\\u{1F5FF}\\u{1F680}-\\u{1F6FF}\\u{1F1E0}-\\u{1F1FF}\\u{2600}-\\u{26FF}\\u{2700}-\\u{27BF}\\u{FE00}-\\u{FE0F}\\u{1F900}-\\u{1F9FF}\\u{1FA00}-\\u{1FA6F}\\u{1FA70}-\\u{1FAFF}\\u{200D}\\u{20E3}\\u{E0020}-\\u{E007F}])+$/u;
   return stripped.length <= 10 && emojiRe.test(stripped);
+}
+
+// TASK-040: Approval-seeking pattern detection (inline in webview)
+var _approvalVerbs = /\\b(deploy|send|delete|merge|restart|proceed|continue|execute|publish|push|remove|update|install|upgrade|migrate|rollback|revert|release|start|stop|kill|drop|overwrite|replace)\\b/i;
+var _approvalPatterns = /\\b(should i|want me to|shall i|do you want me to|ready to|go ahead and)\\b/i;
+function isApprovalSeeking(text) {
+  if (!text) return false;
+  var t = text.trim();
+  if (!t.endsWith('?')) return false;
+  return _approvalPatterns.test(t) || _approvalVerbs.test(t);
+}
+
+function handleApproval(btn, action, msgId) {
+  var container = btn.parentElement;
+  var buttons = container.querySelectorAll('.approval-btn');
+  buttons.forEach(function(b) { b.disabled = true; });
+  btn.classList.add('chosen');
+  var responseText = action === 'approve' ? 'Approved ✓' : 'Rejected ✗';
+  // Inject into input and trigger send
+  msgInput.value = responseText;
+  doSend();
 }
 
 function renderMessages(msgs) {
@@ -3888,9 +4024,19 @@ function renderMessages(msgs) {
         statusHtml = '<span class="msg-status ' + statusCls + '">' + statusIcon + '</span>';
       }
 
+      // TASK-040: Approval buttons for incoming messages with approval-seeking patterns
+      var approvalHtml = '';
+      if (!g.isOutgoing && m.text && isApprovalSeeking(m.text)) {
+        approvalHtml = '<div class="approval-buttons" data-msg-id="' + m.id + '">' +
+          '<button class="approval-btn approve" onclick="handleApproval(this, \'approve\', ' + m.id + ')">✓ Approve</button>' +
+          '<button class="approval-btn reject" onclick="handleApproval(this, \'reject\', ' + m.id + ')">✗ Reject</button>' +
+          '</div>';
+      }
+
       html += '<div class="msg ' + pos + optClass + '" data-msg-id="' + m.id + '" data-sender="' + esc(m.senderName || '') + '" data-text="' + esc((m.text || '').slice(0, 100)) + '" data-outgoing="' + (g.isOutgoing ? '1' : '0') + '" data-timestamp="' + (m.timestamp || 0) + '">' +
         '<div class="' + bubbleCls + '">' + bubbleInner + '<span class="msg-time' + timeClass + '">' + timeStr + statusHtml + '</span>' + retryHtml + '</div>' +
         reactionsHtml +
+        approvalHtml +
         '</div>';
     }
     if (!g.isOutgoing) {

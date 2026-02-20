@@ -66,6 +66,23 @@ export function parseBrief(markdown: string, slug: string, name: string): Projec
 }
 
 /**
+ * Read raw markdown content of a project brief
+ */
+export function readBriefRaw(slug: string, briefsDir: string = BRIEFS_DIR): string | null {
+  const briefPath = path.join(briefsDir, `${slug}.md`);
+  if (!fs.existsSync(briefPath)) { return null; }
+  return fs.readFileSync(briefPath, 'utf-8');
+}
+
+/**
+ * Save raw markdown content to a project brief file
+ */
+export function saveBrief(slug: string, content: string, briefsDir: string = BRIEFS_DIR): void {
+  const briefPath = path.join(briefsDir, `${slug}.md`);
+  fs.writeFileSync(briefPath, content, 'utf-8');
+}
+
+/**
  * Load and parse a single project's brief
  */
 export function loadProjectBrief(slug: string, name: string, briefsDir: string = BRIEFS_DIR): ProjectBrief | null {
@@ -143,11 +160,11 @@ function parseResources(md: string): ProjectBrief['resources'] {
 }
 
 /**
- * Mask an API key: show first 3 and last 4 chars
+ * Mask an API key: show first 4 and last 4 chars
  */
 export function maskKey(key: string): string {
-  if (key.length <= 8) { return '••••••••'; }
-  return `${key.slice(0, 3)}...${key.slice(-4)}`;
+  if (key.length <= 8) { return '********'; }
+  return `${key.slice(0, 4)}****${key.slice(-4)}`;
 }
 
 function parseTechStack(md: string): string[] {

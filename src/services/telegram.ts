@@ -1370,6 +1370,41 @@ input.addEventListener('keydown', (e) => {
     });
   }
 
+  async sendVoice(dialogId: string, buffer: Buffer, duration: number, waveform?: number[]): Promise<void> {
+    if (!this.client) throw new Error('Not connected');
+    const { chatId, topicId } = TelegramService.parseDialogId(dialogId);
+    const entity = await this.client.getEntity(chatId);
+
+    // Pack waveform into 5-bit format (Telegram's format)
+    let waveformBuffer: Buffer | undefined;
+    if (waveform && waveform.length > 0) {
+      const byteLen = Math.ceil(waveform.length * 5 / 8);
+      waveformBuffer = Buffer.alloc(byteLen);
+      for (let i = 0; i < waveform.length; i++) {
+        const val = Math.min(31, Math.max(0, Math.round(waveform[i])));
+        const byteIdx = Math.floor(i * 5 / 8);
+        const bitIdx = (i * 5) % 8;
+        waveformBuffer[byteIdx] |= (val << bitIdx) & 0xff;
+        if (bitIdx > 3 && byteIdx + 1 < byteLen) {
+          waveformBuffer[byteIdx + 1] |= (val >> (8 - bitIdx)) & 0xff;
+        }
+      }
+    }
+
+    await this.client.sendFile(entity, {
+      file: buffer,
+      voiceNote: true,
+      attributes: [
+        new Api.DocumentAttributeAudio({
+          voice: true,
+          duration: Math.round(duration),
+          waveform: waveformBuffer,
+        }),
+      ],
+      replyTo: topicId,
+    });
+  }
+
   /**
    * Download a file/document from a message. Returns buffer and metadata.
    * Supports progress callback for download progress indication.

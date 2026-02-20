@@ -21,6 +21,14 @@ import {
   SubAgentInfo,
   MemoryFile,
 } from './services/agent';
+import {
+  ToolCallEntry,
+  getActiveSessionId,
+  getSessionJsonlPath,
+  readToolCallsFromFile,
+  getUniqueToolNames,
+  filterByToolName,
+} from './services/liveTools';
 
 export class AgentPanel {
   private static instance: AgentPanel | undefined;
@@ -28,7 +36,10 @@ export class AgentPanel {
   private disposables: vscode.Disposable[] = [];
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
   private fileWatcher: fs.FSWatcher | undefined;
-  private currentTab: 'overview' | 'tools' | 'subagents' | 'crons' | 'costs' | 'memory' = 'overview';
+  private currentTab: 'overview' | 'tools' | 'subagents' | 'crons' | 'costs' | 'memory' | 'livetools' = 'overview';
+  private liveToolsFilter: string | null = null;
+  private jsonlWatcher: fs.FSWatcher | undefined;
+  private liveToolEntries: ToolCallEntry[] = [];
 
   public static createOrShow(context: vscode.ExtensionContext) {
     if (AgentPanel.instance) {
@@ -53,6 +64,7 @@ export class AgentPanel {
       AgentPanel.instance = undefined;
       if (this.refreshTimer) clearInterval(this.refreshTimer);
       if (this.fileWatcher) this.fileWatcher.close();
+      if (this.jsonlWatcher) this.jsonlWatcher.close();
       this.disposables.forEach(d => d.dispose());
     }, null, this.disposables);
 
@@ -76,6 +88,10 @@ export class AgentPanel {
             break;
           case 'killSubAgent':
             vscode.window.showWarningMessage(`Sub-agent kill not implemented yet: ${msg.sessionId}`);
+            break;
+          case 'liveToolsFilter':
+            this.liveToolsFilter = msg.filter;
+            this.refreshLiveTools();
             break;
         }
       },

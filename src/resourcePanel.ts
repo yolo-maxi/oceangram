@@ -1,5 +1,9 @@
 import * as vscode from 'vscode';
-import { loadProjectList, loadProjectBrief, ProjectBrief, ProjectListEntry } from './services/resources';
+import { loadProjectList, loadProjectBrief, readBriefRaw, saveBrief, ProjectBrief, ProjectListEntry } from './services/resources';
+import { renderMarkdown } from './services/markdownRenderer';
+import { extractAllUrls, parsePm2Json, parseGitLog, parseGitRemote, formatUptime, Pm2Process, GitLogInfo, GitRemote } from './services/resourceHelpers';
+import { execSync } from 'child_process';
+import { fetchPM2Processes, enrichProcesses, pm2Action, pm2Logs, PM2ProcessDisplay } from './services/pm2';
 
 export class ResourcePanel {
   private static instance: ResourcePanel | undefined;
@@ -7,6 +11,13 @@ export class ResourcePanel {
   private disposables: vscode.Disposable[] = [];
   private projects: ProjectListEntry[] = [];
   private currentBrief: ProjectBrief | null = null;
+  private briefMode: 'view' | 'edit' = 'view';
+  private briefRaw: string = '';
+  private urlHealthStatus: Map<string, boolean | null> = new Map();
+  private healthCheckInterval: NodeJS.Timeout | undefined;
+  private deploymentData: { pm2: Pm2Process[]; git: GitLogInfo | null; remotes: GitRemote[] } | null = null;
+  private pm2Processes: PM2ProcessDisplay[] = [];
+  private refreshTimer: ReturnType<typeof setInterval> | undefined;
 
   public static createOrShow(context: vscode.ExtensionContext) {
     if (ResourcePanel.instance) {
@@ -30,9 +41,19 @@ export class ResourcePanel {
     const first = this.projects.find(p => p.hasBrief);
     if (first) {
       this.currentBrief = loadProjectBrief(first.slug, first.name);
+      this.briefRaw = readBriefRaw(first.slug) || '';
     }
 
+    this.refreshPM2();
+    this.loadDeploymentData();
     this.panel.webview.html = this.getHtml();
+    this.startHealthChecks();
+
+    // Auto-refresh PM2 every 30s
+    this.refreshTimer = setInterval(() => {
+      this.refreshPM2();
+      this.panel.webview.postMessage({ type: 'pm2Update', processes: this.pm2Processes });
+    }, 30000);
 
     this.panel.webview.onDidReceiveMessage(
       (msg) => this.handleMessage(msg),
@@ -42,8 +63,68 @@ export class ResourcePanel {
 
     this.panel.onDidDispose(() => {
       ResourcePanel.instance = undefined;
+      if (this.refreshTimer) { clearInterval(this.refreshTimer); }
+      if (this.healthCheckInterval) { clearInterval(this.healthCheckInterval); }
       this.disposables.forEach(d => d.dispose());
     }, null, this.disposables);
+  }
+
+  private refreshPM2() {
+    this.pm2Processes = enrichProcesses(fetchPM2Processes());
+  }
+
+  private loadDeploymentData() {
+    try {
+      const pm2Output = execSync('pm2 jlist 2>/dev/null || echo "[]"', { encoding: 'utf-8', timeout: 5000 });
+      const pm2 = parsePm2Json(pm2Output);
+
+      let git: GitLogInfo | null = null;
+      let remotes: GitRemote[] = [];
+      const projectPath = this.currentBrief?.resources.localPaths[0]?.path.replace(/^~/, process.env.HOME || '/home/xiko');
+      if (projectPath) {
+        try {
+          const gitLog = execSync(`cd "${projectPath}" && git log -1 --format="%h%n%ai%n%an%n%s" 2>/dev/null || echo ""`, { encoding: 'utf-8', timeout: 5000 });
+          git = parseGitLog(gitLog);
+          const gitRemote = execSync(`cd "${projectPath}" && git remote -v 2>/dev/null || echo ""`, { encoding: 'utf-8', timeout: 5000 });
+          remotes = parseGitRemote(gitRemote);
+        } catch { /* no git */ }
+      }
+      this.deploymentData = { pm2, git, remotes };
+    } catch {
+      this.deploymentData = null;
+    }
+  }
+
+  private startHealthChecks() {
+    if (this.currentBrief) {
+      for (const u of this.currentBrief.resources.urls) {
+        this.checkUrlHealth(u.url);
+      }
+    }
+    this.healthCheckInterval = setInterval(() => {
+      if (this.currentBrief) {
+        for (const u of this.currentBrief.resources.urls) {
+          this.checkUrlHealth(u.url);
+        }
+      }
+    }, 60000);
+  }
+
+  private async checkUrlHealth(url: string) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      const resp = await fetch(url, { method: 'HEAD', signal: controller.signal, redirect: 'follow' });
+      clearTimeout(timeout);
+      this.urlHealthStatus.set(url, resp.ok || resp.status < 500);
+    } catch {
+      this.urlHealthStatus.set(url, false);
+    }
+    this.panel.webview.postMessage({
+      type: 'healthUpdate',
+      url,
+      status: this.urlHealthStatus.get(url),
+    });
   }
 
   private handleMessage(msg: any) {
@@ -52,6 +133,8 @@ export class ResourcePanel {
         const proj = this.projects.find(p => p.slug === msg.slug);
         if (proj) {
           this.currentBrief = loadProjectBrief(proj.slug, proj.name);
+          this.briefRaw = readBriefRaw(proj.slug) || '';
+          this.briefMode = 'view';
           this.panel.webview.html = this.getHtml();
         }
         break;
@@ -71,10 +154,61 @@ export class ResourcePanel {
         break;
       }
       case 'editBrief': {
-        if (this.currentBrief) {
-          const uri = vscode.Uri.file(this.currentBrief.briefPath);
-          vscode.commands.executeCommand('vscode.open', uri);
+        this.briefMode = 'edit';
+        this.panel.webview.html = this.getHtml();
+        break;
+      }
+      case 'viewBrief': {
+        this.briefMode = 'view';
+        this.panel.webview.html = this.getHtml();
+        break;
+      }
+      case 'saveBrief': {
+        if (this.currentBrief && msg.content != null) {
+          saveBrief(this.currentBrief.slug, msg.content);
+          this.briefRaw = msg.content;
+          this.currentBrief = loadProjectBrief(this.currentBrief.slug, this.currentBrief.name);
+          this.briefMode = 'view';
+          this.panel.webview.html = this.getHtml();
+          vscode.window.showInformationMessage('Brief saved');
         }
+        break;
+      }
+      case 'autoSaveBrief': {
+        if (this.currentBrief && msg.content != null) {
+          saveBrief(this.currentBrief.slug, msg.content);
+          this.briefRaw = msg.content;
+          this.currentBrief = loadProjectBrief(this.currentBrief.slug, this.currentBrief.name);
+        }
+        break;
+      }
+      case 'pm2Restart':
+      case 'pm2Stop':
+      case 'pm2Delete': {
+        const action = msg.type.replace('pm2', '').toLowerCase() as 'restart' | 'stop' | 'delete';
+        const result = pm2Action(action, msg.name);
+        if (result.success) {
+          vscode.window.showInformationMessage(`PM2: ${action} ${msg.name} succeeded`);
+        } else {
+          vscode.window.showErrorMessage(`PM2: ${action} ${msg.name} failed — ${result.output}`);
+        }
+        this.refreshPM2();
+        this.panel.webview.postMessage({ type: 'pm2Update', processes: this.pm2Processes });
+        break;
+      }
+      case 'pm2Logs': {
+        const logs = pm2Logs(msg.name, 50);
+        this.panel.webview.postMessage({ type: 'pm2LogsResult', name: msg.name, logs });
+        break;
+      }
+      case 'pm2Refresh': {
+        this.refreshPM2();
+        this.panel.webview.postMessage({ type: 'pm2Update', processes: this.pm2Processes });
+        break;
+      }
+      case 'openTerminal': {
+        const terminal = vscode.window.createTerminal({ name: msg.name, cwd: msg.path });
+        terminal.show();
         break;
       }
     }
@@ -111,6 +245,27 @@ export class ResourcePanel {
     const keysHtml = brief?.resources.apiKeys.length ? brief.resources.apiKeys
       .map(k => `<div class="resource-item key-item"><span>${escHtml(k.label)}</span><code class="masked-key">${escHtml(k.masked)}</code><button class="copy-btn" onclick="postMsg('copyKey','${escAttr(k.raw)}')">📋</button></div>`)
       .join('') : '';
+
+    const pm2CardsHtml = this.pm2Processes.length ? this.pm2Processes.map(p => `
+      <div class="pm2-card">
+        <div class="pm2-card-header">
+          <span class="pm2-name">${escHtml(p.name)}</span>
+          <span class="pm2-status-pill" style="background:${p.statusColor}">${escHtml(p.status)}</span>
+        </div>
+        <div class="pm2-stats">
+          <span>CPU: ${p.cpu}%</span>
+          <span>Mem: ${escHtml(p.memoryFormatted)}</span>
+          <span>Up: ${escHtml(p.uptimeFormatted)}</span>
+          <span>↻ ${p.restarts}</span>
+        </div>
+        <div class="pm2-actions">
+          <button class="action-btn restart" onclick="pm2Do('pm2Restart','${escAttr(p.name)}')">🔄 Restart</button>
+          <button class="action-btn stop" onclick="pm2Confirm('pm2Stop','${escAttr(p.name)}')">⏹ Stop</button>
+          <button class="action-btn logs" onclick="pm2Do('pm2Logs','${escAttr(p.name)}')">📄 Logs</button>
+          ${p.pm2_env?.pm_cwd ? `<button class="action-btn terminal" onclick="vscode.postMessage({type:'openTerminal',name:'${escAttr(p.name)}',path:'${escAttr(p.pm2_env.pm_cwd)}'})">💻 Terminal</button>` : ''}
+        </div>
+        <div class="pm2-log-area" id="logs-${p.pm_id}" style="display:none"></div>
+      </div>`).join('') : '<div class="empty">No PM2 processes running</div>';
 
     const techHtml = brief?.techStack.length
       ? brief.techStack.map(t => `<span class="pill tech">${escHtml(t)}</span>`).join('')
@@ -190,6 +345,22 @@ ul { padding-left: 20px; font-size: 13px; }
 li { padding: 2px 0; }
 .empty { color: var(--vscode-descriptionForeground, #888); font-size: 13px; font-style: italic; }
 .section-title { font-weight: 600; font-size: 13px; color: var(--vscode-descriptionForeground, #888); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+.pm2-card { background: var(--vscode-editor-background, #1e1e1e); border: 1px solid var(--vscode-editorWidget-border, #454545); border-radius: 6px; padding: 10px 14px; margin-bottom: 8px; }
+.pm2-card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.pm2-name { font-weight: 600; font-size: 13px; }
+.pm2-status-pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; color: #fff; font-weight: 600; }
+.pm2-stats { display: flex; gap: 12px; font-size: 12px; color: var(--vscode-descriptionForeground, #999); margin-bottom: 6px; }
+.pm2-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.action-btn { background: var(--vscode-button-secondaryBackground, #3a3d41); color: var(--vscode-button-secondaryForeground, #ccc); border: none; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+.action-btn:hover { opacity: 0.8; }
+.action-btn.stop { background: #5a2d2d; color: #f88; }
+.action-btn.restart { background: #2d4a2d; color: #8f8; }
+.pm2-log-area { margin-top: 8px; max-height: 300px; overflow-y: auto; background: var(--vscode-terminal-background, #1a1a1a); border-radius: 4px; padding: 8px; }
+.pm2-log-area pre { font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; white-space: pre-wrap; word-break: break-all; margin: 0; color: var(--vscode-terminal-foreground, #ccc); }
+.confirm-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.confirm-box { background: var(--vscode-editorWidget-background, #252526); border: 1px solid var(--vscode-editorWidget-border, #454545); border-radius: 8px; padding: 20px; max-width: 360px; text-align: center; }
+.confirm-box p { margin-bottom: 16px; font-size: 14px; }
+.confirm-actions { display: flex; gap: 10px; justify-content: center; }
 </style>
 </head>
 <body>
@@ -206,6 +377,25 @@ li { padding: 2px 0; }
     <div class="card-header">Resources</div>
     ${urlsHtml}${pathsHtml}${pm2Html}${keysHtml}
   </div>` : ''}
+
+  <div class="card">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
+      <span>PM2 Processes</span>
+      <button class="edit-btn" style="font-size:11px;padding:3px 8px" onclick="pm2Do('pm2Refresh','')">🔄 Refresh</button>
+    </div>
+    ${pm2CardsHtml}
+  </div>
+
+  <!-- Confirmation dialog -->
+  <div id="confirm-dialog" class="confirm-overlay" style="display:none">
+    <div class="confirm-box">
+      <p id="confirm-msg"></p>
+      <div class="confirm-actions">
+        <button class="action-btn stop" id="confirm-yes">Yes, do it</button>
+        <button class="action-btn" id="confirm-no" onclick="hideConfirm()">Cancel</button>
+      </div>
+    </div>
+  </div>
 
   ${brief ? `<div class="card">
     <div class="card-header">Tech Stack</div>
@@ -230,6 +420,40 @@ li { padding: 2px 0; }
     if (type === 'openUrl') vscode.postMessage({type, url: value});
     else if (type === 'openFile') vscode.postMessage({type, path: value});
     else if (type === 'copyKey') vscode.postMessage({type, value});
+  }
+  function pm2Do(type, name) {
+    vscode.postMessage({type, name});
+  }
+  let pendingConfirm = null;
+  function pm2Confirm(type, name) {
+    document.getElementById('confirm-msg').textContent = 'Are you sure you want to ' + type.replace('pm2','').toLowerCase() + ' "' + name + '"?';
+    document.getElementById('confirm-dialog').style.display = 'flex';
+    pendingConfirm = {type, name};
+    document.getElementById('confirm-yes').onclick = function() {
+      if (pendingConfirm) pm2Do(pendingConfirm.type, pendingConfirm.name);
+      hideConfirm();
+    };
+  }
+  function hideConfirm() {
+    document.getElementById('confirm-dialog').style.display = 'none';
+    pendingConfirm = null;
+  }
+  window.addEventListener('message', function(event) {
+    const msg = event.data;
+    if (msg.type === 'pm2LogsResult') {
+      const procs = document.querySelectorAll('.pm2-card');
+      procs.forEach(function(card) {
+        const nameEl = card.querySelector('.pm2-name');
+        if (nameEl && nameEl.textContent === msg.name) {
+          const logArea = card.querySelector('.pm2-log-area');
+          logArea.innerHTML = '<pre>' + escapeHtml(msg.logs) + '</pre>';
+          logArea.style.display = logArea.style.display === 'none' ? 'block' : 'none';
+        }
+      });
+    }
+  });
+  function escapeHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   }
 </script>
 </body>

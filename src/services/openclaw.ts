@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { ToolCall, parseToolCallsFromJsonl } from './toolExecution';
 
 export interface AgentSessionInfo {
   sessionKey: string;
@@ -320,5 +321,29 @@ export class OpenClawService {
       workspaceDir,
       sandboxed,
     };
+  }
+
+  /**
+   * Get tool calls from the JSONL transcript for a session.
+   */
+  getSessionToolCalls(chatId: string, topicId?: number): ToolCall[] {
+    const basicInfo = this.findSession(chatId, topicId);
+    if (!basicInfo) return [];
+
+    const sessions = this.loadSessions();
+    const session = sessions[basicInfo.sessionKey];
+    if (!session) return [];
+
+    const sessionId = session.sessionId || session.id;
+    if (!sessionId) return [];
+
+    const jsonlPath = path.join(OPENCLAW_DIR, 'agents', 'main', 'sessions', `${sessionId}.jsonl`);
+    try {
+      if (!fs.existsSync(jsonlPath)) return [];
+      const content = fs.readFileSync(jsonlPath, 'utf-8');
+      return parseToolCallsFromJsonl(content.split('\n'));
+    } catch {
+      return [];
+    }
   }
 }
