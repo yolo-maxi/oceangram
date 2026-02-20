@@ -5,6 +5,7 @@ import { SimplePanel } from './simplePanel';
 import { ResourcePanel } from './resourcePanel';
 import { AgentPanel } from './agentPanel';
 import { setStoragePath } from './services/telegram';
+import { showQuickPick } from './quickPick';
 
 export function activate(context: vscode.ExtensionContext) {
   // Use VS Code's globalStorageUri for cache — always local to the UI machine
@@ -50,6 +51,13 @@ export function activate(context: vscode.ExtensionContext) {
         }
       } catch { /* ignore */ }
       vscode.window.showInformationMessage('Session cleared. Open Comms to log in again.');
+    })
+  );
+
+  // Quick command palette (Cmd+Shift+O)
+  context.subscriptions.push(
+    vscode.commands.registerCommand('oceangram.quickPick', () => {
+      showQuickPick(context);
     })
   );
 

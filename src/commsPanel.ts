@@ -87,6 +87,10 @@ export class CommsPicker {
             tg.trackRecentChat(msg.chatId);
             ChatTab.createOrShow(msg.chatId, msg.chatName, this.context);
             break;
+          case 'openDM':
+            tg.trackRecentChat(msg.userId);
+            ChatTab.createOrShow(msg.userId, msg.name || 'DM', this.context);
+            break;
           case 'getTopics':
             await tg.connect();
             const allDialogs = await tg.getDialogs(200);
@@ -1290,10 +1294,46 @@ body {
   height: 100%; background: var(--tg-accent); border-radius: 2px;
   transition: width 0.2s; width: 0%;
 }
-.msg-sticker, .msg-gif {
-  font-size: 13px;
-  padding: 4px 0;
-  color: var(--tg-text-secondary);
+.msg:has(.msg-sticker) .msg-bubble {
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 2px !important;
+}
+.msg-sticker {
+  max-width: 200px;
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+.msg-sticker:hover { transform: scale(1.05); }
+.msg-sticker img { max-width: 200px; display: block; }
+.msg-sticker-placeholder {
+  font-size: 13px; padding: 4px 0; color: var(--tg-text-secondary);
+}
+.msg-gif-container {
+  position: relative;
+  max-width: 300px;
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: pointer;
+  margin-bottom: 4px;
+}
+.msg-gif-container video {
+  max-width: 300px;
+  display: block;
+  border-radius: 12px;
+}
+.msg-gif-container::after {
+  content: 'GIF';
+  position: absolute; top: 8px; left: 8px;
+  background: rgba(0,0,0,0.5); color: #fff;
+  font-size: 11px; font-weight: 700;
+  padding: 2px 6px; border-radius: 4px;
+  pointer-events: none;
+  opacity: 0; transition: opacity 0.2s;
+}
+.msg-gif-container:hover::after { opacity: 1; }
+.msg-gif-placeholder {
+  font-size: 13px; padding: 4px 0; color: var(--tg-text-secondary);
 }
 
 /* Video message */
@@ -2522,10 +2562,24 @@ body {
 .profile-name { font-size: 16px; font-weight: 600; color: var(--tg-text); text-align: center; }
 .profile-username { font-size: 14px; color: var(--tg-accent); }
 .profile-bio { font-size: 13px; color: var(--tg-text-secondary); text-align: center; max-width: 240px; word-break: break-word; }
+.profile-bio { -webkit-line-clamp: 3; display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
 .profile-detail { font-size: 12px; color: var(--tg-text-secondary); }
 .profile-status { font-size: 12px; color: var(--tg-text-secondary); }
 .profile-status.online { color: #98c379; }
 .profile-loading { color: var(--tg-text-secondary); font-size: 13px; padding: 20px 0; }
+.profile-actions { display: flex; gap: 8px; margin-top: 8px; width: 100%; }
+.profile-action-btn {
+  flex: 1;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.06);
+  color: var(--tg-accent);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.profile-action-btn:hover { background: rgba(255,255,255,0.12); }
 
 /* Search bar */
 .search-bar {
@@ -2996,9 +3050,17 @@ function renderMessages(msgs) {
         }
         bubbleInner += '</div>';
       } else if (m.mediaType === 'sticker') {
-        bubbleInner += '<div class="msg-sticker">🏷️ Sticker</div>';
+        if (m.mediaUrl) {
+          bubbleInner += '<div class="msg-sticker" onclick="showLightbox(this.querySelector(&quot;img&quot;).src)"><img src="' + esc(m.mediaUrl) + '" /></div>';
+        } else {
+          bubbleInner += '<div class="msg-sticker-placeholder">🏷️ Sticker</div>';
+        }
       } else if (m.mediaType === 'gif') {
-        bubbleInner += '<div class="msg-gif">🎞️ GIF</div>';
+        if (m.mediaUrl) {
+          bubbleInner += '<div class="msg-gif-container" onclick="var v=this.querySelector(&quot;video&quot;);v.paused?v.play():v.pause()"><video autoplay loop muted playsinline src="' + esc(m.mediaUrl) + '"></video></div>';
+        } else {
+          bubbleInner += '<div class="msg-gif-placeholder">🎞️ GIF</div>';
+        }
       }
 
       // Text
@@ -4352,6 +4414,10 @@ window.addEventListener('message', function(event) {
     if (info.phone) html += '<div class="profile-detail">📱 +' + esc(info.phone) + '</div>';
     html += '<div class="profile-detail">ID: ' + esc(info.id) + '</div>';
     if (info.isBot) html += '<div class="profile-detail">🤖 Bot</div>';
+    html += '<div class="profile-actions">';
+    html += '<button class="profile-action-btn" onclick="profileSendMessage(\'' + esc(info.id) + '\', \'' + esc(info.name) + '\')">💬 Message</button>';
+    if (info.username) html += '<button class="profile-action-btn" onclick="profileCopyUsername(\'' + esc(info.username) + '\')">📋 @' + esc(info.username) + '</button>';
+    html += '</div>';
     activeProfilePopup.innerHTML = html;
   } else if (msg.type === 'userInfoError' && activeProfilePopup) {
     activeProfilePopup.innerHTML = '<div class="profile-loading">Failed to load profile</div>';

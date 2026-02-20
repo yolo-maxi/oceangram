@@ -1140,8 +1140,39 @@ input.addEventListener('keydown', (e) => {
 
             if (isSticker) {
               info.mediaType = 'sticker';
+              // Download sticker (WebP) as base64
+              const stickerAttr = attrs.find((a: any) => a.className === 'DocumentAttributeSticker');
+              const isAnimatedSticker = doc.mimeType === 'application/x-tgsticker' || doc.mimeType === 'video/webm';
+              if (isAnimatedSticker) {
+                // Animated/video stickers: use emoji fallback or static thumb
+                if (stickerAttr?.alt) info.text = stickerAttr.alt;
+                if (doc.thumbs && doc.thumbs.length > 0) {
+                  try {
+                    const thumb = doc.thumbs[doc.thumbs.length - 1];
+                    const thumbBuffer = await this.client!.downloadMedia(msg, { thumb });
+                    if (thumbBuffer && Buffer.isBuffer(thumbBuffer)) {
+                      info.mediaUrl = `data:image/webp;base64,${thumbBuffer.toString('base64')}`;
+                    }
+                  } catch { /* ignore */ }
+                }
+              } else {
+                try {
+                  const buffer = await this.client!.downloadMedia(msg, {});
+                  if (buffer && Buffer.isBuffer(buffer)) {
+                    const mime = doc.mimeType || 'image/webp';
+                    info.mediaUrl = `data:${mime};base64,${buffer.toString('base64')}`;
+                  }
+                } catch { /* ignore sticker download errors */ }
+              }
             } else if (isAnimated || (isVideo && doc.mimeType === 'video/mp4' && !filenameAttr && media.document?.mimeType === 'video/mp4')) {
               info.mediaType = 'gif';
+              // Download GIF (MP4) as base64
+              try {
+                const buffer = await this.client!.downloadMedia(msg, {});
+                if (buffer && Buffer.isBuffer(buffer)) {
+                  info.mediaUrl = `data:video/mp4;base64,${buffer.toString('base64')}`;
+                }
+              } catch { /* ignore gif download errors */ }
             } else if (isVideo) {
               info.mediaType = 'video';
               const videoAttrCheck = attrs.find((a: any) => a.className === 'DocumentAttributeVideo');
@@ -1451,6 +1482,9 @@ input.addEventListener('keydown', (e) => {
 
   // --- User Info ---
 
+  private userInfoCache: Map<string, { data: any; ts: number }> = new Map();
+  private static USER_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
   async getUserInfo(userId: string): Promise<{
     name: string;
     username?: string;
@@ -1462,6 +1496,11 @@ input.addEventListener('keydown', (e) => {
     id: string;
   }> {
     if (!this.client) throw new Error('Not connected');
+
+    const cached = this.userInfoCache.get(userId);
+    if (cached && Date.now() - cached.ts < TelegramService.USER_CACHE_TTL) {
+      return cached.data;
+    }
 
     const entity = await this.client.getEntity(userId);
     const user = entity as Api.User;
@@ -1511,6 +1550,7 @@ input.addEventListener('keydown', (e) => {
       }
     } catch { /* ignore */ }
 
+    this.userInfoCache.set(userId, { data: result, ts: Date.now() });
     return result;
   }
 
@@ -1591,8 +1631,41 @@ input.addEventListener('keydown', (e) => {
           const isVideo = attrs.some((a: any) => a.className === 'DocumentAttributeVideo');
           const isAudio = attrs.some((a: any) => a.className === 'DocumentAttributeAudio');
           const isSticker = attrs.some((a: any) => a.className === 'DocumentAttributeSticker');
-          if (isSticker) info.mediaType = 'sticker';
-          else if (isVideo) {
+          if (isSticker) {
+            info.mediaType = 'sticker';
+            const stickerAttr = attrs.find((a: any) => a.className === 'DocumentAttributeSticker');
+            const isAnimatedSticker = doc.mimeType === 'application/x-tgsticker' || doc.mimeType === 'video/webm';
+            if (isAnimatedSticker) {
+              if (stickerAttr?.alt) info.text = stickerAttr.alt;
+              if (doc.thumbs && doc.thumbs.length > 0 && this.client) {
+                try {
+                  const thumb = doc.thumbs[doc.thumbs.length - 1];
+                  const thumbBuffer = await this.client.downloadMedia(msg, { thumb });
+                  if (thumbBuffer && Buffer.isBuffer(thumbBuffer)) {
+                    info.mediaUrl = `data:image/webp;base64,${thumbBuffer.toString('base64')}`;
+                  }
+                } catch { /* ignore */ }
+              }
+            } else if (this.client) {
+              try {
+                const buffer = await this.client.downloadMedia(msg, {});
+                if (buffer && Buffer.isBuffer(buffer)) {
+                  const mime = doc.mimeType || 'image/webp';
+                  info.mediaUrl = `data:${mime};base64,${buffer.toString('base64')}`;
+                }
+              } catch { /* ignore */ }
+            }
+          } else if (isVideo && doc.mimeType === 'video/mp4' && !attrs.some((a: any) => a.className === 'DocumentAttributeFilename')) {
+            info.mediaType = 'gif';
+            if (this.client) {
+              try {
+                const buffer = await this.client.downloadMedia(msg, {});
+                if (buffer && Buffer.isBuffer(buffer)) {
+                  info.mediaUrl = `data:video/mp4;base64,${buffer.toString('base64')}`;
+                }
+              } catch { /* ignore */ }
+            }
+          } else if (isVideo) {
             info.mediaType = 'video';
             const videoAttr = attrs.find((a: any) => a.className === 'DocumentAttributeVideo');
             if (videoAttr?.duration) info.duration = videoAttr.duration;
