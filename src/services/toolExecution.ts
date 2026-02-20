@@ -223,3 +223,42 @@ export function groupToolCallsByMessage(toolCalls: ToolCall[]): Map<string, Tool
   }
   return grouped;
 }
+
+/**
+ * Parsed tool call from message text (embedded in Telegram messages from OpenClaw)
+ */
+export interface EmbeddedToolCall {
+  name: string;
+  params: string;          // truncated params summary
+  fullParams: string;      // full parameter string
+  result: string;          // truncated result preview  
+  fullResult: string;      // full result text
+  durationMs: number;      // -1 if unknown
+  isError: boolean;
+  index: number;           // position in the message
+}
+
+/**
+ * Parse tool calls embedded in message text.
+ * OpenClaw formats tool calls in various ways in Telegram messages.
+ * 
+ * Patterns detected:
+ * 1. XML-style: <function_calls>...<invoke name="toolName">...</invoke>...
+ * 2. Function result blocks: <function_results>...</function_results>
+ * 3. Tool headers like "⚡ exec:", "📄 Read:", etc.
+ */
+export function parseToolCallsFromText(text: string): EmbeddedToolCall[] {
+  const toolCalls: EmbeddedToolCall[] = [];
+  if (!text) return toolCalls;
+
+  // Pattern 1: XML-style function calls with invoke blocks
+  // Match: <invoke name="toolName">..params..</invoke>
+  const invokePattern = /<invoke\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/antml:invoke>/gi;
+  let match;
+  let index = 0;
+
+  while ((match = invokePattern.exec(text)) !== null) {
+    const toolName = match[1];
+    const paramsBlock = match[2];
+    
+    // Extract parameter values from <parameter name="x">value
