@@ -905,6 +905,81 @@ body {
   padding: 40px 20px;
   color: var(--text2);
 }
+
+/* Live Tools Feed */
+.filter-bar {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.filter-btn {
+  padding: 4px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text2);
+  font-size: 11px;
+  cursor: pointer;
+}
+.filter-btn:hover { background: var(--bg2); color: var(--text); }
+.filter-btn.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+
+.live-tools-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 600px;
+  overflow-y: auto;
+}
+.tool-entry {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.tool-entry:hover { background: var(--card-hover); }
+.tool-entry.error { border-left: 3px solid var(--error); }
+.tool-entry.pending { border-left: 3px solid var(--warning); }
+.tool-entry.success { border-left: 3px solid var(--success); }
+
+.tool-entry-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.tool-icon { font-size: 14px; flex-shrink: 0; }
+.tool-entry-name { font-weight: 600; min-width: 70px; flex-shrink: 0; }
+.tool-entry-params {
+  flex: 1;
+  color: var(--text2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 10px;
+}
+.tool-entry-duration { color: var(--accent); font-size: 11px; flex-shrink: 0; min-width: 40px; text-align: right; }
+.tool-entry-status { flex-shrink: 0; }
+
+.tool-expand { padding: 8px 0 0 22px; }
+.tool-expand.hidden { display: none; }
+.expand-section { margin-bottom: 8px; }
+.expand-label { font-size: 10px; color: var(--text2); text-transform: uppercase; margin-bottom: 2px; }
+.expand-content {
+  font-size: 11px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  background: var(--bg);
+  padding: 6px 8px;
+  border-radius: 4px;
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 </style>
 </head>
 <body>
@@ -951,6 +1026,15 @@ function viewMemoryFile(path) {
 
 function closePreview() {
   document.getElementById('memory-preview').classList.add('hidden');
+}
+
+function filterLiveTools(filter) {
+  vscode.postMessage({ command: 'liveToolsFilter', filter });
+}
+
+function toggleExpand(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('hidden');
 }
 
 function switchModel(model) {

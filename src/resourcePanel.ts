@@ -135,7 +135,11 @@ export class ResourcePanel {
           this.currentBrief = loadProjectBrief(proj.slug, proj.name);
           this.briefRaw = readBriefRaw(proj.slug) || '';
           this.briefMode = 'view';
+          this.loadDeploymentData();
+          this.urlHealthStatus.clear();
           this.panel.webview.html = this.getHtml();
+          if (this.healthCheckInterval) { clearInterval(this.healthCheckInterval); }
+          this.startHealthChecks();
         }
         break;
       }
@@ -530,6 +534,26 @@ li { padding: 2px 0; }
     else if (type === 'openFile') vscode.postMessage({type, path: value});
     else if (type === 'copyKey') vscode.postMessage({type, value});
   }
+  function revealKey(idx) {
+    const el = document.getElementById('key-' + idx);
+    if (!el) return;
+    el.textContent = el.dataset.raw;
+    el.classList.add('revealed');
+    setTimeout(() => {
+      el.textContent = el.dataset.masked;
+      el.classList.remove('revealed');
+    }, 5000);
+  }
+  window.addEventListener('message', e => {
+    const msg = e.data;
+    if (msg.type === 'healthUpdate') {
+      document.querySelectorAll('.health-dot').forEach(dot => {
+        if (dot.dataset.url === msg.url) {
+          dot.textContent = msg.status === true ? '🟢' : msg.status === false ? '🔴' : '⚪';
+        }
+      });
+    }
+  });
   function pm2Do(type, name) {
     vscode.postMessage({type, name});
   }

@@ -4238,6 +4238,255 @@ function doSend() {
 }
 sendBtn.addEventListener('click', doSend);
 
+// ── Voice Recording ──
+var micBtn = document.getElementById('micBtn');
+var voiceRecordingBar = document.getElementById('voiceRecordingBar');
+var voiceRecTimer = document.getElementById('voiceRecTimer');
+var voiceRecWaveform = document.getElementById('voiceRecWaveform');
+var voiceRecCancel = document.getElementById('voiceRecCancel');
+var voiceRecStop = document.getElementById('voiceRecStop');
+var voicePreviewBar = document.getElementById('voicePreviewBar');
+var voicePlayBtn = document.getElementById('voicePlayBtn');
+var voicePreviewWaveform = document.getElementById('voicePreviewWaveform');
+var voicePreviewDuration = document.getElementById('voicePreviewDuration');
+var voicePreviewCancel = document.getElementById('voicePreviewCancel');
+var voicePreviewSend = document.getElementById('voicePreviewSend');
+
+var voiceState = 'idle'; // idle | recording | preview | sending
+var voiceMediaRecorder = null;
+var voiceChunks = [];
+var voiceStream = null;
+var voiceStartTime = 0;
+var voiceTimerInterval = null;
+var voiceAnalyser = null;
+var voiceAnimFrame = null;
+var voiceAudioCtx = null;
+var voiceRecordedBlob = null;
+var voiceRecordedDuration = 0;
+var voiceWaveformSamples = [];
+var voicePreviewAudio = null;
+var voicePreviewPlayInterval = null;
+
+function voiceFormatDuration(sec) {
+  var m = Math.floor(sec / 60);
+  var s = Math.floor(sec % 60);
+  return m + ':' + (s < 10 ? '0' : '') + s;
+}
+
+function voiceSetState(newState) {
+  voiceState = newState;
+  var composerEl = document.querySelector('.composer');
+  voiceRecordingBar.classList.toggle('active', newState === 'recording');
+  voicePreviewBar.classList.toggle('active', newState === 'preview' || newState === 'sending');
+  composerEl.style.display = (newState === 'idle') ? 'flex' : 'none';
+}
+
+function voiceStartRecording() {
+  navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream) {
+    voiceStream = stream;
+    voiceChunks = [];
+    voiceWaveformSamples = [];
+
+    // Try ogg/opus first, fall back to webm
+    var mimeType = 'audio/ogg; codecs=opus';
+    if (!MediaRecorder.isTypeSupported(mimeType)) {
+      mimeType = 'audio/webm; codecs=opus';
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        mimeType = 'audio/webm';
+      }
+    }
+
+    voiceMediaRecorder = new MediaRecorder(stream, { mimeType: mimeType });
+    voiceMediaRecorder.ondataavailable = function(e) {
+      if (e.data.size > 0) voiceChunks.push(e.data);
+    };
+    voiceMediaRecorder.onstop = function() {
+      voiceRecordedBlob = new Blob(voiceChunks, { type: voiceMediaRecorder.mimeType });
+      voiceRecordedDuration = (Date.now() - voiceStartTime) / 1000;
+      voiceShowPreview();
+    };
+
+    // Audio analyser for waveform
+    voiceAudioCtx = new AudioContext();
+    var source = voiceAudioCtx.createMediaStreamSource(stream);
+    voiceAnalyser = voiceAudioCtx.createAnalyser();
+    voiceAnalyser.fftSize = 256;
+    source.connect(voiceAnalyser);
+
+    voiceMediaRecorder.start(100);
+    voiceStartTime = Date.now();
+    voiceSetState('recording');
+
+    // Timer
+    voiceTimerInterval = setInterval(function() {
+      var elapsed = (Date.now() - voiceStartTime) / 1000;
+      voiceRecTimer.textContent = voiceFormatDuration(elapsed);
+    }, 200);
+
+    // Waveform animation
+    voiceAnimateWaveform();
+  }).catch(function(err) {
+    console.error('Mic access denied:', err);
+  });
+}
+
+function voiceAnimateWaveform() {
+  if (voiceState !== 'recording' || !voiceAnalyser) return;
+  var data = new Uint8Array(voiceAnalyser.frequencyBinCount);
+  voiceAnalyser.getByteTimeDomainData(data);
+
+  // Compute RMS amplitude
+  var sum = 0;
+  for (var i = 0; i < data.length; i++) {
+    var v = (data[i] - 128) / 128;
+    sum += v * v;
+  }
+  var rms = Math.sqrt(sum / data.length);
+  var level = Math.min(31, Math.round(rms * 200)); // 0-31 like Telegram
+  voiceWaveformSamples.push(level);
+
+  // Render bars (last 40)
+  var bars = voiceWaveformSamples.slice(-40);
+  var html = '';
+  for (var j = 0; j < bars.length; j++) {
+    var h = Math.max(3, (bars[j] / 31) * 28);
+    html += '<div class="bar" style="height:' + h + 'px"></div>';
+  }
+  voiceRecWaveform.innerHTML = html;
+
+  voiceAnimFrame = requestAnimationFrame(voiceAnimateWaveform);
+}
+
+function voiceStopRecording() {
+  if (voiceTimerInterval) { clearInterval(voiceTimerInterval); voiceTimerInterval = null; }
+  if (voiceAnimFrame) { cancelAnimationFrame(voiceAnimFrame); voiceAnimFrame = null; }
+  if (voiceMediaRecorder && voiceMediaRecorder.state !== 'inactive') {
+    voiceMediaRecorder.stop();
+  }
+  if (voiceStream) {
+    voiceStream.getTracks().forEach(function(t) { t.stop(); });
+    voiceStream = null;
+  }
+  if (voiceAudioCtx) { voiceAudioCtx.close().catch(function(){}); voiceAudioCtx = null; }
+}
+
+function voiceCancelRecording() {
+  voiceStopRecording();
+  voiceRecordedBlob = null;
+  voiceSetState('idle');
+  msgInput.focus();
+}
+
+function voiceShowPreview() {
+  voiceSetState('preview');
+  voicePreviewDuration.textContent = voiceFormatDuration(voiceRecordedDuration);
+
+  // Render static waveform for preview (downsample to ~40 bars)
+  var targetBars = 40;
+  var samples = voiceWaveformSamples;
+  var step = Math.max(1, Math.floor(samples.length / targetBars));
+  var bars = [];
+  for (var i = 0; i < samples.length; i += step) {
+    var s = 0, c = 0;
+    for (var j = i; j < i + step && j < samples.length; j++) { s += samples[j]; c++; }
+    bars.push(c > 0 ? s / c : 0);
+  }
+  var maxVal = Math.max.apply(null, bars.concat([1]));
+  var html = '';
+  for (var k = 0; k < bars.length; k++) {
+    var h = Math.max(3, (bars[k] / maxVal) * 28);
+    html += '<div class="bar" style="height:' + h + 'px"></div>';
+  }
+  voicePreviewWaveform.innerHTML = html;
+}
+
+function voiceTogglePlay() {
+  if (voicePreviewAudio && !voicePreviewAudio.paused) {
+    voicePreviewAudio.pause();
+    voicePlayBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+    if (voicePreviewPlayInterval) { clearInterval(voicePreviewPlayInterval); voicePreviewPlayInterval = null; }
+    return;
+  }
+  if (!voiceRecordedBlob) return;
+  var url = URL.createObjectURL(voiceRecordedBlob);
+  voicePreviewAudio = new Audio(url);
+  voicePreviewAudio.play();
+  voicePlayBtn.innerHTML = '<svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>';
+
+  var allBars = voicePreviewWaveform.querySelectorAll('.bar');
+  voicePreviewPlayInterval = setInterval(function() {
+    if (!voicePreviewAudio) return;
+    var pct = voicePreviewAudio.currentTime / voicePreviewAudio.duration;
+    var playedCount = Math.floor(pct * allBars.length);
+    for (var i = 0; i < allBars.length; i++) {
+      allBars[i].classList.toggle('played', i < playedCount);
+    }
+    voicePreviewDuration.textContent = voiceFormatDuration(voicePreviewAudio.duration - voicePreviewAudio.currentTime);
+  }, 100);
+
+  voicePreviewAudio.onended = function() {
+    voicePlayBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+    if (voicePreviewPlayInterval) { clearInterval(voicePreviewPlayInterval); voicePreviewPlayInterval = null; }
+    voicePreviewDuration.textContent = voiceFormatDuration(voiceRecordedDuration);
+    var allBars2 = voicePreviewWaveform.querySelectorAll('.bar');
+    for (var i = 0; i < allBars2.length; i++) allBars2[i].classList.remove('played');
+    URL.revokeObjectURL(url);
+    voicePreviewAudio = null;
+  };
+}
+
+function voiceSend() {
+  if (!voiceRecordedBlob || voiceState === 'sending') return;
+  voiceSetState('sending');
+  if (voicePreviewAudio) { voicePreviewAudio.pause(); voicePreviewAudio = null; }
+
+  var reader = new FileReader();
+  reader.onloadend = function() {
+    var base64 = reader.result.split(',')[1];
+    // Downsample waveform to 64 samples (Telegram standard)
+    var wf = [];
+    var step = Math.max(1, Math.floor(voiceWaveformSamples.length / 64));
+    for (var i = 0; i < voiceWaveformSamples.length && wf.length < 64; i += step) {
+      wf.push(voiceWaveformSamples[i]);
+    }
+    var tempId = --optimisticIdCounter;
+    vscode.postMessage({
+      type: 'sendVoice',
+      data: base64,
+      duration: voiceRecordedDuration,
+      waveform: wf,
+      tempId: tempId
+    });
+  };
+  reader.readAsDataURL(voiceRecordedBlob);
+}
+
+micBtn.addEventListener('click', function() {
+  if (voiceState === 'idle') voiceStartRecording();
+});
+voiceRecCancel.addEventListener('click', voiceCancelRecording);
+voiceRecStop.addEventListener('click', function() { voiceStopRecording(); });
+voicePreviewCancel.addEventListener('click', function() {
+  if (voicePreviewAudio) { voicePreviewAudio.pause(); voicePreviewAudio = null; }
+  voiceRecordedBlob = null;
+  voiceSetState('idle');
+  msgInput.focus();
+});
+voicePlayBtn.addEventListener('click', voiceTogglePlay);
+voicePreviewSend.addEventListener('click', voiceSend);
+
+window.addEventListener('message', function(event) {
+  var msg = event.data;
+  if (msg.type === 'voiceSendSuccess') {
+    voiceRecordedBlob = null;
+    voiceWaveformSamples = [];
+    voiceSetState('idle');
+    msgInput.focus();
+  } else if (msg.type === 'voiceSendFailed') {
+    voiceSetState('preview');
+  }
+});
+
 // ── Image Paste ──
 let pastedImageData = null; // { base64, mimeType }
 const imagePasteBar = document.getElementById('imagePasteBar');
