@@ -11,6 +11,7 @@ import {
   friendlySessionName,
   estimateCost,
   toggleCronJob,
+  fetchCronOutput,
   readMemoryFile,
   AgentPanelData,
   SessionEntry,
@@ -86,6 +87,11 @@ export class AgentPanel {
             const content = await readMemoryFile(msg.path);
             this.panel.webview.postMessage({ command: 'memoryContent', path: msg.path, content });
             break;
+          case 'viewCronOutput': {
+            const output = await fetchCronOutput(msg.jobId);
+            this.panel.webview.postMessage({ command: 'cronOutput', jobId: msg.jobId, output });
+            break;
+          }
           case 'killSubAgent':
             vscode.window.showWarningMessage(`Sub-agent kill not implemented yet: ${msg.sessionId}`);
             break;
@@ -311,6 +317,10 @@ export class AgentPanel {
             ${cron.lastDurationMs ? `<span>${formatDuration(cron.lastDurationMs)}</span>` : ''}
           </div>
           ${cron.consecutiveErrors > 0 ? `<div class="cron-errors">⚠️ ${cron.consecutiveErrors} consecutive errors</div>` : ''}
+          <div class="cron-actions">
+            <button class="view-output-btn" onclick="viewCronOutput('${cron.id}')">📄 View Output</button>
+          </div>
+          <div id="cron-output-${cron.id}" class="cron-output hidden"></div>
         </div>
       `).join('')}
     </div>`;
@@ -327,8 +337,12 @@ export class AgentPanel {
         <div class="cost-value">${formatCost(costs.currentSession)}</div>
       </div>
       <div class="cost-card">
-        <div class="cost-label">Today's Total</div>
+        <div class="cost-label">Today</div>
         <div class="cost-value">${formatCost(costs.dailyTotal)}</div>
+      </div>
+      <div class="cost-card">
+        <div class="cost-label">This Week</div>
+        <div class="cost-value">${formatCost(costs.weeklyTotal)}</div>
       </div>
     </div>
 
@@ -341,6 +355,19 @@ export class AgentPanel {
             <span class="model-name">${this.esc(b.model)}</span>
             <span class="token-count">↑${formatTokens(b.inputTokens)} ↓${formatTokens(b.outputTokens)}</span>
             <span class="model-cost">${formatCost(b.cost)}</span>
+          </div>
+        `).join('')}
+    </div>
+
+    <div class="section-subtitle" style="margin-top:16px">Per-Session Costs (Today)</div>
+    <div class="cost-breakdown">
+      ${costs.sessionCosts.length === 0 
+        ? '<div class="empty-state">No sessions today</div>'
+        : costs.sessionCosts.map(s => `
+          <div class="breakdown-row">
+            <span class="session-cost-name" title="${this.esc(s.name)}">${this.esc(s.name.length > 30 ? s.name.slice(0, 27) + '...' : s.name)}</span>
+            <span class="token-count">↑${formatTokens(s.inputTokens)} ↓${formatTokens(s.outputTokens)}</span>
+            <span class="model-cost">${formatCost(s.cost)}</span>
           </div>
         `).join('')}
     </div>`;
@@ -763,6 +790,20 @@ body {
   flex-wrap: wrap;
 }
 .cron-errors { color: var(--error); font-size: 11px; margin-top: 6px; }
+.cron-actions { margin-top: 8px; }
+.cron-output {
+  margin-top: 8px;
+  background: var(--bg);
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-size: 11px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.cron-output.hidden { display: none; }
 
 /* Toggle Switch */
 .toggle-switch {
@@ -827,6 +868,14 @@ body {
 }
 .breakdown-row:last-child { border-bottom: none; }
 .model-name { font-weight: 500; }
+.session-cost-name {
+  font-weight: 400;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
 .token-count { color: var(--text2); font-size: 11px; }
 .model-cost { color: var(--accent); font-weight: 500; }
 
@@ -1037,8 +1086,11 @@ function toggleExpand(id) {
 }
 
 function switchModel(model) {
-  // Model switching would require API support
   vscode.postMessage({ command: 'switchModel', model });
+}
+
+function viewCronOutput(jobId) {
+  vscode.postMessage({ command: 'viewCronOutput', jobId });
 }
 
 window.addEventListener('message', event => {
@@ -1048,6 +1100,13 @@ window.addEventListener('message', event => {
     document.getElementById('preview-path').textContent = msg.path.split('/').pop();
     document.getElementById('preview-content').textContent = msg.content;
     preview.classList.remove('hidden');
+  }
+  if (msg.command === 'cronOutput') {
+    const el = document.getElementById('cron-output-' + msg.jobId);
+    if (el) {
+      el.textContent = msg.output;
+      el.classList.toggle('hidden');
+    }
   }
 });
 </script>

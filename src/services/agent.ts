@@ -48,6 +48,7 @@ export interface CronJobInfo {
   lastDurationMs: number | null;
   consecutiveErrors: number;
   delivery?: { mode: string; channel?: string; to?: string };
+  lastOutput?: string;
 }
 
 export interface SubAgentInfo {
@@ -69,10 +70,21 @@ export interface CostBreakdown {
   cost: number;
 }
 
+export interface SessionCostEntry {
+  name: string;
+  model: string;
+  cost: number;
+  inputTokens: number;
+  outputTokens: number;
+  updatedAt: number;
+}
+
 export interface SessionCosts {
   currentSession: number;
   dailyTotal: number;
+  weeklyTotal: number;
   breakdown: CostBreakdown[];
+  sessionCosts: SessionCostEntry[];
 }
 
 export interface MemoryFile {
@@ -369,6 +381,7 @@ async function getMemoryFiles(dir?: string, depth: number = 0): Promise<MemoryFi
 function getSessionCosts(sessions: SessionEntry[]): SessionCosts {
   const now = Date.now();
   const todayStart = new Date().setHours(0, 0, 0, 0);
+  const weekStart = todayStart - 6 * 24 * 60 * 60 * 1000;
   
   // Current session (most recent)
   const currentSession = sessions[0] ? estimateCost(sessions[0]) : 0;
@@ -377,7 +390,11 @@ function getSessionCosts(sessions: SessionEntry[]): SessionCosts {
   const todaySessions = sessions.filter(s => s.updatedAt >= todayStart);
   const dailyTotal = todaySessions.reduce((sum, s) => sum + estimateCost(s), 0);
   
-  // Breakdown by model
+  // Weekly total (last 7 days)
+  const weekSessions = sessions.filter(s => s.updatedAt >= weekStart);
+  const weeklyTotal = weekSessions.reduce((sum, s) => sum + estimateCost(s), 0);
+  
+  // Breakdown by model (today)
   const modelCosts: Record<string, { input: number; output: number; cost: number }> = {};
   
   for (const s of todaySessions) {
@@ -397,7 +414,17 @@ function getSessionCosts(sessions: SessionEntry[]): SessionCosts {
     cost: data.cost,
   }));
   
-  return { currentSession, dailyTotal, breakdown };
+  // Per-session cost list (today, sorted by cost desc)
+  const sessionCosts: SessionCostEntry[] = todaySessions.map(s => ({
+    name: friendlySessionName(s),
+    model: (s.model || 'default').replace(/^anthropic\//, ''),
+    cost: estimateCost(s),
+    inputTokens: s.inputTokens || 0,
+    outputTokens: s.outputTokens || 0,
+    updatedAt: s.updatedAt,
+  })).sort((a, b) => b.cost - a.cost);
+  
+  return { currentSession, dailyTotal, weeklyTotal, breakdown, sessionCosts };
 }
 
 // --- Get agent config ---
@@ -502,6 +529,18 @@ export async function fetchAgentPanelData(): Promise<AgentPanelData> {
 }
 
 // --- Cron control functions ---
+
+export async function fetchCronOutput(jobId: string): Promise<string> {
+  try {
+    const gatewayPort = vscode.workspace.getConfiguration('oceangram').get<number>('gatewayPort', 4380);
+    const resp = await fetch(`http://localhost:${gatewayPort}/api/cron/output/${jobId}`);
+    if (!resp.ok) return '(No output available)';
+    const data = await resp.json() as any;
+    return data.output || data.lastOutput || '(No output)';
+  } catch {
+    return '(Failed to fetch output)';
+  }
+}
 
 export async function toggleCronJob(jobId: string, enable: boolean): Promise<boolean> {
   try {
