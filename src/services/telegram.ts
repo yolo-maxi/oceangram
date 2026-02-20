@@ -887,65 +887,17 @@ input.addEventListener('keydown', (e) => {
     const pinnedIds = this.getPinnedIds();
     const results: DialogInfo[] = [];
 
+    // Separate forums from regular chats so we can fetch topics in parallel
+    const forums: { d: any; chatId: string; groupName: string }[] = [];
+
     for (const d of dialogs) {
       const chatId = this.getEntityId(d);
       const groupName = this.getEntityName(d.entity);
       const isForum = this.isForumGroup(d.entity);
 
       if (isForum) {
-        // For forum groups, list each topic as a separate entry
-        try {
-          const topics = await this.getForumTopics(chatId);
-          for (const topic of topics) {
-            const topicId = topic.id;
-            const dialogId = TelegramService.makeDialogId(chatId, topicId);
-            const topicTitle = topic.title || 'General';
-            const displayName = `${groupName} / ${topicTitle}`;
-
-            // Extract topic emoji
-            let topicEmoji: string | undefined;
-            // Check if title ends with an emoji
-            const emojiMatch = topicTitle.match(/([\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}])\s*$/u);
-            if (emojiMatch) {
-              topicEmoji = emojiMatch[1];
-            } else if (topicTitle === 'General' || topicId === 1) {
-              topicEmoji = '💬';
-            } else {
-              topicEmoji = '⌗';
-            }
-
-            results.push({
-              id: dialogId,
-              chatId,
-              topicId,
-              name: displayName,
-              lastMessage: '', // Topic-level last message requires extra fetch
-              lastMessageTime: topic.date || 0,
-              unreadCount: topic.unreadCount || 0,
-              initials: this.getInitials(groupName),
-              isPinned: pinnedIds.includes(dialogId),
-              isForum: true,
-              topicEmoji,
-              groupName,
-              topicName: topicTitle,
-            });
-          }
-        } catch {
-          // Fallback: show the group as a single entry
-          results.push({
-            id: chatId,
-            chatId,
-            name: groupName,
-            lastMessage: d.message?.message || '',
-            lastMessageTime: d.message?.date || 0,
-            unreadCount: d.unreadCount || 0,
-            initials: this.getInitials(groupName),
-            isPinned: pinnedIds.includes(chatId),
-            isForum: true,
-          });
-        }
+        forums.push({ d, chatId, groupName });
       } else {
-        // Regular chat/group
         results.push({
           id: chatId,
           chatId,
@@ -957,6 +909,71 @@ input.addEventListener('keydown', (e) => {
           isPinned: pinnedIds.includes(chatId),
           isForum: false,
         });
+      }
+    }
+
+    // Fetch all forum topics in parallel (with 5s timeout per forum)
+    const forumResults = await Promise.allSettled(
+      forums.map(async ({ d, chatId, groupName }) => {
+        const topicEntries: DialogInfo[] = [];
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('timeout')), 5000)
+        );
+        try {
+          const topics = await Promise.race([this.getForumTopics(chatId), timeoutPromise]);
+          for (const topic of topics) {
+            const topicId = topic.id;
+            const dialogId = TelegramService.makeDialogId(chatId, topicId);
+            const topicTitle = topic.title || 'General';
+            const displayName = `${groupName} / ${topicTitle}`;
+
+            let topicEmoji: string | undefined;
+            const emojiMatch = topicTitle.match(/([\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}])\s*$/u);
+            if (emojiMatch) {
+              topicEmoji = emojiMatch[1];
+            } else if (topicTitle === 'General' || topicId === 1) {
+              topicEmoji = '💬';
+            } else {
+              topicEmoji = '⌗';
+            }
+
+            topicEntries.push({
+              id: dialogId,
+              chatId,
+              topicId,
+              name: displayName,
+              lastMessage: '',
+              lastMessageTime: topic.date || 0,
+              unreadCount: topic.unreadCount || 0,
+              initials: this.getInitials(groupName),
+              isPinned: pinnedIds.includes(dialogId),
+              isForum: true,
+              topicEmoji,
+              groupName,
+              topicName: topicTitle,
+            });
+          }
+        } catch {
+          // Timeout or error — show group as single entry
+          topicEntries.push({
+            id: chatId,
+            chatId,
+            name: groupName,
+            lastMessage: d.message?.message || '',
+            lastMessageTime: d.message?.date || 0,
+            unreadCount: d.unreadCount || 0,
+            initials: this.getInitials(groupName),
+            isPinned: pinnedIds.includes(chatId),
+            isForum: true,
+          });
+        }
+        return topicEntries;
+      })
+    );
+
+    for (const result of forumResults) {
+      if (result.status === 'fulfilled') {
+        results.push(...result.value);
       }
     }
 
@@ -1035,7 +1052,11 @@ input.addEventListener('keydown', (e) => {
       }
     }
 
-    const fresh = await this.fetchMessagesFresh(dialogId, limit, offsetId);
+    // Add 10s timeout to prevent infinite "Loading..." state
+    const timeoutPromise = new Promise<MessageInfo[]>((_, reject) =>
+      setTimeout(() => reject(new Error('Message fetch timeout')), 10000)
+    );
+    const fresh = await Promise.race([this.fetchMessagesFresh(dialogId, limit, offsetId), timeoutPromise]);
     if (!offsetId) {
       this.updateMessageCache(dialogId, fresh);
     }

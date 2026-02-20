@@ -1001,7 +1001,14 @@ export class ChatTab {
         switch (msg.type) {
           case 'init':
             await tg.connect();
-            const messages = await addSyntaxHighlighting(await tg.getMessages(this.chatId, 20));
+            let messages: any[];
+            try {
+              messages = await addSyntaxHighlighting(await tg.getMessages(this.chatId, 20));
+            } catch (initErr: any) {
+              console.error('Failed to load messages:', initErr);
+              this.panel.webview.postMessage({ type: 'messages', messages: [], error: initErr.message || 'Failed to load messages' });
+              break;
+            }
             this.panel.webview.postMessage({ type: 'messages', messages });
             // Track last message ID for gap detection
             if (messages.length > 0) {
@@ -4864,6 +4871,10 @@ window.addEventListener('message', (event) => {
   const msg = event.data;
   switch (msg.type) {
     case 'messages':
+      if (msg.error && (!msg.messages || msg.messages.length === 0)) {
+        messagesList.innerHTML = '<div class="empty-state">⚠️ ' + msg.error + '<br><small>Try reopening the chat</small></div>';
+        break;
+      }
       var wasAtBottom = isScrolledToBottom();
       var prevLen = allMessages.length;
       // Merge server messages with optimistic ones — in-place replacement, no flicker
