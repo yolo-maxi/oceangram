@@ -5,13 +5,13 @@ export interface ToolCall {
   id: string;
   name: string;
   arguments: Record<string, any>;
-  timestamp: number;       // when the assistant message with tool_use was sent
-  resultTimestamp: number;  // when the tool result came back
+  timestamp: number;
+  resultTimestamp: number;
   durationMs: number;
   isError: boolean;
-  resultPreview: string;   // truncated result text
-  resultFull: string;      // full result text
-  messageId: string;       // parent assistant message ID
+  resultPreview: string;
+  resultFull: string;
+  messageId: string;
 }
 
 export interface SessionToolCalls {
@@ -22,8 +22,11 @@ export interface SessionToolCalls {
 const TOOL_ICONS: Record<string, string> = {
   exec: '⚡',
   read: '📄',
+  Read: '📄',
   write: '✏️',
+  Write: '✏️',
   edit: '🔧',
+  Edit: '🔧',
   web_search: '🔍',
   web_fetch: '🌐',
   browser: '🖥️',
@@ -42,34 +45,35 @@ export function getToolIcon(name: string): string {
 export function truncateParams(args: Record<string, any>, maxLen: number = 80): string {
   if (!args || Object.keys(args).length === 0) return '';
   
-  // For exec, show command
   if (args.command) {
     const cmd = String(args.command);
     return cmd.length > maxLen ? cmd.slice(0, maxLen) + '…' : cmd;
   }
-  // For read/write/edit, show file path
   if (args.file_path || args.path) {
     const p = String(args.file_path || args.path);
     return p.length > maxLen ? '…' + p.slice(-maxLen + 1) : p;
   }
-  // For web_search, show query
   if (args.query) {
     const q = String(args.query);
     return q.length > maxLen ? q.slice(0, maxLen) + '…' : q;
   }
-  // For web_fetch, show url
   if (args.url) {
     const u = String(args.url);
     return u.length > maxLen ? u.slice(0, maxLen) + '…' : u;
   }
-  // For message, show action
   if (args.action) {
     return String(args.action);
   }
   
-  // Generic: JSON stringify truncated
   const json = JSON.stringify(args);
   return json.length > maxLen ? json.slice(0, maxLen) + '…' : json;
+}
+
+export function truncateString(s: string, maxLen: number = 60): string {
+  if (!s) return '';
+  s = s.trim();
+  if (s.length <= maxLen) return s;
+  return s.slice(0, maxLen) + '…';
 }
 
 export function formatDuration(ms: number): string {
@@ -100,13 +104,8 @@ interface JsonlMessage {
   };
 }
 
-/**
- * Parse a JSONL session file and extract tool calls with their results.
- */
 export function parseToolCallsFromJsonl(lines: string[]): ToolCall[] {
   const toolCalls: ToolCall[] = [];
-  
-  // Map toolCallId -> pending ToolCall info
   const pending = new Map<string, {
     id: string;
     name: string;
@@ -129,7 +128,6 @@ export function parseToolCallsFromJsonl(lines: string[]): ToolCall[] {
     const msg = entry.message;
     const ts = new Date(entry.timestamp).getTime();
 
-    // Assistant message with tool_use blocks
     if (msg.role === 'assistant' && Array.isArray(msg.content)) {
       for (const block of msg.content) {
         if (block.type === 'toolCall' && block.id && block.name) {
@@ -144,13 +142,11 @@ export function parseToolCallsFromJsonl(lines: string[]): ToolCall[] {
       }
     }
 
-    // Tool result message
     if (msg.role === 'toolResult' && msg.toolCallId) {
       const p = pending.get(msg.toolCallId);
       if (!p) continue;
       pending.delete(msg.toolCallId);
 
-      // Extract result text
       let resultText = '';
       let isError = false;
       if (Array.isArray(msg.content)) {
@@ -183,19 +179,13 @@ export function parseToolCallsFromJsonl(lines: string[]): ToolCall[] {
 
 const SESSIONS_DIR = path.join(process.env.HOME || '/home/xiko', '.openclaw', 'agents', 'main', 'sessions');
 
-/**
- * Find the JSONL session file for a given session key and parse tool calls.
- */
 export function getToolCallsForSession(sessionKey: string): ToolCall[] {
-  // The session key is like "agent:main:telegram:group:-1003850294102:topic:8547"
-  // The sessions.json maps keys to session data which includes the session ID (used as filename)
   const sessionsPath = path.join(SESSIONS_DIR, 'sessions.json');
   try {
     const sessions = JSON.parse(fs.readFileSync(sessionsPath, 'utf-8'));
     const session = sessions[sessionKey];
     if (!session) return [];
     
-    // The session ID is the JSONL filename
     const sessionId = session.sessionId || session.id;
     if (!sessionId) return [];
     
@@ -210,10 +200,6 @@ export function getToolCallsForSession(sessionKey: string): ToolCall[] {
   }
 }
 
-/**
- * Group tool calls by their parent assistant message ID.
- * Returns a map of messageId -> ToolCall[]
- */
 export function groupToolCallsByMessage(toolCalls: ToolCall[]): Map<string, ToolCall[]> {
   const grouped = new Map<string, ToolCall[]>();
   for (const tc of toolCalls) {
@@ -224,41 +210,188 @@ export function groupToolCallsByMessage(toolCalls: ToolCall[]): Map<string, Tool
   return grouped;
 }
 
-/**
- * Parsed tool call from message text (embedded in Telegram messages from OpenClaw)
- */
 export interface EmbeddedToolCall {
   name: string;
-  params: string;          // truncated params summary
-  fullParams: string;      // full parameter string
-  result: string;          // truncated result preview  
-  fullResult: string;      // full result text
-  durationMs: number;      // -1 if unknown
+  params: string;
+  fullParams: string;
+  result: string;
+  fullResult: string;
+  durationMs: number;
   isError: boolean;
-  index: number;           // position in the message
+  index: number;
 }
 
 /**
- * Parse tool calls embedded in message text.
- * OpenClaw formats tool calls in various ways in Telegram messages.
- * 
- * Patterns detected:
- * 1. XML-style: <function_calls>...<invoke name="toolName">...</invoke>...
- * 2. Function result blocks: <function_results>...</function_results>
- * 3. Tool headers like "⚡ exec:", "📄 Read:", etc.
+ * Parse tool calls embedded in message text from OpenClaw.
+ * Detects XML-style invoke blocks and function_results.
  */
 export function parseToolCallsFromText(text: string): EmbeddedToolCall[] {
   const toolCalls: EmbeddedToolCall[] = [];
   if (!text) return toolCalls;
 
-  // Pattern 1: XML-style function calls with invoke blocks
-  // Match: <invoke name="toolName">..params..</invoke>
-  const invokePattern = /<invoke\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/antml:invoke>/gi;
-  let match;
-  let index = 0;
-
-  while ((match = invokePattern.exec(text)) !== null) {
-    const toolName = match[1];
-    const paramsBlock = match[2];
+  // Build tag markers using string concat to avoid XML parsing issues
+  const LT = String.fromCharCode(60);
+  const GT = String.fromCharCode(62);
+  
+  const invokeOpen = LT + 'invoke';
+  const invokeClose = LT + '/invoke' + GT;
+  const paramOpen = LT + 'parameter name="';
+  const paramClose = LT + '/parameter' + GT;
+  const fnResultOpen = LT + 'function_results' + GT;
+  const fnResultClose = LT + '/function_results' + GT;
+  
+  // Also check for antml:invoke variant
+  const antInvokeOpen = LT + 'antml:invoke';
+  const antInvokeClose = LT + '/antml:invoke' + GT;
+  const antParamOpen = LT + 'antml:parameter name="';
+  const antParamClose = LT + '/antml:parameter' + GT;
+  
+  let searchStart = 0;
+  let toolIndex = 0;
+  
+  while (searchStart < text.length) {
+    // Find next invoke block (either format)
+    let invokeStart = text.indexOf(invokeOpen, searchStart);
+    let antInvokeStart = text.indexOf(antInvokeOpen, searchStart);
     
-    // Extract parameter values from <parameter name="x">value
+    // Avoid false positive: <invoke should not match <invoke
+    if (invokeStart !== -1 && antInvokeStart !== -1 && antInvokeStart < invokeStart) {
+      // If antml:invoke comes first, skip the regular match if it's at the same position
+      if (invokeStart === antInvokeStart + 6) { // 'antml:'.length = 6
+        invokeStart = text.indexOf(invokeOpen, invokeStart + 1);
+      }
+    }
+    
+    // Use whichever comes first (if any)
+    let isAntFormat = false;
+    let blockStart = -1;
+    
+    if (invokeStart === -1 && antInvokeStart === -1) break;
+    if (invokeStart === -1) {
+      blockStart = antInvokeStart;
+      isAntFormat = true;
+    } else if (antInvokeStart === -1) {
+      blockStart = invokeStart;
+    } else {
+      if (antInvokeStart <= invokeStart) {
+        blockStart = antInvokeStart;
+        isAntFormat = true;
+      } else {
+        blockStart = invokeStart;
+      }
+    }
+    
+    // Extract tool name from name="..." attribute
+    const nameMatch = text.slice(blockStart, blockStart + 100).match(/name="([^"]+)"/);
+    if (!nameMatch) {
+      searchStart = blockStart + 10;
+      continue;
+    }
+    const toolName = nameMatch[1];
+    
+    // Find the closing tag
+    const closeTag = isAntFormat ? antInvokeClose : invokeClose;
+    const blockEnd = text.indexOf(closeTag, blockStart);
+    if (blockEnd === -1) {
+      searchStart = blockStart + 10;
+      continue;
+    }
+    
+    // Extract the block content (parameters)
+    const blockContent = text.slice(blockStart, blockEnd + closeTag.length);
+    
+    // Parse parameters
+    const params: Record<string, string> = {};
+    const pOpen = isAntFormat ? antParamOpen : paramOpen;
+    const pClose = isAntFormat ? antParamClose : paramClose;
+    
+    let pSearch = 0;
+    while (pSearch < blockContent.length) {
+      const pStart = blockContent.indexOf(pOpen, pSearch);
+      if (pStart === -1) break;
+      
+      // Get parameter name
+      const pNameEnd = blockContent.indexOf('"', pStart + pOpen.length);
+      if (pNameEnd === -1) break;
+      const pName = blockContent.slice(pStart + pOpen.length, pNameEnd);
+      
+      // Find closing > after name
+      const tagEnd = blockContent.indexOf(GT, pNameEnd);
+      if (tagEnd === -1) break;
+      
+      // Find parameter closing tag
+      const pEnd = blockContent.indexOf(pClose, tagEnd);
+      if (pEnd === -1) break;
+      
+      // Get parameter value
+      const pValue = blockContent.slice(tagEnd + 1, pEnd);
+      params[pName] = pValue;
+      
+      pSearch = pEnd + pClose.length;
+    }
+    
+    // Look for function_results after this invoke block
+    let result = '';
+    let isError = false;
+    const afterBlock = text.slice(blockEnd + closeTag.length);
+    
+    // Check if there's a result block following
+    const resultStart = afterBlock.indexOf(fnResultOpen);
+    if (resultStart !== -1 && resultStart < 500) { // Within reasonable distance
+      const resultEnd = afterBlock.indexOf(fnResultClose, resultStart);
+      if (resultEnd !== -1) {
+        result = afterBlock.slice(resultStart + fnResultOpen.length, resultEnd).trim();
+        // Check for error indicators
+        if (result.toLowerCase().includes('error') || result.toLowerCase().includes('failed')) {
+          isError = true;
+        }
+      }
+    }
+    
+    // Create truncated params summary
+    let paramsSummary = '';
+    if (params.command) {
+      paramsSummary = truncateString(params.command, 60);
+    } else if (params.file_path || params.path) {
+      paramsSummary = truncateString(params.file_path || params.path || '', 60);
+    } else if (params.query) {
+      paramsSummary = truncateString(params.query, 60);
+    } else if (params.url) {
+      paramsSummary = truncateString(params.url, 60);
+    } else if (params.action) {
+      paramsSummary = params.action;
+    } else {
+      const keys = Object.keys(params);
+      if (keys.length > 0) {
+        paramsSummary = truncateString(JSON.stringify(params), 60);
+      }
+    }
+    
+    toolCalls.push({
+      name: toolName,
+      params: paramsSummary,
+      fullParams: JSON.stringify(params, null, 2),
+      result: truncateString(result, 100),
+      fullResult: result,
+      durationMs: -1, // Unknown for text-parsed calls
+      isError,
+      index: toolIndex++,
+    });
+    
+    searchStart = blockEnd + closeTag.length;
+  }
+  
+  return toolCalls;
+}
+
+/**
+ * Check if a message likely contains tool calls (quick check before full parsing)
+ */
+export function messageHasToolCalls(text: string): boolean {
+  if (!text) return false;
+  const LT = String.fromCharCode(60);
+  // Check for both formats
+  return text.includes(LT + 'invoke') || 
+         text.includes(LT + 'antml:invoke') ||
+         text.includes(LT + 'function_calls' + String.fromCharCode(62));
+}

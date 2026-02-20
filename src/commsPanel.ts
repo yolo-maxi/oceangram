@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { TelegramService, ChatEvent, DialogInfo, ConnectionState, UserStatus, GroupMember, ChatInfoResult, ChatMember, SharedMediaItem } from './services/telegram';
 import { OpenClawService, AgentSessionInfo, AgentDetailedInfo } from './services/openclaw';
-import { ToolCall, getToolIcon, truncateParams, formatDuration, groupToolCallsByMessage } from './services/toolExecution';
+import { ToolCall, getToolIcon, truncateParams, formatDuration, groupToolCallsByMessage, parseToolCallsFromText, messageHasToolCalls, EmbeddedToolCall, truncateString } from './services/toolExecution';
 import { highlightMessageCodeBlocks, disposeHighlighter } from './services/highlighter';
 
 // Shared telegram service across all panels
@@ -3884,6 +3884,120 @@ function handleApproval(btn, action, msgId) {
   doSend();
 }
 
+// TASK-037: Tool execution viewer - parse tool calls from message text
+var TOOL_ICONS = {
+  'exec': '⚡', 'read': '📄', 'Read': '📄', 'write': '✏️', 'Write': '✏️',
+  'edit': '🔧', 'Edit': '🔧', 'web_search': '🔍', 'web_fetch': '🌐',
+  'browser': '🖥️', 'message': '💬', 'tts': '🔊', 'image': '🖼️',
+  'canvas': '🎨', 'nodes': '📡', 'process': '⚙️'
+};
+function getToolIcon(name) { return TOOL_ICONS[name] || '🔨'; }
+function truncateStr(s, max) {
+  if (!s) return '';
+  s = s.trim();
+  return s.length <= max ? s : s.slice(0, max) + '…';
+}
+
+function parseToolCalls(text) {
+  var calls = [];
+  if (!text) return calls;
+  
+  // Check for invoke blocks (both formats)
+  var hasInvoke = text.indexOf('<invoke') >= 0 || text.indexOf('<invoke') >= 0;
+  if (!hasInvoke) return calls;
+  
+  // Use regex to find invoke blocks
+  var pattern = /<(?:antml:)?invoke\\s+name="([^"]+)"[^>]*>([\\s\\S]*?)<\\/(?:antml:)?invoke>/gi;
+  var match;
+  var idx = 0;
+  
+  while ((match = pattern.exec(text)) !== null) {
+    var toolName = match[1];
+    var content = match[2];
+    
+    // Extract parameters
+    var params = {};
+    var paramPattern = /<(?:antml:)?parameter\\s+name="([^"]+)"[^>]*>([\\s\\S]*?)<\\/(?:antml:)?parameter>/gi;
+    var pmatch;
+    while ((pmatch = paramPattern.exec(content)) !== null) {
+      params[pmatch[1]] = pmatch[2];
+    }
+    
+    // Build param summary
+    var paramSummary = '';
+    if (params.command) paramSummary = truncateStr(params.command, 50);
+    else if (params.file_path || params.path) paramSummary = truncateStr(params.file_path || params.path, 50);
+    else if (params.query) paramSummary = truncateStr(params.query, 50);
+    else if (params.url) paramSummary = truncateStr(params.url, 50);
+    else if (params.action) paramSummary = params.action;
+    else {
+      var keys = Object.keys(params);
+      if (keys.length > 0) paramSummary = truncateStr(keys.join(', '), 40);
+    }
+    
+    // Look for result after this block
+    var afterMatch = text.slice(match.index + match[0].length);
+    var resultMatch = afterMatch.match(/<function_results>([\\s\\S]*?)<\\/function_results>/i);
+    var result = resultMatch ? resultMatch[1].trim() : '';
+    var isError = result.toLowerCase().indexOf('error') >= 0;
+    
+    calls.push({
+      name: toolName,
+      params: paramSummary,
+      fullParams: JSON.stringify(params, null, 2),
+      result: truncateStr(result, 80),
+      fullResult: result,
+      isError: isError,
+      index: idx++
+    });
+  }
+  
+  return calls;
+}
+
+function renderToolTimeline(toolCalls) {
+  if (!toolCalls || toolCalls.length === 0) return '';
+  
+  var html = '<div class="tool-timeline">';
+  html += '<div class="tool-timeline-header" onclick="this.classList.toggle(\\'expanded\\')">';
+  html += '<span class="chevron">›</span> ';
+  html += toolCalls.length + ' tool call' + (toolCalls.length > 1 ? 's' : '');
+  html += '</div>';
+  html += '<div class="tool-timeline-items">';
+  
+  for (var i = 0; i < toolCalls.length; i++) {
+    var tc = toolCalls[i];
+    var icon = getToolIcon(tc.name);
+    var statusCls = tc.isError ? 'err' : 'ok';
+    var statusIcon = tc.isError ? '✗' : '✓';
+    
+    html += '<div class="tool-item" onclick="toggleToolDetail(this)">';
+    html += '<span class="tool-icon">' + icon + '</span>';
+    html += '<span class="tool-name">' + esc(tc.name) + '</span>';
+    html += '<span class="tool-params">' + esc(tc.params) + '</span>';
+    html += '<span class="tool-status ' + statusCls + '">' + statusIcon + '</span>';
+    html += '</div>';
+    html += '<div class="tool-item-detail" data-full-params="' + esc(tc.fullParams) + '">';
+    if (tc.fullResult) {
+      html += esc(tc.fullResult.slice(0, 500));
+      if (tc.fullResult.length > 500) html += '\\n...truncated';
+    } else {
+      html += '(no output)';
+    }
+    html += '</div>';
+  }
+  
+  html += '</div></div>';
+  return html;
+}
+
+function toggleToolDetail(el) {
+  var detail = el.nextElementSibling;
+  if (detail && detail.classList.contains('tool-item-detail')) {
+    detail.classList.toggle('visible');
+  }
+}
+
 function renderMessages(msgs) {
   if (!msgs || msgs.length === 0) {
     messagesList.innerHTML =
@@ -4106,8 +4220,18 @@ function renderMessages(msgs) {
           '</div>';
       }
 
+      // TASK-037: Tool execution timeline for messages with tool calls
+      var toolTimelineHtml = '';
+      if (!g.isOutgoing && m.text) {
+        var toolCalls = parseToolCalls(m.text);
+        if (toolCalls.length > 0) {
+          toolTimelineHtml = renderToolTimeline(toolCalls);
+        }
+      }
+
       html += '<div class="msg ' + pos + optClass + '" data-msg-id="' + m.id + '" data-sender="' + esc(m.senderName || '') + '" data-text="' + esc((m.text || '').slice(0, 100)) + '" data-outgoing="' + (g.isOutgoing ? '1' : '0') + '" data-timestamp="' + (m.timestamp || 0) + '">' +
         '<div class="' + bubbleCls + '">' + bubbleInner + '<span class="msg-time' + timeClass + '">' + timeStr + statusHtml + '</span>' + retryHtml + '</div>' +
+        toolTimelineHtml +
         reactionsHtml +
         approvalHtml +
         '</div>';
