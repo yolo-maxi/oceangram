@@ -5,6 +5,7 @@ import { getTelegramApi } from './extension';
 import { OpenClawService, AgentSessionInfo, AgentDetailedInfo } from './services/openclaw';
 import { ToolCall, getToolIcon, truncateParams, formatDuration, groupToolCallsByMessage, parseToolCallsFromText, messageHasToolCalls, EmbeddedToolCall, truncateString } from './services/toolExecution';
 import { highlightMessageCodeBlocks, disposeHighlighter } from './services/highlighter';
+import { showSmartNotification } from './services/notifications';
 
 /** Union type for either direct gramjs or daemon API client */
 type TelegramBackend = TelegramService | TelegramApiClient;
@@ -1055,6 +1056,14 @@ export class ChatTab {
                     if (!this.isActive) {
                       this.unreadCount++;
                       this.updateTitle();
+                      // Smart notification for background tabs
+                      if (event.message && !event.message.isOutgoing) {
+                        showSmartNotification(
+                          event.message.text || '',
+                          event.message.senderName || 'Unknown',
+                          this.chatName
+                        );
+                      }
                     }
                     const hlMsg = await addSyntaxHighlightingSingle(event.message);
                     this.panel.webview.postMessage({ type: 'newMessage', message: hlMsg });
@@ -1270,6 +1279,36 @@ export class ChatTab {
             this.panel.webview.postMessage({ type: 'sharedMedia', mediaType: msg.mediaType, media: media });
             break;
           }
+          case 'exportChat': {
+            const messages: any[] = msg.messages || [];
+            const format: string = msg.format || 'md';
+            const defaultExt = format === 'json' ? 'json' : 'md';
+            const safeName = this.chatName.replace(/[^a-zA-Z0-9_-]/g, '_');
+            const uri = await vscode.window.showSaveDialog({
+              defaultUri: vscode.Uri.file(`${safeName}_export.${defaultExt}`),
+              filters: format === 'json'
+                ? { 'JSON': ['json'] }
+                : { 'Markdown': ['md'] },
+            });
+            if (uri) {
+              let content: string;
+              if (format === 'json') {
+                content = JSON.stringify(messages, null, 2);
+              } else {
+                content = `# ${this.chatName} — Chat Export\n\n`;
+                content += `_Exported ${messages.length} messages_\n\n---\n\n`;
+                for (const m of messages) {
+                  const ts = m.timestamp ? new Date(m.timestamp * 1000).toLocaleString() : '';
+                  const sender = m.senderName || (m.isOutgoing ? 'You' : 'Unknown');
+                  content += `**${sender}** — _${ts}_\n\n`;
+                  content += `${m.text || '_(media)_'}\n\n---\n\n`;
+                }
+              }
+              await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf-8'));
+              vscode.window.showInformationMessage(`Chat exported to ${uri.fsPath}`);
+            }
+            break;
+          }
         }
       } catch (err: any) {
         this.panel.webview.postMessage({ type: 'error', message: err.message || 'Unknown error' });
@@ -1400,6 +1439,18 @@ body {
 }
 .chat-header-bar:hover {
   background: var(--tg-hover);
+}
+.chat-header-export-btn {
+  font-size: 16px;
+  color: var(--tg-text-secondary);
+  padding: 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.chat-header-export-btn:hover {
+  color: var(--tg-accent);
+  background: rgba(255,255,255,0.06);
 }
 .chat-header-info-btn {
   margin-left: auto;
@@ -2492,6 +2543,21 @@ body {
 .code-line-numbered .code-line-content {
   display: table-cell;
   white-space: pre;
+}
+
+/* Diff code block line highlighting */
+.diff-line-add {
+  background: rgba(26, 58, 26, 0.6);
+  display: block;
+}
+.diff-line-del {
+  background: rgba(58, 26, 26, 0.6);
+  display: block;
+}
+.diff-line-hunk {
+  background: rgba(40, 50, 70, 0.6);
+  color: rgba(130, 170, 220, 0.9);
+  display: block;
 }
 
 /* Image lightbox overlay */
@@ -3669,6 +3735,7 @@ body {
     <div class="chat-header-name" id="chatHeaderName">${name}</div>
     <div class="chat-header-status" id="chatHeaderStatus"></div>
   </div>
+  <span class="chat-header-export-btn" title="Export chat" onclick="event.stopPropagation(); showExportMenu()">📥</span>
   <span class="chat-header-info-btn">ℹ️</span>
 </div>
 <!-- Chat info panel overlay -->
@@ -3884,6 +3951,30 @@ function linkify(text) {
   return text.replace(/(https?:\\/\\/[^\\s<]+)/g, '<a href="$1" title="$1">$1</a>');
 }
 
+function isDiffBlock(language, text) {
+  if (language && language.toLowerCase() === 'diff') return true;
+  var lines = text.split('\\n');
+  var diffLines = 0;
+  for (var i = 0; i < Math.min(lines.length, 20); i++) {
+    var l = lines[i];
+    if (/^[+-]{1}[^+-]/.test(l) || /^@@/.test(l)) diffLines++;
+  }
+  return lines.length > 2 && diffLines >= 2;
+}
+
+function applyDiffLineClasses(html) {
+  // Wrap each line in a span with diff class based on first visible char
+  return html.split('\\n').map(function(line) {
+    // Strip HTML to get the raw text for classification
+    var raw = line.replace(/<[^>]*>/g, '');
+    var cls = '';
+    if (/^\\+/.test(raw)) cls = 'diff-line-add';
+    else if (/^-/.test(raw)) cls = 'diff-line-del';
+    else if (/^@@/.test(raw)) cls = 'diff-line-hunk';
+    return cls ? '<span class="' + cls + '">' + line + '</span>' : line;
+  }).join('\\n');
+}
+
 function applyEntities(text, entities, msg) {
   if (!entities || entities.length === 0) return linkify(esc(text));
   var sorted = entities.slice().sort(function(a, b) { return b.offset - a.offset; });
@@ -3900,15 +3991,21 @@ function applyEntities(text, entities, msg) {
       case 'pre': {
         var hlKey = String(i);
         var headerBtns = '<span class="code-header-actions"><button class="line-nums-btn" onclick="toggleLineNumbers(this)" title="Toggle line numbers">#</button><button class="copy-code-btn" onclick="copyCodeBlock(this)" title="Copy code">📋</button></span>';
+        var rawText = chars.slice(e.offset, e.offset + e.length).join('');
+        var isDiff = isDiffBlock(e.language, rawText);
         if (msg && msg.highlightedCodeBlocks && msg.highlightedCodeBlocks[hlKey]) {
+          var hlHtml = msg.highlightedCodeBlocks[hlKey];
+          if (isDiff) hlHtml = applyDiffLineClasses(hlHtml);
           replacement = '<div class="code-block-wrapper">' +
-            '<div class="code-block-header"><span class="code-lang">' + esc(e.language || '') + '</span>' + headerBtns + '</div>' +
-            msg.highlightedCodeBlocks[hlKey] +
+            '<div class="code-block-header"><span class="code-lang">' + esc(e.language || (isDiff ? 'diff' : '')) + '</span>' + headerBtns + '</div>' +
+            hlHtml +
             '</div>';
         } else {
+          var codeHtml = slice;
+          if (isDiff) codeHtml = applyDiffLineClasses(codeHtml);
           replacement = '<div class="code-block-wrapper">' +
-            '<div class="code-block-header"><span class="code-lang">' + esc(e.language || '') + '</span>' + headerBtns + '</div>' +
-            '<pre><code' + (e.language ? ' class="language-' + esc(e.language) + '"' : '') + '>' + slice + '</code></pre>' +
+            '<div class="code-block-header"><span class="code-lang">' + esc(e.language || (isDiff ? 'diff' : '')) + '</span>' + headerBtns + '</div>' +
+            '<pre><code' + (e.language ? ' class="language-' + esc(e.language) + '"' : '') + '>' + codeHtml + '</code></pre>' +
             '</div>';
         }
         break;
@@ -5584,6 +5681,8 @@ document.addEventListener('contextmenu', (e) => {
   if (canDeleteForEveryone) {
     menuHtml += '<div class="ctx-menu-item danger" data-action="deleteForAll">🗑 Delete for everyone</div>';
   }
+  menuHtml += '<div class="ctx-menu-sep"></div>' +
+    '<div class="ctx-menu-item" data-action="exportChat">📥 Export chat</div>';
   menu.innerHTML = menuHtml;
   menu.querySelectorAll('.ctx-menu-item').forEach(item => {
     item.addEventListener('click', () => {
@@ -5601,6 +5700,8 @@ document.addEventListener('contextmenu', (e) => {
         vscode.postMessage({ type: 'deleteMessage', messageIds: [msgId], revoke: false });
       } else if (action === 'deleteForAll') {
         vscode.postMessage({ type: 'deleteMessage', messageIds: [msgId], revoke: true });
+      } else if (action === 'exportChat') {
+        showExportMenu();
       }
       removeCtxMenu();
     });
@@ -6236,6 +6337,36 @@ var chatInfoData = null;
 var chatMembersData = null;
 var sharedMediaData = { photo: null, video: null, file: null, link: null };
 var currentMediaTab = 'photo';
+
+function showExportMenu() {
+  // Remove any existing export menu
+  var existing = document.querySelector('.export-menu');
+  if (existing) { existing.remove(); return; }
+  var menu = document.createElement('div');
+  menu.className = 'ctx-menu export-menu';
+  var headerBar = document.getElementById('chatHeaderBar');
+  var rect = headerBar.getBoundingClientRect();
+  menu.style.right = '60px';
+  menu.style.top = (rect.bottom + 4) + 'px';
+  menu.style.left = 'auto';
+  menu.innerHTML =
+    '<div class="ctx-menu-item" data-action="md">📝 Export as Markdown</div>' +
+    '<div class="ctx-menu-item" data-action="json">📋 Export as JSON</div>';
+  menu.querySelectorAll('.ctx-menu-item').forEach(function(item) {
+    item.addEventListener('click', function() {
+      var format = item.dataset.action;
+      vscode.postMessage({ type: 'exportChat', format: format, messages: allMessages });
+      menu.remove();
+    });
+  });
+  document.body.appendChild(menu);
+  setTimeout(function() {
+    document.addEventListener('click', function handler() {
+      menu.remove();
+      document.removeEventListener('click', handler);
+    }, { once: true });
+  }, 0);
+}
 
 function openInfoPanel() {
   infoPanelOpen = true;
