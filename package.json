@@ -40,6 +40,10 @@
       {
         "command": "oceangram.quickPick",
         "title": "Oceangram: Quick Pick"
+      },
+      {
+        "command": "oceangram.exportChat",
+        "title": "Oceangram: Export Chat"
       }
     ],
     "keybindings": [
@@ -111,6 +115,26 @@
           "type": "number",
           "default": 7777,
           "description": "Port for the Oceangram Telegram daemon (auto-spawned on activate)."
+        },
+        "oceangram.theme": {
+          "type": "string",
+          "default": "telegram-dark",
+          "enum": ["telegram-dark", "auto"],
+          "enumDescriptions": [
+            "Use the bundled Telegram Dark theme",
+            "Follow the current VS Code theme"
+          ],
+          "description": "UI theme for Oceangram panels."
+        },
+        "oceangram.notifications.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable VS Code notifications for incoming messages."
+        },
+        "oceangram.notifications.sound": {
+          "type": "boolean",
+          "default": false,
+          "description": "Play a sound for high-priority notifications (direct mentions)."
         }
       }
     },
