@@ -104,8 +104,35 @@ export class AgentPanel {
       this.fileWatcher = fs.watch(sessionsPath, () => this.refresh());
     } catch { /* file may not exist yet */ }
 
+    this.setupJsonlWatcher();
     this.refresh();
     this.refreshTimer = setInterval(() => this.refresh(), 30000);
+  }
+
+  private setupJsonlWatcher() {
+    try {
+      const sessionId = getActiveSessionId();
+      if (!sessionId) return;
+      const jsonlPath = getSessionJsonlPath(sessionId);
+      if (!fs.existsSync(jsonlPath)) return;
+      this.jsonlWatcher = fs.watch(jsonlPath, () => {
+        this.refreshLiveTools();
+      });
+      // Initial load
+      this.liveToolEntries = readToolCallsFromFile(jsonlPath);
+    } catch { /* ignore */ }
+  }
+
+  private refreshLiveTools() {
+    try {
+      const sessionId = getActiveSessionId();
+      if (!sessionId) return;
+      const jsonlPath = getSessionJsonlPath(sessionId);
+      this.liveToolEntries = readToolCallsFromFile(jsonlPath);
+      if (this.currentTab === 'livetools') {
+        this.refresh();
+      }
+    } catch { /* ignore */ }
   }
 
   private async refresh() {
@@ -370,6 +397,7 @@ export class AgentPanel {
       { id: 'crons', label: '⏰ Crons' },
       { id: 'costs', label: '💰 Costs' },
       { id: 'memory', label: '📂 Memory' },
+      { id: 'livetools', label: '⚡ Live Tools' },
     ];
 
     let tabContent = '';
@@ -380,6 +408,7 @@ export class AgentPanel {
       case 'crons': tabContent = this.renderCronsTab(data); break;
       case 'costs': tabContent = this.renderCostsTab(data); break;
       case 'memory': tabContent = this.renderMemoryTab(data); break;
+      case 'livetools': tabContent = this.renderLiveToolsTab(); break;
     }
 
     return `<!DOCTYPE html>

@@ -232,7 +232,11 @@ export class ResourcePanel {
       </div>` : '';
 
     const urlsHtml = brief?.resources.urls.length ? brief.resources.urls
-      .map(u => `<div class="resource-item"><a href="#" onclick="postMsg('openUrl','${escAttr(u.url)}')">${escHtml(u.label)}</a><span class="url-text">${escHtml(u.url)}</span></div>`)
+      .map(u => {
+        const health = this.urlHealthStatus.get(u.url);
+        const dot = health === true ? '🟢' : health === false ? '🔴' : '⚪';
+        return `<div class="resource-item"><span class="health-dot" data-url="${escAttr(u.url)}">${dot}</span><a href="#" onclick="postMsg('openUrl','${escAttr(u.url)}')">${escHtml(u.label)}</a><span class="url-text">${escHtml(u.url)}</span></div>`;
+      })
       .join('') : '<div class="empty">No URLs found</div>';
 
     const pathsHtml = brief?.resources.localPaths.length ? brief.resources.localPaths
@@ -242,9 +246,14 @@ export class ResourcePanel {
     const pm2Html = brief?.resources.pm2Processes.length
       ? `<div class="pm2-list">${brief.resources.pm2Processes.map(p => `<span class="pill pm2">${escHtml(p)}</span>`).join('')}</div>` : '';
 
-    const keysHtml = brief?.resources.apiKeys.length ? brief.resources.apiKeys
-      .map(k => `<div class="resource-item key-item"><span>${escHtml(k.label)}</span><code class="masked-key">${escHtml(k.masked)}</code><button class="copy-btn" onclick="postMsg('copyKey','${escAttr(k.raw)}')">📋</button></div>`)
-      .join('') : '';
+    const keysHtml = brief?.resources.apiKeys.length ? `<div class="card"><div class="card-header">🔑 API Keys</div>` + brief.resources.apiKeys
+      .map((k, i) => `<div class="resource-item key-item">
+        <span class="key-label">${escHtml(k.label)}</span>
+        <code class="masked-key" id="key-${i}" data-masked="${escAttr(k.masked)}" data-raw="${escAttr(k.raw)}">${escHtml(k.masked)}</code>
+        <button class="copy-btn" onclick="postMsg('copyKey','${escAttr(k.raw)}')" title="Copy">📋</button>
+        <button class="copy-btn reveal-btn" onclick="revealKey(${i})" title="Reveal for 5s">👁</button>
+      </div>`)
+      .join('') + '</div>' : '';
 
     const pm2CardsHtml = this.pm2Processes.length ? this.pm2Processes.map(p => `
       <div class="pm2-card">
@@ -279,6 +288,23 @@ export class ResourcePanel {
       ? brief.history.map(h => `<details${h === brief.history[0] ? ' open' : ''}><summary>${escHtml(h.date)}</summary><ul>${h.items.map(i => `<li>${escHtml(i)}</li>`).join('')}</ul></details>`).join('')
       : '';
 
+    const briefHtml = brief ? (this.briefMode === 'edit'
+      ? `<div class="card brief-editor">
+          <div class="card-header">Brief <span class="mode-badge">Editing</span></div>
+          <textarea id="briefTextarea" class="brief-textarea">${escHtml(this.briefRaw)}</textarea>
+          <div class="brief-actions">
+            <button class="edit-btn save-btn" onclick="saveBrief()">💾 Save</button>
+            <button class="edit-btn cancel-btn" onclick="vscode.postMessage({type:'viewBrief'})">Cancel</button>
+          </div>
+        </div>`
+      : `<div class="card brief-view">
+          <div class="card-header">Brief <span class="mode-badge">Preview</span></div>
+          <div class="brief-content">${renderMarkdown(this.briefRaw)}</div>
+        </div>`) : '';
+
+    const editBtnLabel = this.briefMode === 'edit' ? '👁️ View' : '✏️ Edit Brief';
+    const editBtnAction = this.briefMode === 'edit' ? 'viewBrief' : 'editBrief';
+
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -307,6 +333,37 @@ select {
   border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 13px;
 }
 .edit-btn:hover { opacity: 0.85; }
+.brief-textarea {
+  width: 100%; min-height: 300px; resize: vertical;
+  background: var(--vscode-input-background, #3c3c3c);
+  color: var(--vscode-input-foreground, #ccc);
+  border: 1px solid var(--vscode-input-border, #555);
+  border-radius: 4px; padding: 10px; font-size: 13px;
+  font-family: var(--vscode-editor-font-family, 'Fira Code', 'Cascadia Code', monospace);
+  line-height: 1.6; tab-size: 2;
+}
+.brief-textarea:focus { outline: 1px solid var(--vscode-focusBorder, #007fd4); }
+.brief-actions { display: flex; gap: 8px; margin-top: 8px; }
+.cancel-btn { background: var(--vscode-button-secondaryBackground, #3a3d41); color: var(--vscode-button-secondaryForeground, #ccc); }
+.save-btn { background: #2ea043; }
+.mode-badge {
+  font-size: 11px; font-weight: 400; padding: 2px 8px; border-radius: 8px; margin-left: 8px;
+  background: var(--vscode-badge-background, #4d4d4d); color: var(--vscode-badge-foreground, #fff);
+}
+.brief-content {
+  font-size: 13px; line-height: 1.6;
+}
+.brief-content h1 { font-size: 20px; margin: 12px 0 6px; border-bottom: 1px solid var(--vscode-editorWidget-border, #454545); padding-bottom: 4px; }
+.brief-content h2 { font-size: 16px; margin: 10px 0 4px; }
+.brief-content h3 { font-size: 14px; margin: 8px 0 4px; }
+.brief-content p { margin: 6px 0; }
+.brief-content ul { padding-left: 20px; margin: 4px 0; }
+.brief-content li { padding: 2px 0; }
+.brief-content pre { background: var(--vscode-textCodeBlock-background, #2d2d2d); padding: 10px; border-radius: 4px; overflow-x: auto; margin: 8px 0; }
+.brief-content code { font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; }
+.brief-content blockquote { border-left: 3px solid var(--vscode-textLink-foreground, #3794ff); padding-left: 12px; margin: 6px 0; color: var(--vscode-descriptionForeground, #888); font-style: italic; }
+.brief-content a { color: var(--vscode-textLink-foreground, #3794ff); }
+.brief-content strong { font-weight: 600; }
 .card {
   background: var(--vscode-editorWidget-background, #252526);
   border: 1px solid var(--vscode-editorWidget-border, #454545);
@@ -368,15 +425,21 @@ li { padding: 2px 0; }
     <select onchange="vscode.postMessage({type:'selectProject',slug:this.value})">
       ${projectOptions}
     </select>
-    <button class="edit-btn" onclick="vscode.postMessage({type:'editBrief'})">✏️ Edit Brief</button>
+    <button class="edit-btn" onclick="vscode.postMessage({type:'${editBtnAction}'})">${editBtnLabel}</button>
   </div>
+
+  ${briefHtml}
 
   ${statusHtml}
 
   ${brief ? `<div class="card">
-    <div class="card-header">Resources</div>
-    ${urlsHtml}${pathsHtml}${pm2Html}${keysHtml}
+    <div class="card-header">🌐 URLs & Endpoints</div>
+    ${urlsHtml}${pathsHtml}${pm2Html}
   </div>` : ''}
+
+  ${keysHtml}
+
+  ${this.getDeploymentHtml()}
 
   <div class="card">
     <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">

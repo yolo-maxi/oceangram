@@ -4716,6 +4716,9 @@ window.addEventListener('message', (event) => {
     case 'agentDetails':
       renderAgentDetails(msg.data);
       break;
+    case 'toolCalls':
+      renderToolTimeline(msg.data);
+      break;
     case 'connectionState': {
       var rcBanner = document.getElementById('reconnectBanner');
       var rcText = document.getElementById('reconnectText');
