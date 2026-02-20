@@ -8,13 +8,20 @@ import { setStoragePath } from './services/telegram';
 import { DaemonManager } from './services/daemonManager';
 import { TelegramApiClient } from './services/telegramApi';
 import { showQuickPick } from './quickPick';
+import { OpenClawGatewayClient } from './services/openclawGateway';
 
 let daemonManager: DaemonManager | undefined;
 let telegramApi: TelegramApiClient | undefined;
+let gatewayClient: OpenClawGatewayClient | undefined;
 
 /** Get the shared TelegramApiClient (created on activate) */
 export function getTelegramApi(): TelegramApiClient | undefined {
   return telegramApi;
+}
+
+/** Get the shared OpenClaw Gateway WS client */
+export function getGatewayClient(): OpenClawGatewayClient | undefined {
+  return gatewayClient;
 }
 
 export function activate(context: vscode.ExtensionContext) {
@@ -43,6 +50,21 @@ export function activate(context: vscode.ExtensionContext) {
   }).catch(err => {
     console.error('[Oceangram] Daemon startup error:', err);
   });
+
+  // Initialize OpenClaw Gateway WS client
+  const gwUrl = vscode.workspace.getConfiguration('oceangram').get<string>('gatewayUrl') || 'ws://127.0.0.1:18789';
+  const gwToken = vscode.workspace.getConfiguration('oceangram').get<string>('gatewayToken') || '';
+  if (gwToken) {
+    gatewayClient = new OpenClawGatewayClient(gwUrl, gwToken);
+    context.subscriptions.push({ dispose: () => gatewayClient?.dispose() });
+    gatewayClient.connect().then(() => {
+      console.log('[Oceangram] Connected to OpenClaw Gateway WS');
+    }).catch(err => {
+      console.error('[Oceangram] Gateway WS connect failed:', err.message);
+    });
+  } else {
+    console.log('[Oceangram] No gatewayToken configured, skipping Gateway WS');
+  }
 
   // Comms — chat picker (Cmd+Shift+1)
   context.subscriptions.push(

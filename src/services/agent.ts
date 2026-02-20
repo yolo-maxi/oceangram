@@ -1,6 +1,7 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { readRemoteFile, readRemoteDir, remoteFileExists, remoteFileStat, getOpenclawDir, getMemoryDir } from './remoteFs';
+import type { OpenClawGatewayClient } from './openclawGateway';
 
 // --- Types ---
 
@@ -526,6 +527,143 @@ export async function fetchAgentPanelData(): Promise<AgentPanelData> {
     costs: getSessionCosts(sessions),
     memoryFiles: await getMemoryFiles(),
   };
+}
+
+/**
+ * Fetch agent panel data via the OpenClaw Gateway WS client.
+ * Falls back to file-based reads if gateway is not connected.
+ */
+export async function fetchAgentPanelDataViaGateway(gw: OpenClawGatewayClient): Promise<AgentPanelData> {
+  const now = Date.now();
+  const fiveMinAgo = now - 5 * 60 * 1000;
+
+  // Fetch sessions + config + crons in parallel
+  const [sessionsResult, configResult, cronResult, statusResult] = await Promise.allSettled([
+    gw.listSessions({ includeGlobal: true }),
+    gw.getConfig(),
+    gw.listCronJobs({ includeDisabled: true }),
+    gw.getStatus(),
+  ]);
+
+  // Parse sessions
+  let sessions: SessionEntry[] = [];
+  if (sessionsResult.status === 'fulfilled' && sessionsResult.value?.sessions) {
+    sessions = sessionsResult.value.sessions.map((s: any) => ({
+      key: s.key,
+      model: s.model || null,
+      updatedAt: s.updatedAt || 0,
+      contextTokens: s.contextTokens || null,
+      totalTokens: s.totalTokens || null,
+      inputTokens: s.inputTokens || null,
+      outputTokens: s.outputTokens || null,
+      label: s.label || null,
+      chatType: s.chatType || null,
+      channel: s.channel || null,
+      lastTo: s.lastTo || null,
+      origin: s.origin || null,
+      sessionId: s.sessionId || null,
+      taskSummary: s.taskSummary,
+      status: s.status,
+      startedAt: s.startedAt,
+    }));
+    sessions.sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  // Parse config
+  let defaultModel = 'unknown';
+  if (configResult.status === 'fulfilled') {
+    const config = configResult.value;
+    defaultModel = config?.agents?.defaults?.model?.primary || config?.model || 'unknown';
+  }
+
+  // Parse crons
+  let cronJobs: CronJobInfo[] = [];
+  if (cronResult.status === 'fulfilled' && cronResult.value?.jobs) {
+    cronJobs = cronResult.value.jobs.map((job: any) => {
+      let scheduleDisplay = '';
+      if (job.schedule?.kind === 'cron') {
+        scheduleDisplay = job.schedule.expr;
+      } else if (job.schedule?.kind === 'every') {
+        const ms = job.schedule.everyMs;
+        if (ms >= 3600000) scheduleDisplay = `Every ${Math.round(ms / 3600000)}h`;
+        else if (ms >= 60000) scheduleDisplay = `Every ${Math.round(ms / 60000)}m`;
+        else scheduleDisplay = `Every ${Math.round(ms / 1000)}s`;
+      }
+      return {
+        id: job.id,
+        name: job.name || 'Unnamed',
+        enabled: job.enabled !== false,
+        schedule: job.schedule?.expr || `${job.schedule?.everyMs}ms`,
+        scheduleDisplay,
+        lastRunAt: job.state?.lastRunAtMs || null,
+        nextRunAt: job.state?.nextRunAtMs || null,
+        lastStatus: job.state?.lastStatus || null,
+        lastDurationMs: job.state?.lastDurationMs || null,
+        consecutiveErrors: job.state?.consecutiveErrors || 0,
+        delivery: job.delivery,
+      };
+    });
+  }
+
+  const activeSessions = sessions.filter(s => s.updatedAt > fiveMinAgo).length;
+
+  // Group: sub-agents under their parent
+  const subAgents = sessions.filter(s => s.key.includes(':subagent:'));
+  const nonSubAgents = sessions.filter(s => !s.key.includes(':subagent:'));
+  const groups: SessionGroup[] = nonSubAgents.map(parent => ({
+    parent,
+    children: [] as SessionEntry[],
+  }));
+  for (const sub of subAgents) {
+    let bestGroup = groups[0];
+    let bestDiff = Infinity;
+    for (const g of groups) {
+      const diff = Math.abs(g.parent.updatedAt - sub.updatedAt);
+      if (diff < bestDiff) { bestDiff = diff; bestGroup = g; }
+    }
+    if (bestGroup) bestGroup.children.push(sub);
+  }
+
+  const totalCostEstimate = sessions.reduce((sum, s) => sum + estimateCost(s), 0);
+
+  return {
+    groups,
+    totalSessions: sessions.length,
+    activeSessions,
+    defaultModel,
+    updatedAtMs: now,
+    totalCostEstimate,
+    config: await getAgentConfig(),
+    tools: await getToolsFromConfig(),
+    subAgents: getSubAgents(sessions),
+    cronJobs,
+    costs: getSessionCosts(sessions),
+    memoryFiles: await getMemoryFiles(),
+  };
+}
+
+/**
+ * Toggle a cron job via the Gateway WS client.
+ */
+export async function toggleCronJobViaGateway(gw: OpenClawGatewayClient, jobId: string, enable: boolean): Promise<boolean> {
+  try {
+    await gw.updateCronJob(jobId, { enabled: enable });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Run a cron job immediately via the Gateway WS client.
+ */
+export async function runCronJobViaGateway(gw: OpenClawGatewayClient, jobId: string): Promise<boolean> {
+  try {
+    await gw.runCronJob(jobId);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // --- Cron control functions ---

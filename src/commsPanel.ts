@@ -100,6 +100,7 @@ export class CommsPicker {
             this.panel.webview.postMessage({ type: msg.groupChatId ? 'topicsList' : 'searchResults', groupName: msg.groupName, groupChatId: msg.groupChatId, dialogs: results });
             break;
           case 'openChat':
+            console.log('[Oceangram] openChat:', msg.chatId, msg.chatName);
             tg.trackRecentChat(msg.chatId);
             ChatTab.createOrShow(msg.chatId, msg.chatName, this.context);
             break;
@@ -945,8 +946,10 @@ export class ChatTab {
   private isActive: boolean = true;
 
   static createOrShow(chatId: string, chatName: string, context: vscode.ExtensionContext) {
+    console.log('[Oceangram] ChatTab.createOrShow:', chatId, chatName, 'existing:', ChatTab.tabs.has(chatId));
     const existing = ChatTab.tabs.get(chatId);
     if (existing) {
+      console.log('[Oceangram] ChatTab: revealing existing tab');
       existing.panel.reveal();
       return;
     }
@@ -1014,6 +1017,7 @@ export class ChatTab {
     }, null, this.disposables);
 
     this.panel.webview.onDidReceiveMessage(async (msg) => {
+      console.log('[Oceangram] ChatTab received message:', msg.type, 'chatId:', this.chatId);
       const tg = getTelegram();
       try {
         switch (msg.type) {
@@ -3894,7 +3898,16 @@ body {
 <div id="errorBox" class="error" style="display:none"></div>
 
 <script>
+try {
+document.querySelector('.loading').textContent = 'Script starting...';
+} catch(e) {}
+
 const vscode = acquireVsCodeApi();
+
+try {
+document.querySelector('.loading').textContent = 'acquireVsCodeApi OK, setting up...';
+} catch(e) {}
+
 const messagesList = document.getElementById('messagesList');
 const msgInput = document.getElementById('msgInput');
 const sendBtn = document.getElementById('sendBtn');
@@ -6805,7 +6818,15 @@ function toggleToolDetail(el) {
   observer.observe(messagesList, { childList: true, subtree: false });
 })();
 
+// Debug: show state in UI
+var _dbg = document.querySelector('.loading');
+if (_dbg) _dbg.textContent = 'Sending init...';
 vscode.postMessage({ type: 'init' });
+if (_dbg) _dbg.textContent = 'Init sent, waiting for response...';
+setTimeout(function() {
+  var _dbg2 = document.querySelector('.loading');
+  if (_dbg2) _dbg2.textContent = '⚠️ No response after 5s. Extension handler may not be connected.';
+}, 5000);
 </script>
 </body>
 </html>`;

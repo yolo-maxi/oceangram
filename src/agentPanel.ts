@@ -1,6 +1,9 @@
 import * as vscode from 'vscode';
 import {
   fetchAgentPanelData,
+  fetchAgentPanelDataViaGateway,
+  toggleCronJobViaGateway,
+  runCronJobViaGateway,
   getSessionsPath,
   formatTokens,
   formatRelativeTime,
@@ -21,6 +24,7 @@ import {
   SubAgentInfo,
   MemoryFile,
 } from './services/agent';
+import { getGatewayClient } from './extension';
 import {
   ToolCallEntry,
   getActiveSessionId,
@@ -79,10 +83,16 @@ export class AgentPanel {
             this.currentTab = msg.tab;
             this.refresh();
             break;
-          case 'toggleCron':
-            await toggleCronJob(msg.jobId, msg.enable);
+          case 'toggleCron': {
+            const gw = getGatewayClient();
+            if (gw?.connected) {
+              await toggleCronJobViaGateway(gw, msg.jobId, msg.enable);
+            } else {
+              await toggleCronJob(msg.jobId, msg.enable);
+            }
             this.refresh();
             break;
+          }
           case 'viewMemory':
             const content = await readMemoryFile(msg.path);
             this.panel.webview.postMessage({ command: 'memoryContent', path: msg.path, content });
@@ -142,7 +152,10 @@ export class AgentPanel {
 
   private async refresh() {
     try {
-      const data = await fetchAgentPanelData();
+      const gw = getGatewayClient();
+      const data = gw?.connected
+        ? await fetchAgentPanelDataViaGateway(gw)
+        : await fetchAgentPanelData();
       this.panel.webview.html = this.getHtml(data);
     } catch (e) {
       this.panel.webview.html = this.getErrorHtml(String(e));
