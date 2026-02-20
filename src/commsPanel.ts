@@ -969,7 +969,8 @@ export class ChatTab {
     this.panel = panel;
     this.chatId = chatId;
     this.chatName = chatName;
-    this.panel.webview.html = this.getHtml();
+    // NOTE: webview.html is set AFTER onDidReceiveMessage is registered (end of constructor)
+    // to prevent the webview's 'init' message from firing before the listener exists.
 
     // Track tab visibility for unread badge
     this.panel.onDidChangeViewState((e) => {
@@ -1017,15 +1018,25 @@ export class ChatTab {
       try {
         switch (msg.type) {
           case 'init':
-            await tg.connect();
+            console.log('[Oceangram] INIT: chatId=', this.chatId, 'backend=', tg.constructor.name);
+            try {
+              await tg.connect();
+              console.log('[Oceangram] INIT: connect() done');
+            } catch (connErr: any) {
+              console.error('[Oceangram] INIT: connect() FAILED:', connErr);
+              this.panel.webview.postMessage({ type: 'messages', messages: [], error: `Connect failed: ${connErr.message}` });
+              break;
+            }
             let messages: any[];
             try {
-              console.log('[Oceangram] Loading messages for', this.chatId, 'using', tg.constructor.name);
-              messages = await addSyntaxHighlighting(await tg.getMessages(this.chatId, 20));
-              console.log('[Oceangram] Loaded', messages.length, 'messages');
+              console.log('[Oceangram] INIT: calling getMessages...');
+              const raw = await tg.getMessages(this.chatId, 20);
+              console.log('[Oceangram] INIT: getMessages returned', raw?.length, 'msgs');
+              messages = await addSyntaxHighlighting(raw);
+              console.log('[Oceangram] INIT: highlight done, posting to webview');
             } catch (initErr: any) {
-              console.error('[Oceangram] Failed to load messages:', initErr);
-              this.panel.webview.postMessage({ type: 'messages', messages: [], error: `${initErr.message || 'Failed to load messages'} (${tg.constructor.name})` });
+              console.error('[Oceangram] INIT: getMessages FAILED:', initErr?.message, initErr?.stack?.split('\n')[1]);
+              this.panel.webview.postMessage({ type: 'messages', messages: [], error: `${initErr.message || 'Failed'} (${tg.constructor.name})` });
               break;
             }
             this.panel.webview.postMessage({ type: 'messages', messages });
@@ -1316,6 +1327,9 @@ export class ChatTab {
         this.panel.webview.postMessage({ type: 'error', message: err.message || 'Unknown error' });
       }
     }, null, this.disposables);
+
+    // Set HTML LAST — webview sends 'init' on load, listener must exist first
+    this.panel.webview.html = this.getHtml();
   }
 
   /**
