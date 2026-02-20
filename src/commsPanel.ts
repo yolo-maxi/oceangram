@@ -6355,6 +6355,74 @@ function scrollToMessage(msgId) {
   });
 })();
 
+// TASK-037: Tool execution timeline
+var _toolCallsData = [];
+
+function requestToolCalls() {
+  vscode.postMessage({ type: 'getToolCalls' });
+}
+
+function renderToolTimeline(data) {
+  _toolCallsData = data || [];
+  if (!_toolCallsData.length) return;
+
+  // Attach to the last bot message bubble
+  var allMsgs = document.querySelectorAll('.msg-group.incoming .msg');
+  if (!allMsgs.length) return;
+  var lastBotMsg = allMsgs[allMsgs.length - 1];
+  var bubble = lastBotMsg ? lastBotMsg.querySelector('.msg-bubble') : null;
+  if (!bubble) return;
+  
+  var existing = bubble.querySelector('.tool-timeline');
+  if (existing) existing.remove();
+
+  var totalCalls = _toolCallsData.length;
+  var errorCount = _toolCallsData.filter(function(t) { return t.isError; }).length;
+  var totalDuration = _toolCallsData.reduce(function(s, t) { return s + (t.durationMs || 0); }, 0);
+  var durLabel = totalDuration < 1000 ? totalDuration + 'ms' : (totalDuration / 1000).toFixed(1) + 's';
+
+  var summaryText = totalCalls + ' tool call' + (totalCalls !== 1 ? 's' : '') + ' \\u00b7 ' + durLabel;
+  if (errorCount > 0) summaryText += ' \\u00b7 ' + errorCount + ' error' + (errorCount !== 1 ? 's' : '');
+
+  var html = '<div class="tool-timeline">';
+  html += '<div class="tool-timeline-header" onclick="this.classList.toggle(\\\'expanded\\\')"><span class="chevron">\\u203a</span> \\ud83d\\udd27 ' + summaryText + '</div>';
+  html += '<div class="tool-timeline-items">';
+
+  for (var i = 0; i < _toolCallsData.length; i++) {
+    var t = _toolCallsData[i];
+    var statusCls = t.isError ? 'err' : 'ok';
+    var statusIcon = t.isError ? '\\u2717' : '\\u2713';
+    html += '<div class="tool-item" onclick="toggleToolDetail(this)">';
+    html += '<span class="tool-icon">' + (t.icon || '\\ud83d\\udd28') + '</span>';
+    html += '<span class="tool-name">' + esc(t.name) + '</span>';
+    html += '<span class="tool-params">' + esc(t.paramsSummary || '') + '</span>';
+    html += '<span class="tool-duration">' + esc(t.durationLabel || '') + '</span>';
+    html += '<span class="tool-status ' + statusCls + '">' + statusIcon + '</span>';
+    html += '</div>';
+    html += '<div class="tool-item-detail" data-tool-idx="' + i + '">' + esc(t.resultPreview || '') + '</div>';
+  }
+
+  html += '</div></div>';
+  bubble.insertAdjacentHTML('beforeend', html);
+}
+
+function toggleToolDetail(el) {
+  var detail = el.nextElementSibling;
+  if (detail && detail.classList.contains('tool-item-detail')) {
+    detail.classList.toggle('visible');
+  }
+}
+
+// Auto-request tool calls when messages render
+(function() {
+  var _toolTimer = null;
+  var observer = new MutationObserver(function() {
+    if (_toolTimer) clearTimeout(_toolTimer);
+    _toolTimer = setTimeout(requestToolCalls, 500);
+  });
+  observer.observe(messagesList, { childList: true, subtree: false });
+})();
+
 vscode.postMessage({ type: 'init' });
 </script>
 </body>
