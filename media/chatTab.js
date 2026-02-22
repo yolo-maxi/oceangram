@@ -1443,6 +1443,19 @@ window.addEventListener('message', (event) => {
       console.error('Download failed:', msg.error);
       break;
     }
+    case 'fileSendSuccess':
+      // File upload completed successfully
+      break;
+    case 'fileSendFailed':
+      // File upload failed — show error
+      console.error('File send failed:', msg.error);
+      errorBox.textContent = 'File send failed: ' + (msg.error || 'Unknown error');
+      errorBox.style.display = 'block';
+      setTimeout(function() { errorBox.style.display = 'none'; }, 10000);
+      break;
+    case 'uploadProgress':
+      // Upload progress indicator (future enhancement)
+      break;
     case 'agentInfo':
       updateAgentBanner(msg.info);
       break;
@@ -2461,13 +2474,15 @@ function renderFilePreview() {
     var item = document.createElement('div');
     item.className = 'file-preview-item';
     var isImage = f.type.startsWith('image/');
-    if (isImage) {
+    if (isImage && f.dataUrl) {
       item.innerHTML = '<img src="' + f.dataUrl + '" alt="" />';
     } else {
-      item.innerHTML = '<span class="file-icon">📄</span>';
+      var icon = getFileIcon(f.name, f.type);
+      item.innerHTML = '<span class="file-icon">' + icon + '</span>';
     }
+    var sizeStr = f.size ? formatFileSize(f.size) : '';
     item.innerHTML += '<span class="file-name">' + esc(f.name) + '</span>'
-      + '<span class="file-size">' + formatFileSize(f.size) + '</span>'
+      + (sizeStr ? '<span class="file-size">' + sizeStr + '</span>' : '')
       + '<button class="file-remove" data-idx="' + idx + '">✕</button>';
     filePreviewItems.appendChild(item);
   });
@@ -2488,14 +2503,27 @@ filePreviewSend.addEventListener('click', function() {
   if (pendingFiles.length === 0) return;
   pendingFiles.forEach(function(f) {
     var tempId = 'file_' + Date.now() + '_' + Math.random().toString(36).slice(2);
-    vscode.postMessage({
-      type: 'sendFile',
-      tempId: tempId,
-      fileName: f.name,
-      mimeType: f.type,
-      data: f.base64,
-      caption: ''
-    });
+    if (f.filePath) {
+      // File from VS Code explorer — send path, extension host will read it
+      vscode.postMessage({
+        type: 'sendLocalFile',
+        tempId: tempId,
+        filePath: f.filePath,
+        fileName: f.name,
+        mimeType: f.type,
+        caption: ''
+      });
+    } else {
+      // File from browser drag/paste — send base64 data
+      vscode.postMessage({
+        type: 'sendFile',
+        tempId: tempId,
+        fileName: f.name,
+        mimeType: f.type,
+        data: f.base64,
+        caption: ''
+      });
+    }
   });
   pendingFiles = [];
   renderFilePreview();

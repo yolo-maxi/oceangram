@@ -591,6 +591,23 @@ export class ChatTab {
               this.panel.webview.postMessage({ type: 'voiceSendFailed', tempId: msg.tempId, error: voiceErr.message || 'Voice send failed' });
             }
             break;
+          case 'sendLocalFile':
+            // File path from VS Code explorer drag-and-drop
+            await tg.connect();
+            try {
+              const fileUri = vscode.Uri.file(msg.filePath);
+              const fileData = await vscode.workspace.fs.readFile(fileUri);
+              const fileBuffer = Buffer.from(fileData);
+              const fileName = msg.fileName || msg.filePath.split(/[\\/]/).pop() || 'file';
+              const fileMimeType = msg.mimeType || 'application/octet-stream';
+              // Show upload progress
+              this.panel.webview.postMessage({ type: 'uploadProgress', tempId: msg.tempId, progress: 50 });
+              await tg.sendFile(this.chatId, fileBuffer, fileName, fileMimeType, msg.caption);
+              this.panel.webview.postMessage({ type: 'fileSendSuccess', tempId: msg.tempId });
+            } catch (localFileErr: any) {
+              this.panel.webview.postMessage({ type: 'fileSendFailed', tempId: msg.tempId, error: localFileErr.message || 'File send failed' });
+            }
+            break;
           case 'downloadFile':
             await tg.connect();
             try {
