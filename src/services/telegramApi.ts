@@ -431,16 +431,18 @@ export class TelegramApiClient {
     return { buffer: result.buffer, fileName: 'file', mimeType: result.mimeType };
   }
 
-  async sendFile(dialogId: string, _buffer: Buffer, _fileName: string, _mimeType?: string, _caption?: string): Promise<void> {
-    // TODO: Add file upload endpoint to daemon
-    console.warn('[TelegramApi] sendFile not yet supported via daemon');
-    throw new Error('File upload not yet supported via daemon API');
+  async sendFile(dialogId: string, buffer: Buffer, fileName: string, mimeType?: string, caption?: string): Promise<void> {
+    const data = buffer.toString('base64');
+    await this.request('POST', `/dialogs/${encodeURIComponent(dialogId)}/upload`, {
+      data, fileName, mimeType, caption,
+    });
   }
 
-  async sendVoice(dialogId: string, _buffer: Buffer, _duration: number, _waveform?: number[]): Promise<void> {
-    // TODO: Add voice upload endpoint to daemon
-    console.warn('[TelegramApi] sendVoice not yet supported via daemon');
-    throw new Error('Voice upload not yet supported via daemon API');
+  async sendVoice(dialogId: string, buffer: Buffer, duration: number, waveform?: number[]): Promise<void> {
+    const data = buffer.toString('base64');
+    await this.request('POST', `/dialogs/${encodeURIComponent(dialogId)}/voice`, {
+      data, duration, waveform,
+    });
   }
 
   // --- Profile ---

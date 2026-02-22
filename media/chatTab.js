@@ -2368,14 +2368,65 @@ document.addEventListener('drop', function(e) {
   e.preventDefault();
   dragCounter = 0;
   dropOverlay.classList.remove('active');
-  if (!e.dataTransfer || !e.dataTransfer.files.length) return;
-  handleDroppedFiles(e.dataTransfer.files);
+  if (!e.dataTransfer) return;
+
+  // Check for VS Code explorer file URIs (text/uri-list)
+  var uriList = e.dataTransfer.getData('text/uri-list');
+  if (uriList) {
+    var uris = uriList.split('\n').map(function(u) { return u.trim(); }).filter(function(u) {
+      return u && !u.startsWith('#') && u.startsWith('file://');
+    });
+    if (uris.length > 0) {
+      uris.forEach(function(uri) {
+        // Decode file URI to path
+        var filePath;
+        try {
+          filePath = decodeURIComponent(uri.replace(/^file:\/\//, ''));
+        } catch(ex) {
+          filePath = uri.replace(/^file:\/\//, '');
+        }
+        // On Windows, strip leading / from /C:/path
+        if (/^\/[a-zA-Z]:/.test(filePath)) filePath = filePath.slice(1);
+        var fileName = filePath.split('/').pop() || filePath.split('\\').pop() || 'file';
+        pendingFiles.push({
+          name: fileName,
+          size: 0,
+          type: guessFileType(fileName),
+          dataUrl: '',
+          base64: '',
+          filePath: filePath
+        });
+      });
+      renderFilePreview();
+      return;
+    }
+  }
+
+  // Standard browser file drop
+  if (e.dataTransfer.files.length > 0) {
+    handleDroppedFiles(e.dataTransfer.files);
+  }
 });
 
 function formatFileSize(bytes) {
   if (bytes < 1024) return bytes + ' B';
   if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
   return (bytes/(1024*1024)).toFixed(1) + ' MB';
+}
+
+function guessFileType(name) {
+  var ext = (name || '').split('.').pop().toLowerCase();
+  var map = {
+    jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif',
+    webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp',
+    mp4: 'video/mp4', mov: 'video/quicktime', avi: 'video/x-msvideo', webm: 'video/webm',
+    mp3: 'audio/mpeg', ogg: 'audio/ogg', wav: 'audio/wav', flac: 'audio/flac',
+    pdf: 'application/pdf', zip: 'application/zip', json: 'application/json',
+    js: 'text/javascript', ts: 'text/typescript', py: 'text/x-python',
+    md: 'text/markdown', txt: 'text/plain', html: 'text/html', css: 'text/css',
+    xml: 'text/xml', csv: 'text/csv', yaml: 'text/yaml', yml: 'text/yaml',
+  };
+  return map[ext] || 'application/octet-stream';
 }
 
 function handleDroppedFiles(fileList) {

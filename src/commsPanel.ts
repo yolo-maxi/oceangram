@@ -623,6 +623,43 @@ export class ChatTab {
               this.panel.webview.postMessage({ type: 'editFailed', messageId: msg.messageId, error: editErr.message || 'Edit failed' });
             }
             break;
+          case 'openFile': {
+            try {
+              let filePath: string = msg.path || '';
+              const line: number | null = msg.line || null;
+
+              // Expand ~ to home directory
+              if (filePath.startsWith('~/')) {
+                const remoteHome = vscode.workspace.getConfiguration('oceangram').get<string>('remoteHome') || process.env.HOME || '/home/xiko';
+                filePath = require('path').join(remoteHome, filePath.slice(2));
+              }
+
+              // Resolve relative paths against workspace root
+              if (!filePath.startsWith('/')) {
+                const workspaceFolders = vscode.workspace.workspaceFolders;
+                if (workspaceFolders && workspaceFolders.length > 0) {
+                  filePath = require('path').join(workspaceFolders[0].uri.fsPath, filePath);
+                }
+              }
+
+              const uri = vscode.Uri.file(filePath);
+              const doc = await vscode.workspace.openTextDocument(uri);
+              const editor = await vscode.window.showTextDocument(doc, { preview: true });
+
+              // If line number provided, move cursor and reveal
+              if (line && line > 0) {
+                const pos = new vscode.Position(line - 1, 0);
+                editor.selection = new vscode.Selection(pos, pos);
+                editor.revealRange(
+                  new vscode.Range(pos, pos),
+                  vscode.TextEditorRevealType.InCenter
+                );
+              }
+            } catch (openErr: any) {
+              vscode.window.showWarningMessage(`Could not open file: ${openErr.message || msg.path}`);
+            }
+            break;
+          }
           case 'getUserInfo':
             await tg.connect();
             try {

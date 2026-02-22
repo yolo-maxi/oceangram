@@ -2359,3 +2359,28 @@ body {
   overflow-y: auto;
 }
 .tool-item-detail.visible { display: block; }
+
+/* ── Clickable file paths ── */
+.file-link {
+  color: #7ec8e3;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 0.92em;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+  border-radius: 3px;
+  padding: 0 2px;
+  margin: 0 1px;
+}
+.file-link:hover {
+  color: #a3e0ff;
+  background: rgba(126, 200, 227, 0.12);
+  text-decoration-style: solid;
+}
+.file-link::before {
+  content: '📄 ';
+  font-size: 0.85em;
+  font-style: normal;
+}

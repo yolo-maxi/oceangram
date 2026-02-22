@@ -52,6 +52,18 @@
       {
         "command": "oceangram.sendToAgent",
         "title": "Oceangram: Send to Agent"
+      },
+      {
+        "command": "oceangram.sendTerminalToChat",
+        "title": "Oceangram: Send Terminal Output to Chat"
+      },
+      {
+        "command": "oceangram.clearAnnotations",
+        "title": "Oceangram: Clear Agent Annotations"
+      },
+      {
+        "command": "oceangram.toggleAnnotations",
+        "title": "Oceangram: Toggle Agent Annotations"
       }
     ],
     "menus": {
@@ -93,6 +105,12 @@
         "command": "oceangram.quickPick",
         "key": "ctrl+shift+o",
         "mac": "cmd+shift+o"
+      },
+      {
+        "command": "oceangram.sendTerminalToChat",
+        "key": "ctrl+shift+t",
+        "mac": "cmd+shift+t",
+        "when": "terminalFocus"
       }
     ],
     "configuration": {

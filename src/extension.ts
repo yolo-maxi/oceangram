@@ -10,10 +10,12 @@ import { TelegramApiClient } from './services/telegramApi';
 import { showQuickPick } from './quickPick';
 import { showChatPicker } from './chatPicker';
 import { OpenClawGatewayClient } from './services/openclawGateway';
+import { AnnotationManager } from './services/annotations';
 
 let daemonManager: DaemonManager | undefined;
 let telegramApi: TelegramApiClient | undefined;
 let gatewayClient: OpenClawGatewayClient | undefined;
+let annotationManager: AnnotationManager | undefined;
 
 /** Get the shared TelegramApiClient (created on activate) */
 export function getTelegramApi(): TelegramApiClient | undefined {
@@ -66,6 +68,57 @@ export function activate(context: vscode.ExtensionContext) {
   } else {
     console.log('[Oceangram] No gatewayToken configured, skipping Gateway WS');
   }
+
+  // Initialize Annotation Manager
+  annotationManager = new AnnotationManager();
+  context.subscriptions.push(annotationManager);
+
+  // Wire gateway events to annotation manager
+  if (gatewayClient) {
+    // Listen for agent message events from the gateway
+    gatewayClient.on('event:chat.message', (data: any) => {
+      if (data?.role === 'assistant' && data?.content && annotationManager) {
+        const content = typeof data.content === 'string' ? data.content : String(data.content);
+        const created = annotationManager.processMessage(content);
+        if (created.length > 0) {
+          console.log(`[Oceangram] Created ${created.length} annotation(s) from agent message`);
+        }
+      }
+    });
+    // Also listen for generic message events
+    gatewayClient.on('event:message', (data: any) => {
+      if (data?.role === 'assistant' && data?.content && annotationManager) {
+        const content = typeof data.content === 'string' ? data.content : String(data.content);
+        const created = annotationManager.processMessage(content);
+        if (created.length > 0) {
+          console.log(`[Oceangram] Created ${created.length} annotation(s) from agent message`);
+        }
+      }
+    });
+  }
+
+  // Clear Annotations command
+  context.subscriptions.push(
+    vscode.commands.registerCommand('oceangram.clearAnnotations', () => {
+      if (annotationManager) {
+        const count = annotationManager.count;
+        annotationManager.clearAll();
+        vscode.window.showInformationMessage(`Cleared ${count} annotation(s).`);
+      }
+    })
+  );
+
+  // Toggle Annotations command
+  context.subscriptions.push(
+    vscode.commands.registerCommand('oceangram.toggleAnnotations', () => {
+      if (annotationManager) {
+        const visible = annotationManager.toggle();
+        vscode.window.showInformationMessage(
+          `Annotations ${visible ? 'shown' : 'hidden'} (${annotationManager.count} total).`
+        );
+      }
+    })
+  );
 
   // Comms — chat picker (Cmd+Shift+1)
   context.subscriptions.push(
@@ -122,6 +175,50 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('oceangram.quickPick', () => {
       showQuickPick(context);
+    })
+  );
+
+  // Send terminal output to chat (Cmd+Shift+T)
+  context.subscriptions.push(
+    vscode.commands.registerCommand('oceangram.sendTerminalToChat', async () => {
+      const terminal = vscode.window.activeTerminal;
+      if (!terminal) {
+        vscode.window.showWarningMessage('No active terminal. Open a terminal first.');
+        return;
+      }
+
+      // Copy the terminal selection to clipboard, then read it
+      await vscode.commands.executeCommand('workbench.action.terminal.copySelection');
+      const clipboardText = await vscode.env.clipboard.readText();
+
+      if (!clipboardText || !clipboardText.trim()) {
+        // No selection — inform user
+        vscode.window.showInformationMessage(
+          'Select text in the terminal first, then run this command. The selected text will be sent as a code block.'
+        );
+        return;
+      }
+
+      // Pick a chat to send to
+      const api = getTelegramApi();
+      if (!api) {
+        vscode.window.showWarningMessage('Telegram not connected. Open Comms first.');
+        return;
+      }
+
+      const { showChatPicker } = await import('./chatPicker');
+      const chosen = await showChatPicker(api);
+      if (!chosen) { return; }
+
+      // Format as code block and send
+      const codeBlock = '```\n' + clipboardText.trim() + '\n```';
+      try {
+        await api.connect();
+        await api.sendMessage(chosen.id, codeBlock);
+        vscode.window.showInformationMessage(`Terminal output sent to ${chosen.name}`);
+      } catch (err: any) {
+        vscode.window.showErrorMessage(`Failed to send: ${err.message}`);
+      }
     })
   );
 
