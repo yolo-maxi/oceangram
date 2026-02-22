@@ -44,8 +44,30 @@
       {
         "command": "oceangram.exportChat",
         "title": "Oceangram: Export Chat"
+      },
+      {
+        "command": "oceangram.sendToChat",
+        "title": "Oceangram: Send to Chat"
+      },
+      {
+        "command": "oceangram.sendToAgent",
+        "title": "Oceangram: Send to Agent"
       }
     ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "oceangram.sendToChat",
+          "when": "editorHasSelection",
+          "group": "oceangram@1"
+        },
+        {
+          "command": "oceangram.sendToAgent",
+          "when": "editorHasSelection",
+          "group": "oceangram@2"
+        }
+      ]
+    },
     "keybindings": [
       {
         "command": "oceangram.openComms",

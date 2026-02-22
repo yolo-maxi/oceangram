@@ -8,6 +8,7 @@ import { setStoragePath } from './services/telegram';
 import { DaemonManager } from './services/daemonManager';
 import { TelegramApiClient } from './services/telegramApi';
 import { showQuickPick } from './quickPick';
+import { showChatPicker } from './chatPicker';
 import { OpenClawGatewayClient } from './services/openclawGateway';
 
 let daemonManager: DaemonManager | undefined;
@@ -121,6 +122,79 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('oceangram.quickPick', () => {
       showQuickPick(context);
+    })
+  );
+
+  // Send to Chat — editor context menu
+  context.subscriptions.push(
+    vscode.commands.registerCommand('oceangram.sendToChat', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.selection.isEmpty) {
+        vscode.window.showWarningMessage('Select some text first.');
+        return;
+      }
+
+      const selection = editor.selection;
+      const selectedText = editor.document.getText(selection);
+      const fileName = vscode.workspace.asRelativePath(editor.document.uri);
+      const startLine = selection.start.line + 1;
+      const endLine = selection.end.line + 1;
+      const languageId = editor.document.languageId;
+      const lineRange = startLine === endLine ? `L${startLine}` : `L${startLine}-${endLine}`;
+
+      const header = `📎 \`${fileName}:${lineRange}\``;
+      const codeBlock = `\`\`\`${languageId}\n${selectedText}\n\`\`\``;
+      const message = `${header}\n${codeBlock}`;
+
+      const api = getTelegramApi();
+      if (!api) {
+        vscode.window.showErrorMessage('Telegram not connected. Open Comms first.');
+        return;
+      }
+
+      const chat = await showChatPicker(api);
+      if (!chat) { return; }
+
+      try {
+        await api.sendMessage(chat.id, message);
+        vscode.window.showInformationMessage(`Sent to ${chat.name}`);
+      } catch (err: any) {
+        vscode.window.showErrorMessage(`Failed to send: ${err.message}`);
+      }
+    })
+  );
+
+  // Send to Agent — editor context menu
+  context.subscriptions.push(
+    vscode.commands.registerCommand('oceangram.sendToAgent', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.selection.isEmpty) {
+        vscode.window.showWarningMessage('Select some text first.');
+        return;
+      }
+
+      const selection = editor.selection;
+      const selectedText = editor.document.getText(selection);
+      const fileName = vscode.workspace.asRelativePath(editor.document.uri);
+      const startLine = selection.start.line + 1;
+      const endLine = selection.end.line + 1;
+      const languageId = editor.document.languageId;
+      const lineRange = startLine === endLine ? `L${startLine}` : `L${startLine}-${endLine}`;
+
+      const message = `File: ${fileName}:${lineRange}\n\`\`\`${languageId}\n${selectedText}\n\`\`\``;
+
+      const gw = getGatewayClient();
+      if (!gw || !gw.connected) {
+        vscode.window.showErrorMessage('OpenClaw Gateway not connected. Check gatewayUrl and gatewayToken settings.');
+        return;
+      }
+
+      try {
+        await gw.sendChat(message);
+        vscode.window.showInformationMessage('Sent to OpenClaw agent');
+      } catch (err: any) {
+        vscode.window.showErrorMessage(`Failed to send to agent: ${err.message}`);
+      }
     })
   );
 
