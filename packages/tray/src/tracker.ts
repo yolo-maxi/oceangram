@@ -12,17 +12,22 @@ class MessageTracker extends EventEmitter {
   private unreads: Map<string, UnreadEntry>;
   private lastSeenIds: Map<string, number>;
   private pollTimer: ReturnType<typeof setInterval> | null;
+  private activeChatsTimer: ReturnType<typeof setInterval> | null;
   private wsActive: boolean;
   // Cache dialog info for display names in notifications
   private dialogNames: Map<string, string>;
+  // Track when user last sent a message per dialog (for active-chats filter)
+  private lastSentTimes: Map<string, number>;
 
   constructor() {
     super();
     this.unreads = new Map();
     this.lastSeenIds = new Map();
     this.pollTimer = null;
+    this.activeChatsTimer = null;
     this.wsActive = false;
     this.dialogNames = new Map();
+    this.lastSentTimes = new Map();
 
     this._loadLastSeen();
   }
@@ -61,12 +66,19 @@ class MessageTracker extends EventEmitter {
     this.pollTimer = setInterval(() => this._poll(), 5000);
     // Initial poll
     setTimeout(() => this._poll(), 1000);
+
+    // Periodically prune expired active chats (every 30s)
+    this.activeChatsTimer = setInterval(() => this._pruneActiveChats(), 30000);
   }
 
   stop(): void {
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
+    }
+    if (this.activeChatsTimer) {
+      clearInterval(this.activeChatsTimer);
+      this.activeChatsTimer = null;
     }
     this._saveLastSeen();
   }
@@ -186,6 +198,55 @@ class MessageTracker extends EventEmitter {
 
   getDialogName(dialogId: string): string | undefined {
     return this.dialogNames.get(dialogId);
+  }
+
+  // ── Active chats (sent recently + has unreads) ──
+
+  private static readonly ACTIVE_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
+
+  /** Record that the user sent a message to a dialog. */
+  recordSent(dialogId: string): void {
+    this.lastSentTimes.set(dialogId, Date.now());
+  }
+
+  /**
+   * Returns dialog IDs where:
+   *  - user sent a message within the last 30 min, AND
+   *  - dialog has unread messages
+   * These are "active conversations" that should appear alongside whitelisted tabs.
+   */
+  getActiveChats(): Array<{ dialogId: string; displayName: string }> {
+    const now = Date.now();
+    const cutoff = now - MessageTracker.ACTIVE_WINDOW_MS;
+    const result: Array<{ dialogId: string; displayName: string }> = [];
+
+    for (const [dialogId, sentTime] of this.lastSentTimes) {
+      if (sentTime < cutoff) continue; // expired
+      const unread = this.unreads.get(dialogId);
+      if (!unread || unread.count <= 0) continue; // no unreads
+      const name = this.dialogNames.get(dialogId) || dialogId;
+      result.push({ dialogId, displayName: name });
+    }
+
+    return result;
+  }
+
+  /** Prune expired entries and emit change if any were removed. */
+  private _pruneActiveChats(): void {
+    const now = Date.now();
+    const cutoff = now - MessageTracker.ACTIVE_WINDOW_MS;
+    let changed = false;
+
+    for (const [dialogId, sentTime] of this.lastSentTimes) {
+      if (sentTime < cutoff) {
+        this.lastSentTimes.delete(dialogId);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      this.emit('active-chats-changed');
+    }
   }
 }
 

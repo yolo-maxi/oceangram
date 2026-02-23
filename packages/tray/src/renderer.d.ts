@@ -33,12 +33,16 @@ interface OceangramAPI {
   // Unread counts
   getUnreadCounts(): Promise<Record<string, number>>;
 
+  // Active chats (sent recently + has unreads)
+  getActiveChats(): Promise<Array<{ dialogId: string; displayName: string }>>;
+
   // Events from main → renderer
   onNewMessage(cb: (data: NewMessageEvent) => void): void;
   onMessagesUpdated(cb: (data: unknown) => void): void;
   onConnectionChanged(cb: (status: boolean) => void): void;
   onUnreadCountsUpdated(cb: (counts: Record<string, number>) => void): void;
   onSelectDialog(cb: (dialogId: string) => void): void;
+  onActiveChatsChanged(cb: (chats: Array<{ dialogId: string; displayName: string }>) => void): void;
 
   // Bubble-specific (legacy)
   getBubbleData(): Promise<Record<string, { displayName: string; count: number }>>;

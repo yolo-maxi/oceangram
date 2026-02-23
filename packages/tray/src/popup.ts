@@ -1,4 +1,4 @@
-// popup.ts — Minimal whitelisted-contacts-only popup
+// popup.ts — Minimal popup: whitelisted + active-conversation tabs
 /// <reference path="renderer.d.ts" />
 
 (() => {
@@ -7,13 +7,18 @@
   // State
   let myId: string | null = null;
   let selectedDialogId: string | null = null;
-  let whitelistEntries: WhitelistEntry[] = [];
   let unreadCounts: Record<string, number> = {};
 
-  interface WhitelistEntry {
-    userId: string;
-    username: string;
+  // Tab sources
+  let whitelistEntries: TabEntry[] = [];
+  let activeChats: TabEntry[] = [];
+  // Merged, deduplicated tab list
+  let allTabs: TabEntry[] = [];
+
+  interface TabEntry {
+    dialogId: string;
     displayName: string;
+    source: 'whitelist' | 'active';
   }
 
   interface MessageLike {
@@ -49,6 +54,28 @@
     return div.innerHTML;
   }
 
+  // ── Tab merging ──
+
+  function mergeTabs(): void {
+    // Whitelist entries first, then active chats not already in whitelist
+    const seen = new Set<string>();
+    const merged: TabEntry[] = [];
+
+    for (const entry of whitelistEntries) {
+      seen.add(entry.dialogId);
+      merged.push(entry);
+    }
+
+    for (const entry of activeChats) {
+      if (!seen.has(entry.dialogId)) {
+        seen.add(entry.dialogId);
+        merged.push(entry);
+      }
+    }
+
+    allTabs = merged;
+  }
+
   // ── Init ──
 
   async function init(): Promise<void> {
@@ -61,39 +88,74 @@
     } catch { /* ignore */ }
 
     // Get whitelist
-    whitelistEntries = await api.getWhitelist();
+    const wl = await api.getWhitelist();
+    whitelistEntries = wl.map((e) => ({
+      dialogId: e.userId,
+      displayName: e.displayName || e.username || e.userId,
+      source: 'whitelist' as const,
+    }));
 
-    if (whitelistEntries.length === 0) {
-      // No whitelisted contacts — show empty state
+    // Get active chats
+    try {
+      const ac = await api.getActiveChats();
+      activeChats = ac.map((e) => ({
+        dialogId: e.dialogId,
+        displayName: e.displayName,
+        source: 'active' as const,
+      }));
+    } catch { /* ignore */ }
+
+    mergeTabs();
+    renderLayout();
+  }
+
+  /** Determine layout based on tab count and render accordingly. */
+  function renderLayout(): void {
+    if (allTabs.length === 0) {
+      // No tabs at all — show empty state
       contactBar.style.display = 'none';
+      tabsEl.style.display = 'none';
       messagesEl.style.display = 'none';
       composerEl.style.display = 'none';
       emptyState.style.display = '';
       return;
     }
 
-    if (whitelistEntries.length === 1) {
-      // Single contact — open directly, no tabs
+    // We have tabs — ensure messaging UI is visible
+    emptyState.style.display = 'none';
+    messagesEl.style.display = '';
+    composerEl.style.display = '';
+
+    if (allTabs.length === 1) {
+      // Single tab — show contact bar, no tabs
+      contactBar.style.display = '';
       tabsEl.style.display = 'none';
-      selectContact(whitelistEntries[0]);
+      if (selectedDialogId !== allTabs[0].dialogId) {
+        selectTab(allTabs[0]);
+      }
     } else {
-      // Multiple contacts — show tabs, hide the single contact bar
+      // Multiple tabs
       contactBar.style.display = 'none';
       tabsEl.style.display = 'flex';
       renderTabs();
-      selectContact(whitelistEntries[0]);
+      // Select first if nothing selected, or re-select current if still valid
+      if (!selectedDialogId || !allTabs.some((t) => t.dialogId === selectedDialogId)) {
+        selectTab(allTabs[0]);
+      } else {
+        updateTabActive();
+      }
     }
   }
 
   // ── Tabs ──
 
   function renderTabs(): void {
-    tabsEl.innerHTML = whitelistEntries.map((entry) => {
-      const isActive = entry.userId === selectedDialogId;
-      const hasUnread = (unreadCounts[entry.userId] || 0) > 0;
+    tabsEl.innerHTML = allTabs.map((entry) => {
+      const isActive = entry.dialogId === selectedDialogId;
+      const hasUnread = (unreadCounts[entry.dialogId] || 0) > 0;
       return `
-        <div class="tab${isActive ? ' active' : ''}${hasUnread ? ' has-unread' : ''}" data-user-id="${escapeHtml(entry.userId)}">
-          ${escapeHtml(entry.displayName || entry.username || entry.userId)}
+        <div class="tab${isActive ? ' active' : ''}${hasUnread ? ' has-unread' : ''}" data-dialog-id="${escapeHtml(entry.dialogId)}">
+          ${escapeHtml(entry.displayName)}
           <span class="tab-badge"></span>
         </div>
       `;
@@ -101,10 +163,10 @@
 
     tabsEl.querySelectorAll('.tab').forEach((el) => {
       el.addEventListener('click', () => {
-        const userId = (el as HTMLElement).dataset.userId;
-        if (userId && userId !== selectedDialogId) {
-          const entry = whitelistEntries.find((e) => e.userId === userId);
-          if (entry) selectContact(entry);
+        const dialogId = (el as HTMLElement).dataset.dialogId;
+        if (dialogId && dialogId !== selectedDialogId) {
+          const entry = allTabs.find((t) => t.dialogId === dialogId);
+          if (entry) selectTab(entry);
         }
       });
     });
@@ -112,23 +174,25 @@
 
   function updateTabActive(): void {
     tabsEl.querySelectorAll('.tab').forEach((el) => {
-      const uid = (el as HTMLElement).dataset.userId;
-      el.classList.toggle('active', uid === selectedDialogId);
-      const hasUnread = uid ? (unreadCounts[uid] || 0) > 0 : false;
-      el.classList.toggle('has-unread', hasUnread && uid !== selectedDialogId);
+      const did = (el as HTMLElement).dataset.dialogId;
+      el.classList.toggle('active', did === selectedDialogId);
+      const hasUnread = did ? (unreadCounts[did] || 0) > 0 : false;
+      el.classList.toggle('has-unread', hasUnread && did !== selectedDialogId);
     });
   }
 
-  // ── Select contact ──
+  // ── Select tab ──
 
-  async function selectContact(entry: WhitelistEntry): Promise<void> {
-    selectedDialogId = entry.userId;
+  async function selectTab(entry: TabEntry): Promise<void> {
+    selectedDialogId = entry.dialogId;
 
     // Update contact bar (single mode)
-    contactName.textContent = entry.displayName || entry.username || entry.userId;
+    contactName.textContent = entry.displayName;
 
     // Update tabs (multi mode)
-    updateTabActive();
+    if (allTabs.length > 1) {
+      updateTabActive();
+    }
 
     // Show loading
     loadingEl.style.display = '';
@@ -136,12 +200,12 @@
     messagesEl.innerHTML = '';
     messagesEl.appendChild(loadingEl);
 
-    await loadMessages(entry.userId);
+    await loadMessages(entry.dialogId);
 
     // Mark as read
-    api.markRead(entry.userId);
-    unreadCounts[entry.userId] = 0;
-    updateTabActive();
+    api.markRead(entry.dialogId);
+    unreadCounts[entry.dialogId] = 0;
+    if (allTabs.length > 1) updateTabActive();
 
     // Focus composer
     setTimeout(() => composerInput.focus(), 100);
@@ -153,9 +217,7 @@
       loadingEl.style.display = 'none';
 
       if (!Array.isArray(messages) || messages.length === 0) {
-        messagesEl.innerHTML = `
-          <div class="loading">No messages yet</div>
-        `;
+        messagesEl.innerHTML = `<div class="loading">No messages yet</div>`;
         return;
       }
 
@@ -233,28 +295,12 @@
   function formatText(text: string): string {
     if (!text) return '';
     let html = escapeHtml(text);
-
-    // Links
-    html = html.replace(
-      /(https?:\/\/[^\s<]+)/g,
-      '<a href="$1" target="_blank" rel="noopener">$1</a>'
-    );
-
-    // Code blocks
+    html = html.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
     html = html.replace(/```([\s\S]+?)```/g, '<pre>$1</pre>');
-
-    // Bold
     html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-
-    // Italic
     html = html.replace(/(?<!\*)\*([^*]+?)\*(?!\*)/g, '<em>$1</em>');
-
-    // Inline code
     html = html.replace(/`([^`]+?)`/g, '<code>$1</code>');
-
-    // Newlines
     html = html.replace(/\n/g, '<br>');
-
     return html;
   }
 
@@ -326,24 +372,35 @@
     const msg = data.message;
     const msgDialogId = String(msg.dialogId || msg.chatId || data.dialogId || '');
 
-    // Only care about whitelisted contacts
-    const isWhitelisted = whitelistEntries.some((e) => e.userId === msgDialogId);
-    if (!isWhitelisted) return;
+    // Only care about tabs we're showing
+    const isTabbed = allTabs.some((t) => t.dialogId === msgDialogId);
 
     if (msgDialogId === selectedDialogId) {
       // Current chat — append message
       appendMessage(msg);
       api.markRead(selectedDialogId);
-    } else {
-      // Other whitelisted chat — update unread
+    } else if (isTabbed) {
+      // Other visible tab — update unread
       unreadCounts[msgDialogId] = (unreadCounts[msgDialogId] || 0) + 1;
       updateTabActive();
     }
+    // Note: active-chats-changed event from main process will handle
+    // adding new tabs for non-whitelisted active conversations
   });
 
   api.onUnreadCountsUpdated((counts) => {
     unreadCounts = counts;
     updateTabActive();
+  });
+
+  api.onActiveChatsChanged((chats) => {
+    activeChats = chats.map((e) => ({
+      dialogId: e.dialogId,
+      displayName: e.displayName,
+      source: 'active' as const,
+    }));
+    mergeTabs();
+    renderLayout();
   });
 
   api.onConnectionChanged((connected: boolean) => {
@@ -352,8 +409,8 @@
 
   // Select dialog from main process (e.g., notification click)
   api.onSelectDialog((dialogId) => {
-    const entry = whitelistEntries.find((e) => e.userId === dialogId);
-    if (entry) selectContact(entry);
+    const entry = allTabs.find((t) => t.dialogId === dialogId);
+    if (entry) selectTab(entry);
   });
 
   // ── Keyboard shortcuts ──

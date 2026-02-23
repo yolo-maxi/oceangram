@@ -48,6 +48,10 @@ contextBridge.exposeInMainWorld('oceangram', {
   getUnreadCounts: (): Promise<Record<string, number>> =>
     ipcRenderer.invoke('get-unread-counts'),
 
+  // Active chats (sent recently + has unreads)
+  getActiveChats: (): Promise<Array<{ dialogId: string; displayName: string }>> =>
+    ipcRenderer.invoke('get-active-chats'),
+
   // Events from main → renderer
   onNewMessage: (cb: (data: NewMessageEvent) => void): void => {
     ipcRenderer.on('new-message', (_: IpcRendererEvent, data: NewMessageEvent) => cb(data));
@@ -63,6 +67,9 @@ contextBridge.exposeInMainWorld('oceangram', {
   },
   onSelectDialog: (cb: (dialogId: string) => void): void => {
     ipcRenderer.on('select-dialog', (_: IpcRendererEvent, dialogId: string) => cb(dialogId));
+  },
+  onActiveChatsChanged: (cb: (chats: Array<{ dialogId: string; displayName: string }>) => void): void => {
+    ipcRenderer.on('active-chats-changed', (_: IpcRendererEvent, chats: Array<{ dialogId: string; displayName: string }>) => cb(chats));
   },
 
   // Bubble-specific (kept for backward compat)

@@ -188,6 +188,14 @@ function initializeApp(): void {
     // Forward unread counts to popup
     if (popupWindow && !popupWindow.isDestroyed()) {
       popupWindow.webContents.send('unread-counts-updated', tracker!.getAllUnreadCounts());
+      // Active chats may have changed (unreads cleared/added)
+      popupWindow.webContents.send('active-chats-changed', tracker!.getActiveChats());
+    }
+  });
+
+  tracker.on('active-chats-changed', () => {
+    if (popupWindow && !popupWindow.isDestroyed()) {
+      popupWindow.webContents.send('active-chats-changed', tracker!.getActiveChats());
     }
   });
 
@@ -435,6 +443,8 @@ function setupIPC(): void {
   });
 
   ipcMain.handle('send-message', async (_: IpcMainInvokeEvent, dialogId: string, text: string) => {
+    // Record sent time for active-chats filter
+    tracker!.recordSent(dialogId);
     return await daemon!.sendMessage(dialogId, text);
   });
 
@@ -497,6 +507,11 @@ function setupIPC(): void {
   // Unread counts
   ipcMain.handle('get-unread-counts', () => {
     return tracker!.getAllUnreadCounts();
+  });
+
+  // Active chats (recent send + unread)
+  ipcMain.handle('get-active-chats', () => {
+    return tracker!.getActiveChats();
   });
 
   // Close popup (from renderer)
