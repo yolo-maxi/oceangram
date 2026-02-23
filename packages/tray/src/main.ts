@@ -3,24 +3,22 @@ import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, Notification, scr
 import path from 'path';
 import http from 'http';
 import { DaemonManager } from './daemonManager';
-import { NewMessageEvent, AppSettings, WhitelistEntry } from './types';
+import { NewMessageEvent, AppSettings, WhitelistEntry, TelegramDialog } from './types';
 
 // Module types (loaded after app ready)
 type DaemonModule = typeof import('./daemon');
 type WhitelistModule = typeof import('./whitelist');
 type TrackerModule = typeof import('./tracker');
-type BubblesModule = typeof import('./bubbles');
 
 let daemon: DaemonModule | null = null;
 let whitelist: WhitelistModule | null = null;
 let tracker: TrackerModule | null = null;
-let bubbles: BubblesModule | null = null;
 
 // Globals
 let tray: Tray | null = null;
 let settingsWindow: BrowserWindow | null = null;
 let loginWindow: BrowserWindow | null = null;
-const chatPopups: Map<string, BrowserWindow> = new Map();
+let popupWindow: BrowserWindow | null = null;
 const daemonManager = new DaemonManager();
 
 // ── App setup ──
@@ -33,8 +31,9 @@ if (!gotLock) {
 }
 
 app.on('second-instance', () => {
-  // Focus settings if open
-  if (settingsWindow && !settingsWindow.isDestroyed()) {
+  if (popupWindow && !popupWindow.isDestroyed()) {
+    popupWindow.focus();
+  } else if (settingsWindow && !settingsWindow.isDestroyed()) {
     settingsWindow.focus();
   }
 });
@@ -83,7 +82,6 @@ app.whenReady().then(async () => {
   if (!daemonReady) {
     console.error('[main] Daemon failed to start');
     tray!.setToolTip('Oceangram — Daemon failed to start');
-    // Still try to continue — daemon might be externally managed
   }
 
   // Check if logged in
@@ -101,13 +99,11 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   // Don't quit when windows close — we're a tray app
-  // No-op: prevent default quit behavior for tray apps
 });
 
 app.on('before-quit', () => {
   if (daemon) daemon.stop();
   if (tracker) tracker.stop();
-  if (bubbles) bubbles.destroyAll();
   daemonManager.stop();
 });
 
@@ -170,12 +166,9 @@ function initializeApp(): void {
   daemon = require('./daemon') as DaemonModule;
   whitelist = require('./whitelist') as WhitelistModule;
   tracker = require('./tracker') as TrackerModule;
-  bubbles = require('./bubbles') as BubblesModule;
 
   // Setup
   setupIPC();
-  bubbles.init();
-  bubbles.setPopupFactory(openChatPopup);
 
   // Start daemon connection & message tracking
   daemon.start();
@@ -184,29 +177,33 @@ function initializeApp(): void {
   // Update tray based on events
   daemon.on('connection-changed', (connected: boolean) => {
     updateTrayIcon();
-    // Forward to all open windows
-    for (const [, win] of chatPopups) {
-      if (!win.isDestroyed()) {
-        win.webContents.send('connection-changed', connected);
-      }
+    // Forward to popup if open
+    if (popupWindow && !popupWindow.isDestroyed()) {
+      popupWindow.webContents.send('connection-changed', connected);
     }
   });
 
-  tracker.on('user-unreads-changed', () => {
+  tracker.on('unread-count-changed', () => {
     updateTrayIcon();
+    // Forward unread counts to popup
+    if (popupWindow && !popupWindow.isDestroyed()) {
+      popupWindow.webContents.send('unread-counts-updated', tracker!.getAllUnreadCounts());
+    }
   });
 
   tracker.on('new-message', (data: NewMessageEvent) => {
-    // Forward to relevant chat popup
-    const popup = chatPopups.get(data.userId);
-    if (popup && !popup.isDestroyed()) {
-      popup.webContents.send('new-message', data);
+    // Forward to popup
+    if (popupWindow && !popupWindow.isDestroyed()) {
+      popupWindow.webContents.send('new-message', data);
     }
 
-    // Show notification if enabled
+    // Show notification if enabled and popup is not focused
     const settings = whitelist!.getSettings();
     if (settings.showNotifications) {
-      showNotification(data);
+      const popupFocused = popupWindow && !popupWindow.isDestroyed() && popupWindow.isFocused();
+      if (!popupFocused) {
+        showNotification(data);
+      }
     }
   });
 
@@ -219,43 +216,126 @@ function initializeApp(): void {
 function createTray(): void {
   const iconPath = path.join(__dirname, '..', 'src', 'assets', 'tray-icon.png');
   const icon = nativeImage.createFromPath(iconPath);
-  // Set as template for macOS dark/light mode
   icon.setTemplateImage(true);
 
   tray = new Tray(icon);
   tray.setToolTip('Oceangram — Connecting...');
-  updateTrayMenu();
+
+  // Left-click: toggle popup
+  tray.on('click', () => {
+    togglePopup();
+  });
+
+  // Right-click: context menu with Settings + Quit
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: 'Settings',
+      click: openSettings,
+    },
+    { type: 'separator' },
+    {
+      label: 'Quit Oceangram',
+      click: () => {
+        app.quit();
+      },
+    },
+  ]);
+  tray.on('right-click', () => {
+    tray!.popUpContextMenu(contextMenu);
+  });
 }
 
-function updateTrayMenu(): void {
-  const bubblesVisible = bubbles ? bubbles.visible : true;
-  const items: MenuItemConstructorOptions[] = [];
+function togglePopup(): void {
+  if (popupWindow && !popupWindow.isDestroyed()) {
+    popupWindow.close();
+    popupWindow = null;
+    return;
+  }
+  openPopup();
+}
 
-  if (bubbles) {
-    items.push({
-      label: bubblesVisible ? 'Hide Bubbles' : 'Show Bubbles',
-      click: () => {
-        bubbles!.toggleVisibility();
-        updateTrayMenu();
-      },
-    });
-    items.push({ type: 'separator' });
+function openPopup(): void {
+  if (popupWindow && !popupWindow.isDestroyed()) {
+    popupWindow.focus();
+    return;
   }
 
-  items.push({
-    label: 'Settings',
-    click: openSettings,
-  });
-  items.push({ type: 'separator' });
-  items.push({
-    label: 'Quit Oceangram',
-    click: () => {
-      app.quit();
+  // Position near the tray icon
+  const trayBounds = tray!.getBounds();
+  const display = screen.getDisplayNearestPoint({ x: trayBounds.x, y: trayBounds.y });
+  const workArea = display.workArea;
+
+  const popupWidth = 420;
+  const popupHeight = 540;
+
+  // Calculate position: centered below tray icon, clamped to screen
+  let x = Math.round(trayBounds.x + trayBounds.width / 2 - popupWidth / 2);
+  let y: number;
+
+  // On macOS menu bar is at top, so popup goes below
+  if (process.platform === 'darwin') {
+    y = trayBounds.y + trayBounds.height + 4;
+  } else {
+    // On other platforms, tray might be at bottom
+    if (trayBounds.y > workArea.y + workArea.height / 2) {
+      // Tray is in bottom half — show above
+      y = trayBounds.y - popupHeight - 4;
+    } else {
+      y = trayBounds.y + trayBounds.height + 4;
+    }
+  }
+
+  // Clamp to screen bounds
+  x = Math.max(workArea.x, Math.min(x, workArea.x + workArea.width - popupWidth));
+  y = Math.max(workArea.y, Math.min(y, workArea.y + workArea.height - popupHeight));
+
+  const settings = whitelist ? whitelist.getSettings() : { alwaysOnTop: true };
+
+  popupWindow = new BrowserWindow({
+    width: popupWidth,
+    height: popupHeight,
+    x,
+    y,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: settings.alwaysOnTop !== false,
+    skipTaskbar: true,
+    resizable: true,
+    minimizable: false,
+    maximizable: false,
+    hasShadow: true,
+    vibrancy: 'under-window',
+    visualEffectState: 'active',
+    roundedCorners: true,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
     },
   });
 
-  const menu = Menu.buildFromTemplate(items);
-  tray!.setContextMenu(menu);
+  popupWindow.loadFile(path.join(__dirname, '..', 'src', 'popup.html'));
+
+  popupWindow.webContents.on('did-finish-load', () => {
+    if (popupWindow && !popupWindow.isDestroyed()) {
+      popupWindow.webContents.send('connection-changed', daemon ? daemon.connected : false);
+    }
+  });
+
+  // Close on blur (clicking outside)
+  popupWindow.on('blur', () => {
+    // Small delay to avoid closing when clicking tray icon to toggle
+    setTimeout(() => {
+      if (popupWindow && !popupWindow.isDestroyed() && !popupWindow.isFocused()) {
+        popupWindow.close();
+      }
+    }, 100);
+  });
+
+  popupWindow.on('closed', () => {
+    popupWindow = null;
+  });
 }
 
 function updateTrayIcon(): void {
@@ -285,8 +365,7 @@ function updateTrayIcon(): void {
 // ── Notifications ──
 
 function showNotification(data: NewMessageEvent): void {
-  const userInfo = whitelist!.getUserInfo(data.userId);
-  const name = userInfo ? userInfo.displayName : 'Unknown';
+  const name = data.displayName || 'Unknown';
   const text = data.message.text || data.message.message || 'New message';
 
   const notif = new Notification({
@@ -297,83 +376,20 @@ function showNotification(data: NewMessageEvent): void {
   });
 
   notif.on('click', () => {
-    openChatPopup(data.userId);
+    // Open popup and select this chat
+    if (!popupWindow || popupWindow.isDestroyed()) {
+      openPopup();
+    }
+    // Wait for load then select chat
+    setTimeout(() => {
+      if (popupWindow && !popupWindow.isDestroyed()) {
+        popupWindow.webContents.send('select-dialog', data.dialogId);
+        popupWindow.focus();
+      }
+    }, 300);
   });
 
   notif.show();
-}
-
-// ── Chat Popup ──
-
-function openChatPopup(userId: string): void {
-  // If already open, focus it
-  if (chatPopups.has(userId)) {
-    const existing = chatPopups.get(userId)!;
-    if (!existing.isDestroyed()) {
-      existing.focus();
-      return;
-    }
-    chatPopups.delete(userId);
-  }
-
-  const settings = whitelist!.getSettings();
-  const userInfo = whitelist!.getUserInfo(userId);
-  const unreads = tracker!.getUnreads(userId);
-
-  // Position near the bubble if possible
-  const { width: screenW, height: screenH } = screen.getPrimaryDisplay().workAreaSize;
-  const x = Math.max(20, screenW - 400 - 100);
-  const y = Math.max(50, Math.floor(screenH / 2) - 250);
-
-  const popup = new BrowserWindow({
-    width: 400,
-    height: 500,
-    x,
-    y,
-    frame: false,
-    transparent: true,
-    alwaysOnTop: settings.alwaysOnTop !== false,
-    skipTaskbar: true,
-    resizable: true,
-    minimizable: false,
-    maximizable: false,
-    hasShadow: true,
-    vibrancy: 'under-window',
-    visualEffectState: 'active',
-    roundedCorners: true,
-    backgroundColor: '#00000000',
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  });
-
-  popup.loadFile(path.join(__dirname, '..', 'src', 'popup.html'));
-
-  popup.webContents.on('did-finish-load', () => {
-    popup.webContents.send('popup-init', {
-      userId,
-      dialogId: unreads.dialogId || userId,
-      displayName: userInfo ? userInfo.displayName : userId,
-    });
-    popup.webContents.send('connection-changed', daemon!.connected);
-  });
-
-  // Track popup
-  chatPopups.set(userId, popup);
-
-  popup.on('closed', () => {
-    chatPopups.delete(userId);
-  });
-
-  // Mark messages as read when popup opens
-  tracker!.markRead(userId);
-
-  // Remove bubble when chat is open
-  if (bubbles) {
-    bubbles.removeBubble(userId);
-  }
 }
 
 // ── Settings Window ──
@@ -422,15 +438,15 @@ function setupIPC(): void {
     return await daemon!.sendMessage(dialogId, text);
   });
 
-  ipcMain.handle('mark-read', async (_: IpcMainInvokeEvent, userId: string) => {
-    tracker!.markRead(userId);
+  ipcMain.handle('mark-read', async (_: IpcMainInvokeEvent, dialogId: string) => {
+    tracker!.markRead(dialogId);
     return true;
   });
 
   ipcMain.handle('get-dialog-info', async (_: IpcMainInvokeEvent, dialogId: string) => {
     const dialogs = await daemon!.getDialogs();
     if (Array.isArray(dialogs)) {
-      return dialogs.find((d) => String(d.id) === String(dialogId)) || null;
+      return dialogs.find((d: TelegramDialog) => String(d.id) === String(dialogId)) || null;
     }
     return null;
   });
@@ -459,16 +475,12 @@ function setupIPC(): void {
 
   ipcMain.handle('update-settings', (_: IpcMainInvokeEvent, settings: Partial<AppSettings>) => {
     whitelist!.updateSettings(settings);
-    // Apply settings changes
-    if (settings.bubblePosition !== undefined && bubbles) {
-      bubbles.repositionAll();
-    }
     return true;
   });
 
   // Dialogs
-  ipcMain.handle('get-dialogs', async () => {
-    return await daemon!.getDialogs();
+  ipcMain.handle('get-dialogs', async (_: IpcMainInvokeEvent, limit?: number) => {
+    return await daemon!.getDialogs(limit);
   });
 
   // Daemon status
@@ -482,11 +494,21 @@ function setupIPC(): void {
     return await daemon!.getMe();
   });
 
+  // Unread counts
+  ipcMain.handle('get-unread-counts', () => {
+    return tracker!.getAllUnreadCounts();
+  });
+
   // Close popup (from renderer)
   ipcMain.on('close-popup', (event: IpcMainEvent) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (win && !win.isDestroyed()) {
       win.close();
     }
+  });
+
+  // Open settings from renderer
+  ipcMain.on('open-settings', () => {
+    openSettings();
   });
 }

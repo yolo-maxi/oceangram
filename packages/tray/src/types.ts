@@ -118,6 +118,7 @@ export interface NewMessageEvent {
   userId: string;
   dialogId: string;
   message: TelegramMessage;
+  displayName?: string;
 }
 
 // ── Login API ──

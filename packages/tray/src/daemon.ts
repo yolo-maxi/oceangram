@@ -102,9 +102,10 @@ class DaemonClient extends EventEmitter {
     }
   }
 
-  async getDialogs(): Promise<TelegramDialog[]> {
+  async getDialogs(limit?: number): Promise<TelegramDialog[]> {
     try {
-      return await this._request('GET', '/dialogs') as TelegramDialog[];
+      const query = limit ? `?limit=${limit}` : '';
+      return await this._request('GET', `/dialogs${query}`) as TelegramDialog[];
     } catch {
       return [];
     }

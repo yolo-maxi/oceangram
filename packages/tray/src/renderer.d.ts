@@ -12,10 +12,10 @@ import {
 } from './types';
 
 interface OceangramAPI {
-  // Chat popup
+  // Chat messages
   getMessages(dialogId: string, limit?: number): Promise<TelegramMessage[]>;
   sendMessage(dialogId: string, text: string): Promise<unknown>;
-  markRead(userId: string): Promise<boolean>;
+  markRead(dialogId: string): Promise<boolean>;
   getDialogInfo(dialogId: string): Promise<TelegramDialog | null>;
   getProfilePhoto(userId: string): Promise<string | null>;
   closePopup(): void;
@@ -26,26 +26,32 @@ interface OceangramAPI {
   removeUser(userId: string): Promise<boolean>;
   getSettings(): Promise<AppSettings>;
   updateSettings(settings: Partial<AppSettings>): Promise<boolean>;
-  getDialogs(): Promise<TelegramDialog[]>;
+  getDialogs(limit?: number): Promise<TelegramDialog[]>;
   getDaemonStatus(): Promise<boolean>;
   getMe(): Promise<TelegramUser | null>;
+
+  // Unread counts
+  getUnreadCounts(): Promise<Record<string, number>>;
 
   // Events from main → renderer
   onNewMessage(cb: (data: NewMessageEvent) => void): void;
   onMessagesUpdated(cb: (data: unknown) => void): void;
   onConnectionChanged(cb: (status: boolean) => void): void;
+  onUnreadCountsUpdated(cb: (counts: Record<string, number>) => void): void;
+  onSelectDialog(cb: (dialogId: string) => void): void;
 
-  // Bubble-specific
+  // Bubble-specific (legacy)
   getBubbleData(): Promise<Record<string, { displayName: string; count: number }>>;
   bubbleClicked(userId: string): void;
   onBubbleInit(cb: (data: BubbleInitData) => void): void;
   onBubbleUpdate(cb: (data: BubbleUpdateData) => void): void;
 
-  // Popup-specific
+  // Popup-specific (legacy)
   onPopupInit(cb: (data: PopupInitData) => void): void;
 
   // Window control
   startDrag(): void;
+  openSettings(): void;
 
   // Login
   loginSuccess(): void;

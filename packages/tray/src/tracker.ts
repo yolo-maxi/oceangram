@@ -1,10 +1,9 @@
-// tracker.ts — Message tracking + filtering for whitelisted users
+// tracker.ts — Message tracking for all dialogs (no whitelist filtering)
 import { EventEmitter } from 'events';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import daemon from './daemon';
-import whitelist from './whitelist';
 import { TelegramMessage, TelegramDialog, DaemonEvent, UnreadEntry } from './types';
 
 const LAST_SEEN_FILE: string = path.join(os.homedir(), '.oceangram-tray', 'last-seen.json');
@@ -14,6 +13,8 @@ class MessageTracker extends EventEmitter {
   private lastSeenIds: Map<string, number>;
   private pollTimer: ReturnType<typeof setInterval> | null;
   private wsActive: boolean;
+  // Cache dialog info for display names in notifications
+  private dialogNames: Map<string, string>;
 
   constructor() {
     super();
@@ -21,6 +22,7 @@ class MessageTracker extends EventEmitter {
     this.lastSeenIds = new Map();
     this.pollTimer = null;
     this.wsActive = false;
+    this.dialogNames = new Map();
 
     this._loadLastSeen();
   }
@@ -55,9 +57,8 @@ class MessageTracker extends EventEmitter {
       console.log('[tracker] WS lost, polling mode');
     });
 
-    // Start polling
-    const interval = whitelist.getSettings().pollIntervalMs || 3000;
-    this.pollTimer = setInterval(() => this._poll(), interval);
+    // Start polling — fetch dialog unread counts from daemon
+    this.pollTimer = setInterval(() => this._poll(), 5000);
     // Initial poll
     setTimeout(() => this._poll(), 1000);
   }
@@ -71,32 +72,40 @@ class MessageTracker extends EventEmitter {
   }
 
   private async _poll(): Promise<void> {
-    // If WS is active, poll less frequently (just for catch-up)
     if (!daemon.connected) return;
 
     try {
       const dialogs = await daemon.getDialogs();
       if (!Array.isArray(dialogs)) return;
 
+      let changed = false;
       for (const dialog of dialogs) {
         const d = dialog as TelegramDialog;
-        const userId = String(d.userId || d.id);
-        if (!whitelist.isWhitelisted(userId)) continue;
-
         const dialogId = String(d.id);
-        const messages = await daemon.getMessages(dialogId, 10);
-        if (!Array.isArray(messages) || messages.length === 0) continue;
+        const name = d.title || d.name || d.firstName || d.username || dialogId;
+        this.dialogNames.set(dialogId, name);
 
-        const lastSeen = this.lastSeenIds.get(dialogId);
-        const newMsgs = lastSeen
-          ? messages.filter((m: TelegramMessage) => m.id > lastSeen && String(m.fromId || m.senderId) === userId)
-          : [];
+        // Use the unread count from the dialog itself
+        const daemonUnread = d.unreadCount || 0;
+        const current = this.unreads.get(dialogId);
+        const currentCount = current ? current.count : 0;
 
-        if (newMsgs.length > 0) {
-          for (const msg of newMsgs) {
-            this._addUnread(userId, dialogId, msg);
+        if (daemonUnread !== currentCount) {
+          if (daemonUnread > 0) {
+            if (!current) {
+              this.unreads.set(dialogId, { dialogId, messages: [], count: daemonUnread });
+            } else {
+              current.count = daemonUnread;
+            }
+          } else {
+            this.unreads.delete(dialogId);
           }
+          changed = true;
         }
+      }
+
+      if (changed) {
+        this.emit('unread-count-changed');
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -109,54 +118,60 @@ class MessageTracker extends EventEmitter {
     const fromId = String(msg.fromId || msg.senderId || '');
     const dialogId = String(msg.dialogId || msg.chatId || '');
 
-    if (!fromId || !whitelist.isWhitelisted(fromId)) return;
+    if (!dialogId) return;
 
-    this._addUnread(fromId, dialogId, msg);
-  }
-
-  private _addUnread(userId: string, dialogId: string, msg: TelegramMessage): void {
-    if (!this.unreads.has(userId)) {
-      this.unreads.set(userId, { dialogId, messages: [], count: 0 });
+    // Track unread
+    if (!this.unreads.has(dialogId)) {
+      this.unreads.set(dialogId, { dialogId, messages: [], count: 0 });
     }
+    const entry = this.unreads.get(dialogId)!;
 
-    const entry = this.unreads.get(userId)!;
     // Prevent duplicates
-    if (entry.messages.some((m) => m.id === msg.id)) return;
+    if (msg.id && entry.messages.some((m) => m.id === msg.id)) return;
 
-    entry.dialogId = dialogId;
     entry.messages.push(msg);
     entry.count = entry.messages.length;
 
-    this.emit('new-message', { userId, dialogId, message: msg });
-    this.emit('user-unreads-changed', { userId, count: entry.count });
+    const displayName = this.dialogNames.get(dialogId) || msg.senderName || msg.firstName || fromId;
+
+    this.emit('new-message', { userId: fromId, dialogId, message: msg, displayName });
+    this.emit('unread-count-changed');
   }
 
-  markRead(userId: string): void {
-    const entry = this.unreads.get(userId);
+  markRead(dialogId: string): void {
+    const entry = this.unreads.get(dialogId);
     if (!entry) return;
 
     // Update last seen to the latest message
     const latest = entry.messages[entry.messages.length - 1];
     if (latest) {
-      this.lastSeenIds.set(entry.dialogId || '', latest.id);
+      this.lastSeenIds.set(dialogId, latest.id);
       this._saveLastSeen();
       // Mark read on daemon
       daemon.markRead(latest.id).catch(() => {});
     }
 
-    this.unreads.delete(userId);
-    this.emit('messages-read', { userId });
-    this.emit('user-unreads-changed', { userId, count: 0 });
+    this.unreads.delete(dialogId);
+    this.emit('messages-read', { dialogId });
+    this.emit('unread-count-changed');
   }
 
-  getUnreads(userId: string): UnreadEntry {
-    return this.unreads.get(userId) || { dialogId: null, messages: [], count: 0 };
+  getUnreads(dialogId: string): UnreadEntry {
+    return this.unreads.get(dialogId) || { dialogId: null, messages: [], count: 0 };
   }
 
   getAllUnreads(): Record<string, UnreadEntry> {
     const result: Record<string, UnreadEntry> = {};
-    for (const [userId, data] of this.unreads) {
-      result[userId] = data;
+    for (const [dialogId, data] of this.unreads) {
+      result[dialogId] = data;
+    }
+    return result;
+  }
+
+  getAllUnreadCounts(): Record<string, number> {
+    const result: Record<string, number> = {};
+    for (const [dialogId, data] of this.unreads) {
+      result[dialogId] = data.count;
     }
     return result;
   }
@@ -167,6 +182,10 @@ class MessageTracker extends EventEmitter {
       total += data.count;
     }
     return total;
+  }
+
+  getDialogName(dialogId: string): string | undefined {
+    return this.dialogNames.get(dialogId);
   }
 }
 
