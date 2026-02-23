@@ -299,6 +299,39 @@ html, body {
 .message .text strong { font-weight: 600; }
 .message .text em { font-style: italic; }
 
+.reply-context {
+  font-size: 11px;
+  color: var(--text-dim);
+  padding: 4px 8px;
+  margin-bottom: 4px;
+  border-left: 2px solid var(--accent);
+  border-radius: 2px;
+  background: rgba(255,255,255,0.04);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.reply-context:hover {
+  background: rgba(255,255,255,0.08);
+}
+
+.message.reply-highlight {
+  animation: highlightFlash 1.5s ease-out;
+}
+
+@keyframes highlightFlash {
+  0% { background: rgba(176,102,255,0.3); }
+  100% { background: transparent; }
+}
+
+.message.outgoing .reply-context {
+  border-left-color: rgba(255,255,255,0.4);
+  background: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.7);
+}
+
 .message .time {
   font-size: 10px;
   color: var(--text-ts);

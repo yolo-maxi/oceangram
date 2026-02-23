@@ -324,8 +324,17 @@
       const time = formatTime(msg.date || msg.timestamp);
       const msgId = msg.id || 0;
 
+      const replyToId = (msg as any).replyToId;
+      let replyHtml = '';
+      if (replyToId) {
+        const replyMsg = sorted.find(m => m.id === replyToId);
+        const replyText = replyMsg ? (replyMsg.text || replyMsg.message || '').substring(0, 80) : `Message #${replyToId}`;
+        replyHtml = `<div class="reply-context" data-reply-to="${replyToId}">${escapeHtml(replyText)}</div>`;
+      }
+
       html += `
         <div class="message ${isOutgoing ? 'outgoing' : 'incoming'}" data-msg-id="${msgId}">
+          ${replyHtml}
           <div class="text">${text}</div>
           <div class="time">${time}</div>
         </div>
@@ -351,7 +360,18 @@
     const div = document.createElement('div');
     div.className = `message ${isOutgoing ? 'outgoing' : 'incoming'}`;
     div.dataset.msgId = String(msgId);
+    const replyToId = (msg as any).replyToId;
+    let replyHtml = '';
+    if (replyToId) {
+      // Try to find in cached messages
+      const cached = selectedDialogId ? messageCache[selectedDialogId] : null;
+      const replyMsg = cached?.find(m => m.id === replyToId);
+      const replyText = replyMsg ? (replyMsg.text || replyMsg.message || '').substring(0, 80) : `Message #${replyToId}`;
+      replyHtml = `<div class="reply-context" data-reply-to="${replyToId}">${escapeHtml(replyText)}</div>`;
+    }
+
     div.innerHTML = `
+      ${replyHtml}
       <div class="text">${text}</div>
       <div class="time">${time}</div>
     `;
@@ -366,6 +386,7 @@
   }
 
   function bindMessageClicks(): void {
+    // Click message → set reply target
     messagesEl.querySelectorAll('.message[data-msg-id]').forEach((el) => {
       el.addEventListener('click', () => {
         const msgId = parseInt((el as HTMLElement).dataset.msgId || '0', 10);
@@ -373,6 +394,20 @@
         const textEl = el.querySelector('.text');
         const preview = (textEl?.textContent || '').substring(0, 50);
         setReplyTarget(msgId, preview);
+      });
+    });
+    // Click reply context → scroll to original message
+    messagesEl.querySelectorAll('.reply-context[data-reply-to]').forEach((el) => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const replyTo = (el as HTMLElement).dataset.replyTo;
+        if (!replyTo) return;
+        const target = messagesEl.querySelector(`.message[data-msg-id="${replyTo}"]`);
+        if (target) {
+          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          target.classList.add('reply-highlight');
+          setTimeout(() => target.classList.remove('reply-highlight'), 1500);
+        }
       });
     });
   }
