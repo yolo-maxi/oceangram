@@ -265,8 +265,8 @@ function openPopup(): void {
   const display = screen.getDisplayNearestPoint({ x: trayBounds.x, y: trayBounds.y });
   const workArea = display.workArea;
 
-  const popupWidth = 420;
-  const popupHeight = 540;
+  const popupWidth = 350;
+  const popupHeight = 450;
 
   // Calculate position: centered below tray icon, clamped to screen
   let x = Math.round(trayBounds.x + trayBounds.width / 2 - popupWidth / 2);

@@ -1,4 +1,4 @@
-// popup.ts — Chat client popup renderer logic
+// popup.ts — Minimal whitelisted-contacts-only popup
 /// <reference path="renderer.d.ts" />
 
 (() => {
@@ -7,21 +7,13 @@
   // State
   let myId: string | null = null;
   let selectedDialogId: string | null = null;
-  let dialogsCache: DialogItem[] = [];
+  let whitelistEntries: WhitelistEntry[] = [];
   let unreadCounts: Record<string, number> = {};
-  let searchQuery = '';
 
-  interface DialogItem {
-    id: string | number;
-    userId?: string | number;
-    name?: string;
-    title?: string;
-    firstName?: string;
-    username?: string;
-    type?: string;
-    unreadCount?: number;
-    lastMessage?: MessageLike;
-    photo?: string;
+  interface WhitelistEntry {
+    userId: string;
+    username: string;
+    displayName: string;
   }
 
   interface MessageLike {
@@ -40,33 +32,16 @@
   }
 
   // DOM refs
-  const chatList = document.getElementById('chatList')!;
-  const searchInput = document.getElementById('searchInput') as HTMLInputElement;
-  const chatPanel = document.getElementById('chatPanel')!;
-  const chatEmpty = document.getElementById('chatEmpty')!;
-  const chatView = document.getElementById('chatView')!;
-  const chatHeaderName = document.getElementById('chatHeaderName')!;
-  const chatHeaderStatus = document.getElementById('chatHeaderStatus')!;
-  const chatHeaderLetter = document.getElementById('chatHeaderLetter')!;
-  const chatHeaderAvatar = document.getElementById('chatHeaderAvatar')!;
-  const chatHeaderAvatarImg = document.getElementById('chatHeaderAvatarImg') as HTMLImageElement;
+  const contactBar = document.getElementById('contactBar')!;
+  const contactName = document.getElementById('contactName')!;
+  const tabsEl = document.getElementById('tabs')!;
   const messagesEl = document.getElementById('messages')!;
   const loadingEl = document.getElementById('loadingState')!;
   const composerInput = document.getElementById('composerInput') as HTMLTextAreaElement;
   const sendBtn = document.getElementById('sendBtn') as HTMLButtonElement;
-  const closeBtn = document.getElementById('closeBtn')!;
-  const settingsBtn = document.getElementById('settingsBtn')!;
-  const backBtn = document.getElementById('backBtn')!;
+  const composerEl = document.getElementById('composer')!;
+  const emptyState = document.getElementById('emptyState')!;
   const connectionBanner = document.getElementById('connectionBanner')!;
-
-  const COLORS = ['#e53935','#d81b60','#8e24aa','#5e35b1','#3949ab','#1e88e5','#00897b','#43a047','#f4511e','#6d4c41'];
-
-  function getColor(id: string | number): string {
-    let hash = 0;
-    const s = String(id);
-    for (let i = 0; i < s.length; i++) hash = ((hash << 5) - hash) + s.charCodeAt(i);
-    return COLORS[Math.abs(hash) % COLORS.length];
-  }
 
   function escapeHtml(str: string): string {
     const div = document.createElement('div');
@@ -85,211 +60,110 @@
       unreadCounts = await api.getUnreadCounts();
     } catch { /* ignore */ }
 
-    await loadDialogs();
-  }
+    // Get whitelist
+    whitelistEntries = await api.getWhitelist();
 
-  // ── Dialog list ──
-
-  async function loadDialogs(): Promise<void> {
-    chatList.innerHTML = '<div class="chat-list-loading">Loading chats...</div>';
-
-    try {
-      const dialogs = await api.getDialogs(50);
-      if (!Array.isArray(dialogs)) {
-        chatList.innerHTML = '<div class="chat-list-loading">Failed to load chats</div>';
-        return;
-      }
-
-      dialogsCache = dialogs as DialogItem[];
-      renderDialogList();
-    } catch {
-      chatList.innerHTML = '<div class="chat-list-loading">Error loading chats</div>';
-    }
-  }
-
-  function renderDialogList(): void {
-    let filtered = dialogsCache;
-
-    // Apply search filter
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      filtered = dialogsCache.filter((d) => {
-        const name = getDialogName(d).toLowerCase();
-        return name.includes(q);
-      });
-    }
-
-    // Sort: unread first, then by last message timestamp
-    filtered.sort((a, b) => {
-      const aUnread = getUnreadCount(a);
-      const bUnread = getUnreadCount(b);
-      if (aUnread > 0 && bUnread === 0) return -1;
-      if (aUnread === 0 && bUnread > 0) return 1;
-      const aTime = getLastMessageTime(a);
-      const bTime = getLastMessageTime(b);
-      return bTime - aTime;
-    });
-
-    if (filtered.length === 0) {
-      chatList.innerHTML = `<div class="chat-list-loading">${searchQuery ? 'No matching chats' : 'No chats found'}</div>`;
+    if (whitelistEntries.length === 0) {
+      // No whitelisted contacts — show empty state
+      contactBar.style.display = 'none';
+      messagesEl.style.display = 'none';
+      composerEl.style.display = 'none';
+      emptyState.style.display = '';
       return;
     }
 
-    chatList.innerHTML = filtered.map((d) => {
-      const id = String(d.id);
-      const name = getDialogName(d);
-      const preview = getLastMessagePreview(d);
-      const time = formatChatTime(getLastMessageTime(d));
-      const unread = getUnreadCount(d);
-      const isActive = id === selectedDialogId;
-      const hasUnread = unread > 0;
-      const letter = (name[0] || '?').toUpperCase();
-      const color = getColor(d.userId || d.id);
+    if (whitelistEntries.length === 1) {
+      // Single contact — open directly, no tabs
+      tabsEl.style.display = 'none';
+      selectContact(whitelistEntries[0]);
+    } else {
+      // Multiple contacts — show tabs, hide the single contact bar
+      contactBar.style.display = 'none';
+      tabsEl.style.display = 'flex';
+      renderTabs();
+      selectContact(whitelistEntries[0]);
+    }
+  }
 
+  // ── Tabs ──
+
+  function renderTabs(): void {
+    tabsEl.innerHTML = whitelistEntries.map((entry) => {
+      const isActive = entry.userId === selectedDialogId;
+      const hasUnread = (unreadCounts[entry.userId] || 0) > 0;
       return `
-        <div class="chat-item${isActive ? ' active' : ''}${hasUnread ? ' has-unread' : ''}" data-dialog-id="${escapeHtml(id)}">
-          <div class="chat-avatar" style="background: ${color}">
-            <span>${escapeHtml(letter)}</span>
-          </div>
-          <div class="chat-info">
-            <div class="chat-name">${escapeHtml(name)}</div>
-            <div class="chat-preview">${escapeHtml(preview)}</div>
-          </div>
-          <div class="chat-meta">
-            ${time ? `<div class="chat-time">${escapeHtml(time)}</div>` : ''}
-            ${hasUnread ? `<div class="chat-badge">${unread > 99 ? '99+' : unread}</div>` : ''}
-          </div>
+        <div class="tab${isActive ? ' active' : ''}${hasUnread ? ' has-unread' : ''}" data-user-id="${escapeHtml(entry.userId)}">
+          ${escapeHtml(entry.displayName || entry.username || entry.userId)}
+          <span class="tab-badge"></span>
         </div>
       `;
     }).join('');
 
-    // Bind click handlers
-    chatList.querySelectorAll('.chat-item').forEach((el) => {
+    tabsEl.querySelectorAll('.tab').forEach((el) => {
       el.addEventListener('click', () => {
-        const dialogId = (el as HTMLElement).dataset.dialogId;
-        if (dialogId) selectDialog(dialogId);
+        const userId = (el as HTMLElement).dataset.userId;
+        if (userId && userId !== selectedDialogId) {
+          const entry = whitelistEntries.find((e) => e.userId === userId);
+          if (entry) selectContact(entry);
+        }
       });
     });
   }
 
-  function getDialogName(d: DialogItem): string {
-    return d.title || d.name || d.firstName || d.username || String(d.id);
-  }
-
-  function getLastMessagePreview(d: DialogItem): string {
-    if (!d.lastMessage) return '';
-    const text = d.lastMessage.text || d.lastMessage.message || '';
-    return text.substring(0, 50).replace(/\n/g, ' ');
-  }
-
-  function getLastMessageTime(d: DialogItem): number {
-    if (!d.lastMessage) return 0;
-    return d.lastMessage.date || d.lastMessage.timestamp || 0;
-  }
-
-  function getUnreadCount(d: DialogItem): number {
-    const id = String(d.id);
-    // Prefer tracker unread counts, fall back to dialog's own count
-    if (unreadCounts[id] !== undefined) return unreadCounts[id];
-    return d.unreadCount || 0;
-  }
-
-  function formatChatTime(ts: number): string {
-    if (!ts) return '';
-    const d = ts < 1e12 ? new Date(ts * 1000) : new Date(ts);
-    const now = new Date();
-
-    if (d.toDateString() === now.toDateString()) {
-      return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-    }
-
-    const yesterday = new Date(now);
-    yesterday.setDate(yesterday.getDate() - 1);
-    if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
-
-    const dayDiff = Math.floor((now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
-    if (dayDiff < 7) {
-      return d.toLocaleDateString('en-US', { weekday: 'short' });
-    }
-
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  }
-
-  // ── Select dialog ──
-
-  async function selectDialog(dialogId: string): Promise<void> {
-    selectedDialogId = dialogId;
-
-    // Update active state in list
-    chatList.querySelectorAll('.chat-item').forEach((el) => {
-      el.classList.toggle('active', (el as HTMLElement).dataset.dialogId === dialogId);
+  function updateTabActive(): void {
+    tabsEl.querySelectorAll('.tab').forEach((el) => {
+      const uid = (el as HTMLElement).dataset.userId;
+      el.classList.toggle('active', uid === selectedDialogId);
+      const hasUnread = uid ? (unreadCounts[uid] || 0) > 0 : false;
+      el.classList.toggle('has-unread', hasUnread && uid !== selectedDialogId);
     });
+  }
 
-    // Show chat view
-    chatEmpty.style.display = 'none';
-    chatView.style.display = 'flex';
-    document.querySelector('.app')!.classList.add('chat-open');
+  // ── Select contact ──
 
-    // Find dialog info
-    const dialog = dialogsCache.find((d) => String(d.id) === dialogId);
-    const name = dialog ? getDialogName(dialog) : dialogId;
-    const letter = (name[0] || '?').toUpperCase();
-    const color = getColor(dialog?.userId || dialog?.id || dialogId);
+  async function selectContact(entry: WhitelistEntry): Promise<void> {
+    selectedDialogId = entry.userId;
 
-    chatHeaderName.textContent = name;
-    chatHeaderLetter.textContent = letter;
-    chatHeaderAvatar.style.background = color;
-    chatHeaderAvatarImg.style.display = 'none';
-    chatHeaderLetter.style.display = '';
+    // Update contact bar (single mode)
+    contactName.textContent = entry.displayName || entry.username || entry.userId;
 
-    // Load avatar
-    const userId = dialog ? String(dialog.userId || dialog.id) : dialogId;
-    api.getProfilePhoto(userId).then((avatar) => {
-      if (avatar) {
-        chatHeaderAvatarImg.src = avatar;
-        chatHeaderAvatarImg.style.display = 'block';
-        chatHeaderLetter.style.display = 'none';
-        chatHeaderAvatarImg.onerror = () => {
-          chatHeaderAvatarImg.style.display = 'none';
-          chatHeaderLetter.style.display = '';
-        };
-      }
-    });
+    // Update tabs (multi mode)
+    updateTabActive();
 
-    // Load messages
+    // Show loading
     loadingEl.style.display = '';
     loadingEl.textContent = 'Loading messages...';
     messagesEl.innerHTML = '';
     messagesEl.appendChild(loadingEl);
 
-    await loadMessages(dialogId);
+    await loadMessages(entry.userId);
 
     // Mark as read
-    api.markRead(dialogId);
-
-    // Clear unread for this dialog
-    unreadCounts[dialogId] = 0;
-    renderDialogList();
+    api.markRead(entry.userId);
+    unreadCounts[entry.userId] = 0;
+    updateTabActive();
 
     // Focus composer
     setTimeout(() => composerInput.focus(), 100);
   }
 
   async function loadMessages(dialogId: string): Promise<void> {
-    const messages = await api.getMessages(dialogId, 30);
-    loadingEl.style.display = 'none';
+    try {
+      const messages = await api.getMessages(dialogId, 30);
+      loadingEl.style.display = 'none';
 
-    if (!Array.isArray(messages) || messages.length === 0) {
-      messagesEl.innerHTML = `
-        <div class="empty-state">
-          <div class="icon">💬</div>
-          <div>No messages yet</div>
-        </div>
-      `;
-      return;
+      if (!Array.isArray(messages) || messages.length === 0) {
+        messagesEl.innerHTML = `
+          <div class="loading">No messages yet</div>
+        `;
+        return;
+      }
+
+      renderMessages(messages);
+    } catch {
+      loadingEl.style.display = 'none';
+      messagesEl.innerHTML = `<div class="loading">Failed to load messages</div>`;
     }
-
-    renderMessages(messages);
   }
 
   // ── Message rendering ──
@@ -313,13 +187,11 @@
 
       const fromId = String(msg.fromId || msg.senderId || '');
       const isOutgoing = msg.isOutgoing === true || fromId === myId;
-      const senderName = msg.senderName || msg.firstName || '';
       const text = formatText(msg.text || msg.message || '');
       const time = formatTime(msg.date || msg.timestamp);
 
       html += `
         <div class="message ${isOutgoing ? 'outgoing' : 'incoming'}">
-          ${(!isOutgoing && senderName) ? `<div class="sender">${escapeHtml(senderName)}</div>` : ''}
           <div class="text">${text}</div>
           <div class="time">${time}</div>
         </div>
@@ -333,18 +205,16 @@
   function appendMessage(msg: MessageLike): void {
     const fromId = String(msg.fromId || msg.senderId || '');
     const isOutgoing = msg.isOutgoing === true || fromId === myId;
-    const senderName = msg.senderName || msg.firstName || '';
     const text = formatText(msg.text || msg.message || '');
     const time = formatTime(msg.date || msg.timestamp);
 
-    // Remove empty state if present
-    const emptyState = messagesEl.querySelector('.empty-state');
-    if (emptyState) emptyState.remove();
+    // Remove loading/empty states
+    const loading = messagesEl.querySelector('.loading');
+    if (loading) loading.remove();
 
     const div = document.createElement('div');
     div.className = `message ${isOutgoing ? 'outgoing' : 'incoming'}`;
     div.innerHTML = `
-      ${(!isOutgoing && senderName) ? `<div class="sender">${escapeHtml(senderName)}</div>` : ''}
       <div class="text">${text}</div>
       <div class="time">${time}</div>
     `;
@@ -370,16 +240,16 @@
       '<a href="$1" target="_blank" rel="noopener">$1</a>'
     );
 
-    // Code blocks ```text```
+    // Code blocks
     html = html.replace(/```([\s\S]+?)```/g, '<pre>$1</pre>');
 
-    // Bold **text**
+    // Bold
     html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
 
-    // Italic *text* (but not **)
+    // Italic
     html = html.replace(/(?<!\*)\*([^*]+?)\*(?!\*)/g, '<em>$1</em>');
 
-    // Code `text`
+    // Inline code
     html = html.replace(/`([^`]+?)`/g, '<code>$1</code>');
 
     // Newlines
@@ -449,28 +319,6 @@
     composerInput.style.height = Math.min(composerInput.scrollHeight, 100) + 'px';
   });
 
-  searchInput.addEventListener('input', () => {
-    searchQuery = searchInput.value.trim();
-    renderDialogList();
-  });
-
-  closeBtn.addEventListener('click', () => {
-    api.closePopup();
-  });
-
-  settingsBtn.addEventListener('click', () => {
-    api.openSettings();
-  });
-
-  backBtn.addEventListener('click', () => {
-    // Go back to chat list (mobile/narrow mode)
-    selectedDialogId = null;
-    chatEmpty.style.display = '';
-    chatView.style.display = 'none';
-    document.querySelector('.app')!.classList.remove('chat-open');
-    renderDialogList();
-  });
-
   // ── Real-time updates ──
 
   api.onNewMessage((data) => {
@@ -478,55 +326,41 @@
     const msg = data.message;
     const msgDialogId = String(msg.dialogId || msg.chatId || data.dialogId || '');
 
-    // If this message is for the currently selected dialog, append it
+    // Only care about whitelisted contacts
+    const isWhitelisted = whitelistEntries.some((e) => e.userId === msgDialogId);
+    if (!isWhitelisted) return;
+
     if (msgDialogId === selectedDialogId) {
+      // Current chat — append message
       appendMessage(msg);
       api.markRead(selectedDialogId);
     } else {
-      // Update unread count for the other dialog
-      if (msgDialogId) {
-        unreadCounts[msgDialogId] = (unreadCounts[msgDialogId] || 0) + 1;
-      }
+      // Other whitelisted chat — update unread
+      unreadCounts[msgDialogId] = (unreadCounts[msgDialogId] || 0) + 1;
+      updateTabActive();
     }
-
-    // Update dialog list (move to top, update preview)
-    const existing = dialogsCache.find((d) => String(d.id) === msgDialogId);
-    if (existing) {
-      existing.lastMessage = msg;
-    }
-    renderDialogList();
   });
 
   api.onUnreadCountsUpdated((counts) => {
     unreadCounts = counts;
-    renderDialogList();
+    updateTabActive();
   });
 
   api.onConnectionChanged((connected: boolean) => {
-    chatHeaderStatus.textContent = connected ? 'online' : 'offline';
-    chatHeaderStatus.className = 'chat-header-status ' + (connected ? 'connected' : 'disconnected');
     connectionBanner.classList.toggle('visible', !connected);
   });
 
   // Select dialog from main process (e.g., notification click)
   api.onSelectDialog((dialogId) => {
-    selectDialog(dialogId);
+    const entry = whitelistEntries.find((e) => e.userId === dialogId);
+    if (entry) selectContact(entry);
   });
 
   // ── Keyboard shortcuts ──
 
   document.addEventListener('keydown', (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
-      if (selectedDialogId) {
-        // Go back to chat list if narrow, otherwise close
-        if (window.innerWidth <= 350) {
-          backBtn.click();
-        } else {
-          api.closePopup();
-        }
-      } else {
-        api.closePopup();
-      }
+      api.closePopup();
     }
   });
 
