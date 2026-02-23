@@ -421,6 +421,12 @@ export class TelegramService {
 
   async getDialogs(limit = 100): Promise<DialogInfo[]> {
     if (!this.client) throw new Error('Not connected');
+
+    // Return cached if fresh (< 30s)
+    if (this.dialogsCache && (Date.now() - this.dialogsCache.ts) < 30_000) {
+      return this.dialogsCache.data.slice(0, limit);
+    }
+
     const timeout = new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('getDialogs timeout (30s)')), 30000)
     );
@@ -480,6 +486,7 @@ export class TelegramService {
         });
       }
     }
+    this.dialogsCache = { ts: Date.now(), data: results };
     return results;
   }
 
@@ -749,10 +756,27 @@ export class TelegramService {
 
   async getProfilePhoto(userId: string): Promise<{ buffer: Buffer; mimeType: string } | null> {
     if (!this.client) throw new Error('Not connected');
-    const entity = await this.client.getEntity(userId);
-    const buffer = await this.client.downloadProfilePhoto(entity);
-    if (!buffer || !Buffer.isBuffer(buffer)) return null;
-    return { buffer, mimeType: 'image/jpeg' };
+
+    // Check in-memory cache (1 hour TTL)
+    const cached = this.profilePhotoCache.get(userId);
+    if (cached && (Date.now() - cached.ts) < 3_600_000) {
+      return cached.data;
+    }
+
+    try {
+      const entity = await this.client.getEntity(userId);
+      const buffer = await this.client.downloadProfilePhoto(entity);
+      if (!buffer || !Buffer.isBuffer(buffer)) {
+        this.profilePhotoCache.set(userId, { ts: Date.now(), data: null });
+        return null;
+      }
+      const result = { buffer, mimeType: 'image/jpeg' };
+      this.profilePhotoCache.set(userId, { ts: Date.now(), data: result });
+      return result;
+    } catch {
+      this.profilePhotoCache.set(userId, { ts: Date.now(), data: null });
+      return null;
+    }
   }
 
   // --- Forward Messages ---

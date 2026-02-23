@@ -49,7 +49,7 @@ class DaemonClient extends EventEmitter {
         path: url.pathname + url.search,
         method,
         headers: { 'Content-Type': 'application/json' },
-        timeout: 5000,
+        timeout: 15000,
       };
 
       const req = http.request(options, (res) => {
