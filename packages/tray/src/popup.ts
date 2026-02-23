@@ -211,8 +211,9 @@
   async function selectTab(entry: TabEntry): Promise<void> {
     selectedDialogId = entry.dialogId;
 
-    // Clear any pending reply when switching tabs
+    // Clear pending state when switching tabs
     clearReplyTarget();
+    clearAttachment();
 
     // Update contact bar (single mode)
     contactName.textContent = entry.displayName;
@@ -453,7 +454,9 @@
 
   async function sendMessage(): Promise<void> {
     const text = composerInput.value.trim();
-    if (!text || !selectedDialogId) return;
+    const hasFile = !!pendingFile;
+    if (!text && !hasFile) return;
+    if (!selectedDialogId) return;
 
     composerInput.value = '';
     composerInput.style.height = 'auto';
@@ -462,18 +465,35 @@
     const currentReplyTo = replyTarget?.messageId;
     clearReplyTarget();
 
-    // Optimistic append
-    appendMessage({
-      fromId: myId || undefined,
-      text,
-      date: Math.floor(Date.now() / 1000),
-      isOutgoing: true,
-    });
-
-    try {
-      await api.sendMessage(selectedDialogId, text, currentReplyTo);
-    } catch (err) {
-      console.error('Send failed:', err);
+    if (hasFile && pendingFile) {
+      // Send file with optional caption
+      const file = pendingFile;
+      clearAttachment();
+      appendMessage({
+        fromId: myId || undefined,
+        text: text ? `📎 ${text}` : '📎 Photo',
+        date: Math.floor(Date.now() / 1000),
+        isOutgoing: true,
+      });
+      try {
+        const base64 = await fileToBase64(file);
+        await api.sendFile(selectedDialogId, base64, file.name, file.type, text || undefined);
+      } catch (err) {
+        console.error('File send failed:', err);
+      }
+    } else {
+      // Text-only message
+      appendMessage({
+        fromId: myId || undefined,
+        text,
+        date: Math.floor(Date.now() / 1000),
+        isOutgoing: true,
+      });
+      try {
+        await api.sendMessage(selectedDialogId, text, currentReplyTo);
+      } catch (err) {
+        console.error('Send failed:', err);
+      }
     }
 
     sendBtn.disabled = false;
@@ -514,62 +534,40 @@
 
   // ── File preview ──
 
-  const filePreview = document.getElementById('filePreview')!;
-  const filePreviewImg = document.getElementById('filePreviewImg') as HTMLImageElement;
-  const filePreviewName = document.getElementById('filePreviewName')!;
-  const filePreviewSend = document.getElementById('filePreviewSend')!;
-  const filePreviewCancel = document.getElementById('filePreviewCancel')!;
+  const attachmentStrip = document.getElementById('attachmentStrip')!;
+  const attachmentThumb = document.getElementById('attachmentThumb') as HTMLImageElement;
+  const attachmentName = document.getElementById('attachmentName')!;
+  const attachmentRemove = document.getElementById('attachmentRemove')!;
   let pendingFile: File | null = null;
   let isSendingFile = false;
 
-  function showFilePreview(file: File): void {
+  function attachFile(file: File): void {
     pendingFile = file;
-    filePreviewName.textContent = file.name;
+    attachmentName.textContent = file.name;
 
     if (file.type.startsWith('image/')) {
       const url = URL.createObjectURL(file);
-      filePreviewImg.src = url;
-      filePreviewImg.style.display = 'block';
+      attachmentThumb.src = url;
+      attachmentThumb.style.display = '';
     } else {
-      filePreviewImg.style.display = 'none';
+      attachmentThumb.style.display = 'none';
     }
 
-    filePreview.style.display = '';
-  }
-
-  function hideFilePreview(): void {
-    pendingFile = null;
-    filePreview.style.display = 'none';
-    if (filePreviewImg.src.startsWith('blob:')) {
-      URL.revokeObjectURL(filePreviewImg.src);
-    }
-    filePreviewImg.src = '';
+    attachmentStrip.style.display = '';
     composerInput.focus();
   }
 
-  filePreviewCancel.addEventListener('click', hideFilePreview);
-
-  filePreviewSend.addEventListener('click', async () => {
-    if (!pendingFile || !selectedDialogId || isSendingFile) return;
-    isSendingFile = true;
-    const file = pendingFile;
-    const targetDialog = selectedDialogId;
-    // Grab composer text as caption
-    const caption = composerInput.textContent?.trim() || '';
-    const currentReplyTo = replyTarget?.messageId;
-    console.log(`[popup] Sending file "${file.name}" to dialog ${targetDialog}, caption: "${caption}"`);
-    hideFilePreview();
-    clearReplyTarget();
-    if (caption) composerInput.textContent = '';
-    try {
-      const base64 = await fileToBase64(file);
-      await api.sendFile(targetDialog, base64, file.name, file.type, caption || undefined);
-    } catch (err) {
-      console.error('[popup] File send failed:', err);
-    } finally {
-      isSendingFile = false;
+  function clearAttachment(): void {
+    pendingFile = null;
+    attachmentStrip.style.display = 'none';
+    if (attachmentThumb.src.startsWith('blob:')) {
+      URL.revokeObjectURL(attachmentThumb.src);
     }
-  });
+    attachmentThumb.src = '';
+    composerInput.focus();
+  }
+
+  attachmentRemove.addEventListener('click', clearAttachment);
 
   // ── Paste images ──
 
@@ -585,7 +583,7 @@
         e.stopPropagation();
         const file = item.getAsFile();
         console.log('[paste] got image file:', file?.name, file?.size, file?.type);
-        if (file) showFilePreview(file);
+        if (file) attachFile(file);
         return true;
       }
     }
@@ -629,7 +627,7 @@
     if (!files || files.length === 0) return;
 
     // Preview first file only
-    if (files[0]) showFilePreview(files[0]);
+    if (files[0]) attachFile(files[0]);
   });
 
   // ── Real-time updates ──
