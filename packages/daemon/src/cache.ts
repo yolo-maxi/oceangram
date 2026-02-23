@@ -22,7 +22,23 @@ export class Cache {
       fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     }
 
-    const SQL = await initSqlJs();
+    // Locate WASM file — next to the bundle in production, or in node_modules in dev
+    let wasmPath: string | undefined;
+    const bundleDir = path.dirname(process.argv[1] || __dirname);
+    const candidates = [
+      path.join(bundleDir, 'sql-wasm.wasm'),
+      path.join(bundleDir, '..', 'resources', 'sql-wasm.wasm'),
+      path.join(__dirname, '..', 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm'),
+    ];
+    for (const c of candidates) {
+      if (fs.existsSync(c)) { wasmPath = c; break; }
+    }
+
+    const initOpts: any = {};
+    if (wasmPath) {
+      initOpts.locateFile = () => wasmPath;
+    }
+    const SQL = await initSqlJs(initOpts);
 
     if (fs.existsSync(this.dbPath)) {
       const buffer = fs.readFileSync(this.dbPath);
