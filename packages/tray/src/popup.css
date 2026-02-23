@@ -116,19 +116,19 @@ html, body {
 }
 
 .tab-avatar {
-  width: 18px;
-  height: 18px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   background: var(--accent);
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 600;
   color: #fff;
-  margin-right: 4px;
-  vertical-align: middle;
+  flex-shrink: 0;
   overflow: hidden;
+  transition: box-shadow 0.15s;
 }
 
 .tab-avatar img {
@@ -137,8 +137,15 @@ html, body {
   object-fit: cover;
 }
 
+.tab-name {
+  margin-left: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .tab {
-  padding: 6px 14px;
+  padding: 6px 8px;
   font-size: 12px;
   font-weight: 500;
   display: flex;

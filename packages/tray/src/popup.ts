@@ -168,9 +168,9 @@
       const isActive = entry.dialogId === selectedDialogId;
       const hasUnread = (unreadCounts[entry.dialogId] || 0) > 0;
       return `
-        <div class="tab${isActive ? ' active' : ''}${hasUnread ? ' has-unread' : ''}" data-dialog-id="${escapeHtml(entry.dialogId)}">
+        <div class="tab${isActive ? ' active' : ''}${hasUnread ? ' has-unread' : ''}" data-dialog-id="${escapeHtml(entry.dialogId)}" title="${escapeHtml(entry.displayName)}">
           <span class="tab-avatar" id="tab-avatar-${escapeHtml(entry.dialogId)}">${escapeHtml((entry.displayName || '?').charAt(0).toUpperCase())}</span>
-          ${escapeHtml(entry.displayName)}
+          ${isActive ? `<span class="tab-name">${escapeHtml(entry.displayName)}</span>` : ''}
           <span class="tab-badge"></span>
         </div>
       `;
