@@ -127,6 +127,14 @@ class DaemonClient extends EventEmitter {
     }
   }
 
+  async uploadFile(dialogId: string, data: string, fileName: string, mimeType?: string, caption?: string): Promise<unknown> {
+    try {
+      return await this._request('POST', `/dialogs/${dialogId}/upload`, { data, fileName, mimeType, caption });
+    } catch {
+      return null;
+    }
+  }
+
   async markRead(messageId: number): Promise<unknown> {
     try {
       return await this._request('POST', `/messages/${messageId}/read`);

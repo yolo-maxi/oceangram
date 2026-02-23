@@ -15,6 +15,7 @@ interface OceangramAPI {
   // Chat messages
   getMessages(dialogId: string, limit?: number): Promise<TelegramMessage[]>;
   sendMessage(dialogId: string, text: string): Promise<unknown>;
+  sendFile(dialogId: string, data: string, fileName: string, mimeType?: string, caption?: string): Promise<unknown>;
   markRead(dialogId: string): Promise<boolean>;
   getDialogInfo(dialogId: string): Promise<TelegramDialog | null>;
   getProfilePhoto(userId: string): Promise<string | null>;

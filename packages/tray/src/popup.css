@@ -406,3 +406,21 @@ html, body {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* Drag-and-drop overlay */
+.app.drag-over::after {
+  content: "Drop file to send";
+  position: absolute;
+  inset: 0;
+  background: rgba(124, 92, 255, 0.15);
+  border: 2px dashed var(--accent);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+  pointer-events: none;
+  z-index: 100;
+}

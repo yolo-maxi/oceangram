@@ -448,6 +448,11 @@ function setupIPC(): void {
     return await daemon!.sendMessage(dialogId, text);
   });
 
+  ipcMain.handle('send-file', async (_: IpcMainInvokeEvent, dialogId: string, data: string, fileName: string, mimeType?: string, caption?: string) => {
+    tracker!.recordSent(dialogId);
+    return await daemon!.uploadFile(dialogId, data, fileName, mimeType, caption);
+  });
+
   ipcMain.handle('mark-read', async (_: IpcMainInvokeEvent, dialogId: string) => {
     tracker!.markRead(dialogId);
     return true;

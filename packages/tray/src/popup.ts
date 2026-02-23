@@ -401,6 +401,74 @@
     composerInput.style.height = Math.min(composerInput.scrollHeight, 100) + 'px';
   });
 
+  // ── File helper ──
+
+  function fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        // Strip data URL prefix to get raw base64
+        const base64 = result.includes(',') ? result.split(',')[1] : result;
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function sendFileToChat(file: File): Promise<void> {
+    if (!selectedDialogId) return;
+    const base64 = await fileToBase64(file);
+    await api.sendFile(selectedDialogId, base64, file.name, file.type);
+  }
+
+  // ── Paste images ──
+
+  composerInput.addEventListener('paste', async (e: ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (file) await sendFileToChat(file);
+        return;
+      }
+    }
+    // Non-image paste falls through to default text paste
+  });
+
+  // ── Drag and drop files ──
+
+  const appEl = document.querySelector('.app') as HTMLElement;
+
+  appEl.addEventListener('dragover', (e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    appEl.classList.add('drag-over');
+  });
+
+  appEl.addEventListener('dragleave', (e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    appEl.classList.remove('drag-over');
+  });
+
+  appEl.addEventListener('drop', async (e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    appEl.classList.remove('drag-over');
+
+    const files = e.dataTransfer?.files;
+    if (!files || files.length === 0) return;
+
+    for (const file of Array.from(files)) {
+      await sendFileToChat(file);
+    }
+  });
+
   // ── Real-time updates ──
 
   api.onNewMessage((data) => {
