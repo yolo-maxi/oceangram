@@ -127,14 +127,18 @@ export class TelegramService {
 
     this.client = new TelegramClient(session, apiId, apiHash, {
       connectionRetries: 5,
+      timeout: 30,
     });
 
+    console.log('[telegram] Connecting to Telegram...');
     await this.client.connect();
+    console.log('[telegram] Connected. Checking auth...');
 
     if (!await this.client.isUserAuthorized()) {
       throw new Error('NOT_AUTHORIZED');
     }
 
+    console.log('[telegram] Authorized. Ready.');
     this.connected = true;
     this.setupEventHandlers();
   }
@@ -407,12 +411,18 @@ export class TelegramService {
 
   async getMe(): Promise<Api.User> {
     if (!this.client) throw new Error('Not connected');
-    return await this.client.getMe() as Api.User;
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('getMe timeout (15s)')), 15000)
+    );
+    return await Promise.race([this.client.getMe(), timeout]) as Api.User;
   }
 
   async getDialogs(limit = 100): Promise<DialogInfo[]> {
     if (!this.client) throw new Error('Not connected');
-    const dialogs = await this.client.getDialogs({ limit });
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('getDialogs timeout (30s)')), 30000)
+    );
+    const dialogs = await Promise.race([this.client.getDialogs({ limit }), timeout]);
     const results: DialogInfo[] = [];
 
     for (const d of dialogs) {
