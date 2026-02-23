@@ -1,5 +1,5 @@
 // daemonManager.ts — Spawns and manages the oceangram-daemon child process
-import { fork, ChildProcess } from 'child_process';
+import { spawn, execSync, ChildProcess } from 'child_process';
 import path from 'path';
 import http from 'http';
 
@@ -43,11 +43,17 @@ export class DaemonManager {
     const bundlePath = this.getBundlePath();
     console.log('[DaemonManager] Starting daemon from:', bundlePath);
 
-    this.process = fork(bundlePath, [], {
+    // Use system Node.js (not Electron's) so native addons (better-sqlite3) work
+    let nodePath = 'node';
+    try {
+      nodePath = execSync('which node', { encoding: 'utf8' }).trim();
+    } catch { /* fallback to 'node' on PATH */ }
+
+    this.process = spawn(nodePath, [bundlePath], {
       env: { ...process.env, PORT: String(this.port) },
-      stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
+      stdio: ['pipe', 'pipe', 'pipe'],
       detached: false,
-    });
+    }) as ChildProcess;
 
     this.process.stdout?.on('data', (d: Buffer) => console.log('[Daemon]', d.toString().trim()));
     this.process.stderr?.on('data', (d: Buffer) => console.error('[Daemon ERR]', d.toString().trim()));
