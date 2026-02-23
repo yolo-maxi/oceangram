@@ -533,21 +533,35 @@
 
   // ── Paste images ──
 
-  composerInput.addEventListener('paste', (e: ClipboardEvent) => {
-    if (isSendingFile) return;
+  function handleImagePaste(e: ClipboardEvent): boolean {
+    if (isSendingFile) return false;
     const items = e.clipboardData?.items;
-    if (!items) return;
+    if (!items) { console.log('[paste] no clipboardData items'); return false; }
 
+    console.log('[paste] items:', Array.from(items).map(i => `${i.kind}:${i.type}`));
     for (const item of Array.from(items)) {
       if (item.type.startsWith('image/')) {
         e.preventDefault();
         e.stopPropagation();
         const file = item.getAsFile();
+        console.log('[paste] got image file:', file?.name, file?.size, file?.type);
         if (file) showFilePreview(file);
-        return;
+        return true;
       }
     }
+    return false;
+  }
+
+  // Listen on composer for paste
+  composerInput.addEventListener('paste', (e: ClipboardEvent) => {
+    handleImagePaste(e);
     // Non-image paste falls through to default text paste
+  });
+
+  // Window-level fallback — catches paste even when composer isn't focused
+  document.addEventListener('paste', (e: ClipboardEvent) => {
+    if (e.target === composerInput) return; // already handled above
+    handleImagePaste(e);
   });
 
   // ── Drag and drop files ──
