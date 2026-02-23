@@ -41,7 +41,30 @@ html, body {
   border-radius: 12px;
   overflow: hidden;
   background: var(--bg);
-  animation: slideUp 0.2s ease-out;
+  animation: popIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transform-origin: top center;
+}
+
+@keyframes popIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.92) translateY(-8px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes popOut {
+  0% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.95) translateY(-6px);
+  }
 }
 
 /* ── Connection banner ── */

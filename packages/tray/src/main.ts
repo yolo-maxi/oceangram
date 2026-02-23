@@ -253,10 +253,22 @@ function createTray(): void {
   });
 }
 
+function closePopupAnimated(): void {
+  if (!popupWindow || popupWindow.isDestroyed()) return;
+  popupWindow.webContents.executeJavaScript(`
+    document.querySelector('.app').style.animation = 'popOut 0.15s cubic-bezier(0.55, 0.085, 0.68, 0.53) forwards';
+  `).catch(() => {});
+  setTimeout(() => {
+    if (popupWindow && !popupWindow.isDestroyed()) {
+      popupWindow.close();
+      popupWindow = null;
+    }
+  }, 150);
+}
+
 function togglePopup(): void {
   if (popupWindow && !popupWindow.isDestroyed()) {
-    popupWindow.close();
-    popupWindow = null;
+    closePopupAnimated();
     return;
   }
   openPopup();
@@ -336,7 +348,7 @@ function openPopup(): void {
     // Small delay to avoid closing when clicking tray icon to toggle
     setTimeout(() => {
       if (popupWindow && !popupWindow.isDestroyed() && !popupWindow.isFocused()) {
-        popupWindow.close();
+        closePopupAnimated();
       }
     }, 100);
   });
