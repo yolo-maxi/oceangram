@@ -500,3 +500,65 @@ html, body {
   pointer-events: none;
   z-index: 100;
 }
+
+/* File preview overlay */
+.file-preview {
+  position: absolute;
+  bottom: 60px;
+  left: 8px;
+  right: 8px;
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  z-index: 50;
+  animation: popIn 0.15s ease-out;
+}
+
+.file-preview-img {
+  max-width: 100%;
+  max-height: 200px;
+  border-radius: 8px;
+  display: block;
+  margin: 0 auto 8px;
+  object-fit: contain;
+}
+
+.file-preview-name {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: center;
+  margin-bottom: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-preview-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.file-preview-cancel,
+.file-preview-send {
+  padding: 6px 16px;
+  border: none;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.file-preview-cancel {
+  background: var(--border);
+  color: var(--text);
+}
+
+.file-preview-send {
+  background: var(--accent);
+  color: #fff;
+}
+
+.file-preview-cancel:hover { opacity: 0.8; }
+.file-preview-send:hover { background: var(--accent-hover); }

@@ -477,32 +477,63 @@
     });
   }
 
+  // ── File preview ──
+
+  const filePreview = document.getElementById('filePreview')!;
+  const filePreviewImg = document.getElementById('filePreviewImg') as HTMLImageElement;
+  const filePreviewName = document.getElementById('filePreviewName')!;
+  const filePreviewSend = document.getElementById('filePreviewSend')!;
+  const filePreviewCancel = document.getElementById('filePreviewCancel')!;
+  let pendingFile: File | null = null;
   let isSendingFile = false;
 
-  async function sendFileToChat(file: File): Promise<void> {
-    if (!selectedDialogId || isSendingFile) return;
+  function showFilePreview(file: File): void {
+    pendingFile = file;
+    filePreviewName.textContent = file.name;
+
+    if (file.type.startsWith('image/')) {
+      const url = URL.createObjectURL(file);
+      filePreviewImg.src = url;
+      filePreviewImg.style.display = 'block';
+    } else {
+      filePreviewImg.style.display = 'none';
+    }
+
+    filePreview.style.display = '';
+  }
+
+  function hideFilePreview(): void {
+    pendingFile = null;
+    filePreview.style.display = 'none';
+    if (filePreviewImg.src.startsWith('blob:')) {
+      URL.revokeObjectURL(filePreviewImg.src);
+    }
+    filePreviewImg.src = '';
+    composerInput.focus();
+  }
+
+  filePreviewCancel.addEventListener('click', hideFilePreview);
+
+  filePreviewSend.addEventListener('click', async () => {
+    if (!pendingFile || !selectedDialogId || isSendingFile) return;
     isSendingFile = true;
-    const targetDialog = selectedDialogId; // capture at call time
+    const file = pendingFile;
+    const targetDialog = selectedDialogId;
     console.log(`[popup] Sending file "${file.name}" to dialog ${targetDialog}`);
+    hideFilePreview();
     try {
       const base64 = await fileToBase64(file);
       await api.sendFile(targetDialog, base64, file.name, file.type);
-      // Visual feedback
-      const sendBtn = document.getElementById('sendBtn');
-      if (sendBtn) {
-        sendBtn.style.background = 'var(--green)';
-        setTimeout(() => { sendBtn.style.background = ''; }, 500);
-      }
     } catch (err) {
       console.error('[popup] File send failed:', err);
     } finally {
       isSendingFile = false;
     }
-  }
+  });
 
   // ── Paste images ──
 
-  composerInput.addEventListener('paste', async (e: ClipboardEvent) => {
+  composerInput.addEventListener('paste', (e: ClipboardEvent) => {
     if (isSendingFile) return;
     const items = e.clipboardData?.items;
     if (!items) return;
@@ -512,8 +543,8 @@
         e.preventDefault();
         e.stopPropagation();
         const file = item.getAsFile();
-        if (file) await sendFileToChat(file);
-        return; // only send first image
+        if (file) showFilePreview(file);
+        return;
       }
     }
     // Non-image paste falls through to default text paste
@@ -543,9 +574,8 @@
     const files = e.dataTransfer?.files;
     if (!files || files.length === 0) return;
 
-    for (const file of Array.from(files)) {
-      await sendFileToChat(file);
-    }
+    // Preview first file only
+    if (files[0]) showFilePreview(files[0]);
   });
 
   // ── Real-time updates ──
