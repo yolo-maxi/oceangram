@@ -8,6 +8,7 @@
   let myId: string | null = null;
   let selectedDialogId: string | null = null;
   let unreadCounts: Record<string, number> = {};
+  let replyTarget: { messageId: number; preview: string } | null = null;
 
   // Tab sources
   let whitelistEntries: TabEntry[] = [];
@@ -49,17 +50,26 @@
   const connectionBanner = document.getElementById('connectionBanner')!;
 
   const contactAvatar = document.getElementById('contactAvatar')!;
+  const replyBar = document.getElementById('replyBar')!;
+  const replyBarText = document.getElementById('replyBarText')!;
+  const replyBarCancel = document.getElementById('replyBarCancel')!;
 
   function loadAvatar(entry: TabEntry): void {
     const initial = (entry.displayName || '?').charAt(0).toUpperCase();
     contactAvatar.innerHTML = `<span>${escapeHtml(initial)}</span>`;
-    // Try loading photo
+    // Try loading photo with a 3-second timeout
     const userId = entry.dialogId;
-    api.getProfilePhoto(userId).then((dataUrl: string | null) => {
+    console.log('[avatar] Loading for', userId, 'displayName:', entry.displayName);
+    const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000));
+    Promise.race([api.getProfilePhoto(userId), timeout]).then((dataUrl: string | null) => {
+      console.log('[avatar] Result for', userId, ':', dataUrl ? 'got image' : 'null/timeout');
       if (dataUrl && selectedDialogId === entry.dialogId) {
         contactAvatar.innerHTML = `<img src="${dataUrl}" alt="">`;
       }
-    }).catch(() => { /* keep initial */ });
+    }).catch((err) => {
+      console.log('[avatar] Error for', userId, ':', err);
+      /* keep initial */
+    });
   }
 
   function escapeHtml(str: string): string {
@@ -201,6 +211,9 @@
   async function selectTab(entry: TabEntry): Promise<void> {
     selectedDialogId = entry.dialogId;
 
+    // Clear any pending reply when switching tabs
+    clearReplyTarget();
+
     // Update contact bar (single mode)
     contactName.textContent = entry.displayName;
     loadAvatar(entry);
@@ -264,6 +277,28 @@
     }
   }
 
+  // ── Reply bar ──
+
+  function setReplyTarget(messageId: number, preview: string): void {
+    replyTarget = { messageId, preview };
+    replyBarText.textContent = `Replying to: ${preview}`;
+    replyBar.style.display = '';
+    // Highlight the target message
+    messagesEl.querySelectorAll('.message.reply-target').forEach((el) => el.classList.remove('reply-target'));
+    const targetEl = messagesEl.querySelector(`[data-msg-id="${messageId}"]`);
+    if (targetEl) targetEl.classList.add('reply-target');
+    composerInput.focus();
+  }
+
+  function clearReplyTarget(): void {
+    replyTarget = null;
+    replyBar.style.display = 'none';
+    replyBarText.textContent = '';
+    messagesEl.querySelectorAll('.message.reply-target').forEach((el) => el.classList.remove('reply-target'));
+  }
+
+  replyBarCancel.addEventListener('click', clearReplyTarget);
+
   // ── Message rendering ──
 
   function renderMessages(messages: MessageLike[]): void {
@@ -287,9 +322,10 @@
       const isOutgoing = msg.isOutgoing === true || fromId === myId;
       const text = formatText(msg.text || msg.message || '');
       const time = formatTime(msg.date || msg.timestamp);
+      const msgId = msg.id || 0;
 
       html += `
-        <div class="message ${isOutgoing ? 'outgoing' : 'incoming'}">
+        <div class="message ${isOutgoing ? 'outgoing' : 'incoming'}" data-msg-id="${msgId}">
           <div class="text">${text}</div>
           <div class="time">${time}</div>
         </div>
@@ -297,6 +333,7 @@
     }
 
     messagesEl.innerHTML = html;
+    bindMessageClicks();
     scrollToBottom();
   }
 
@@ -305,6 +342,7 @@
     const isOutgoing = msg.isOutgoing === true || fromId === myId;
     const text = formatText(msg.text || msg.message || '');
     const time = formatTime(msg.date || msg.timestamp);
+    const msgId = msg.id || 0;
 
     // Remove loading/empty states
     const loading = messagesEl.querySelector('.loading');
@@ -312,12 +350,31 @@
 
     const div = document.createElement('div');
     div.className = `message ${isOutgoing ? 'outgoing' : 'incoming'}`;
+    div.dataset.msgId = String(msgId);
     div.innerHTML = `
       <div class="text">${text}</div>
       <div class="time">${time}</div>
     `;
+    div.addEventListener('click', () => {
+      if (msgId) {
+        const preview = (msg.text || msg.message || '').substring(0, 50);
+        setReplyTarget(msgId, preview);
+      }
+    });
     messagesEl.appendChild(div);
     scrollToBottom();
+  }
+
+  function bindMessageClicks(): void {
+    messagesEl.querySelectorAll('.message[data-msg-id]').forEach((el) => {
+      el.addEventListener('click', () => {
+        const msgId = parseInt((el as HTMLElement).dataset.msgId || '0', 10);
+        if (!msgId) return;
+        const textEl = el.querySelector('.text');
+        const preview = (textEl?.textContent || '').substring(0, 50);
+        setReplyTarget(msgId, preview);
+      });
+    });
   }
 
   function scrollToBottom(): void {
@@ -367,6 +424,9 @@
     composerInput.style.height = 'auto';
     sendBtn.disabled = true;
 
+    const currentReplyTo = replyTarget?.messageId;
+    clearReplyTarget();
+
     // Optimistic append
     appendMessage({
       fromId: myId || undefined,
@@ -376,7 +436,7 @@
     });
 
     try {
-      await api.sendMessage(selectedDialogId, text);
+      await api.sendMessage(selectedDialogId, text, currentReplyTo);
     } catch (err) {
       console.error('Send failed:', err);
     }

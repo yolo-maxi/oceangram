@@ -16,8 +16,8 @@ contextBridge.exposeInMainWorld('oceangram', {
   // Chat messages
   getMessages: (dialogId: string, limit?: number): Promise<TelegramMessage[]> =>
     ipcRenderer.invoke('get-messages', dialogId, limit),
-  sendMessage: (dialogId: string, text: string): Promise<unknown> =>
-    ipcRenderer.invoke('send-message', dialogId, text),
+  sendMessage: (dialogId: string, text: string, replyTo?: number): Promise<unknown> =>
+    ipcRenderer.invoke('send-message', dialogId, text, replyTo),
   sendFile: (dialogId: string, data: string, fileName: string, mimeType?: string, caption?: string): Promise<unknown> =>
     ipcRenderer.invoke('send-file', dialogId, data, fileName, mimeType, caption),
   markRead: (dialogId: string): Promise<boolean> =>

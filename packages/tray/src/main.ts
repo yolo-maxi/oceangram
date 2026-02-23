@@ -454,10 +454,10 @@ function setupIPC(): void {
     return await daemon!.getMessages(dialogId, limit || 30);
   });
 
-  ipcMain.handle('send-message', async (_: IpcMainInvokeEvent, dialogId: string, text: string) => {
+  ipcMain.handle('send-message', async (_: IpcMainInvokeEvent, dialogId: string, text: string, replyTo?: number) => {
     // Record sent time for active-chats filter
     tracker!.recordSent(dialogId);
-    return await daemon!.sendMessage(dialogId, text);
+    return await daemon!.sendMessage(dialogId, text, replyTo);
   });
 
   ipcMain.handle('send-file', async (_: IpcMainInvokeEvent, dialogId: string, data: string, fileName: string, mimeType?: string, caption?: string) => {

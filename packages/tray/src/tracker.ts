@@ -116,6 +116,9 @@ class MessageTracker extends EventEmitter {
         }
       }
 
+      // Sync active chats from daemon dialog data (captures sends from regular Telegram)
+      this.syncActiveChatsFromDaemon(dialogs);
+
       if (changed) {
         this.emit('unread-count-changed');
       }
@@ -210,8 +213,43 @@ class MessageTracker extends EventEmitter {
   }
 
   /**
+   * Sync active chats from daemon dialog data.
+   * Checks each dialog's lastMessage — if it's outgoing and within 30 min, record it.
+   * This captures sends from regular Telegram (not just the tray composer).
+   */
+  syncActiveChatsFromDaemon(dialogs: TelegramDialog[]): void {
+    if (!Array.isArray(dialogs)) return;
+    const now = Date.now();
+    const cutoff = now - MessageTracker.ACTIVE_WINDOW_MS;
+    let changed = false;
+
+    for (const d of dialogs) {
+      const dialogId = String(d.id);
+      const lastMsg = d.lastMessage;
+      if (!lastMsg) continue;
+      if (!lastMsg.isOutgoing) continue;
+
+      const msgTime = lastMsg.date || lastMsg.timestamp || 0;
+      // Convert to ms (daemon uses seconds)
+      const msgTimeMs = msgTime < 1e12 ? msgTime * 1000 : msgTime;
+      if (msgTimeMs < cutoff) continue;
+
+      // Only set if we don't already have a more recent send time
+      const existing = this.lastSentTimes.get(dialogId);
+      if (!existing || existing < msgTimeMs) {
+        this.lastSentTimes.set(dialogId, msgTimeMs);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      this.emit('active-chats-changed');
+    }
+  }
+
+  /**
    * Returns dialog IDs where:
-   *  - user sent a message within the last 30 min, AND
+   *  - user sent a message within the last 30 min (from tray OR regular Telegram), AND
    *  - dialog has unread messages
    * These are "active conversations" that should appear alongside whitelisted tabs.
    */

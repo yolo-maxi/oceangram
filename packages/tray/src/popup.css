@@ -330,6 +330,59 @@ html, body {
   font-size: 13px;
 }
 
+/* ── Reply bar ── */
+.reply-bar {
+  display: flex;
+  align-items: center;
+  padding: 4px 10px;
+  background: var(--bg-dark);
+  border-top: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  flex-shrink: 0;
+  gap: 6px;
+  animation: slideUp 0.12s ease-out;
+}
+
+.reply-bar-text {
+  flex: 1;
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.reply-bar-cancel {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 4px;
+  line-height: 1;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.reply-bar-cancel:hover {
+  color: var(--text);
+  background: rgba(255,255,255,0.1);
+}
+
+.message {
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.message:hover {
+  filter: brightness(1.1);
+}
+
+.message.reply-target {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
 /* ── Composer ── */
 .composer {
   display: flex;

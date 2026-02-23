@@ -119,9 +119,11 @@ class DaemonClient extends EventEmitter {
     }
   }
 
-  async sendMessage(dialogId: string, text: string): Promise<unknown> {
+  async sendMessage(dialogId: string, text: string, replyTo?: number): Promise<unknown> {
     try {
-      return await this._request('POST', `/dialogs/${dialogId}/messages`, { text });
+      const body: Record<string, unknown> = { text };
+      if (replyTo != null) body.replyTo = replyTo;
+      return await this._request('POST', `/dialogs/${dialogId}/messages`, body);
     } catch {
       return null;
     }
