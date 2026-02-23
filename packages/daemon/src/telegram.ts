@@ -7,6 +7,7 @@ import { CustomFile } from 'telegram/client/uploads';
 import { computeCheck } from 'telegram/Password';
 import bigInt from 'big-integer';
 import { getApiId, getApiHash, loadConfig, saveConfig } from './config';
+import { Cache } from './cache';
 
 // --- Privacy key mapping ---
 type PrivacyKeyName = 'lastSeen' | 'phoneNumber' | 'profilePhoto' | 'forwards' | 'calls' | 'groups';
@@ -105,6 +106,11 @@ export class TelegramService {
   private messagesCache: Map<string, { ts: number; data: MessageInfo[] }> = new Map();
   private dialogsCache: { ts: number; data: DialogInfo[] } | null = null;
   private profilePhotoCache: Map<string, { ts: number; data: { buffer: Buffer; mimeType: string } | null }> = new Map();
+  private cache: Cache;
+
+  constructor() {
+    this.cache = new Cache();
+  }
 
   isConnected(): boolean { return this.connected; }
   getClient(): TelegramClient | null { return this.client; }
@@ -230,10 +236,14 @@ export class TelegramService {
         : undefined;
       const dialogId = topicId ? `${chatId}:${topicId}` : chatId;
 
+      const messageInfo = this.rawMessageToInfo(msg);
+      // Upsert into SQLite cache (L2)
+      try { this.cache.upsertMessages(dialogId, [messageInfo]); } catch (e) { console.error('[cache] upsert error:', e); }
+
       this.emit({
         type: 'newMessage',
         dialogId,
-        message: this.rawMessageToInfo(msg),
+        message: messageInfo,
       });
     }, new NewMessage({}));
 
@@ -241,16 +251,27 @@ export class TelegramService {
       const msg = event.message;
       if (!msg) return;
       const chatId = msg.chatId?.toString() || (msg as any).peerId?.toString() || '';
+
+      const messageInfo = this.rawMessageToInfo(msg);
+      // Update in SQLite cache (L2)
+      try { this.cache.upsertMessages(chatId, [messageInfo]); } catch (e) { console.error('[cache] edit upsert error:', e); }
+
       this.emit({
         type: 'editedMessage',
         dialogId: chatId,
-        message: this.rawMessageToInfo(msg),
+        message: messageInfo,
       });
     }, new EditedMessage({}));
 
     this.client.addEventHandler((event: DeletedMessageEvent) => {
       const ids = event.deletedIds || [];
       const chatId = (event as any).chatId?.toString() || '';
+
+      // Delete from SQLite cache (L2)
+      for (const id of ids) {
+        try { this.cache.deleteMessage(chatId, id); } catch (e) { console.error('[cache] delete error:', e); }
+      }
+
       this.emit({
         type: 'deletedMessage',
         dialogId: chatId,
@@ -422,10 +443,27 @@ export class TelegramService {
   async getDialogs(limit = 100): Promise<DialogInfo[]> {
     if (!this.client) throw new Error('Not connected');
 
-    // Return cached if fresh (< 30s)
+    // L1: Return in-memory cached if fresh (< 30s)
     if (this.dialogsCache && (Date.now() - this.dialogsCache.ts) < 30_000) {
       return this.dialogsCache.data.slice(0, limit);
     }
+
+    // L2: Check SQLite cache
+    const cachedDialogs = this.cache.getDialogs(limit);
+    if (cachedDialogs.length >= limit) {
+      // Populate L1 and schedule background refresh
+      this.dialogsCache = { ts: Date.now(), data: cachedDialogs };
+      this.refreshDialogsBackground(limit);
+      return cachedDialogs;
+    }
+
+    // Cache miss — fetch from Telegram
+    const fresh = await this.fetchDialogsFromTelegram(limit);
+    return fresh;
+  }
+
+  private async fetchDialogsFromTelegram(limit: number): Promise<DialogInfo[]> {
+    if (!this.client) throw new Error('Not connected');
 
     const timeout = new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('getDialogs timeout (30s)')), 30000)
@@ -486,8 +524,17 @@ export class TelegramService {
         });
       }
     }
+
+    // Update both caches
     this.dialogsCache = { ts: Date.now(), data: results };
+    try { this.cache.upsertDialogs(results); } catch (e) { console.error('[cache] dialogs upsert error:', e); }
     return results;
+  }
+
+  private refreshDialogsBackground(limit: number): void {
+    this.fetchDialogsFromTelegram(limit).catch((e) => {
+      console.error('[cache] background dialogs refresh error:', e);
+    });
   }
 
   private async getForumTopics(chatId: string): Promise<Api.ForumTopic[]> {
@@ -515,11 +562,30 @@ export class TelegramService {
   async getMessages(dialogId: string, limit = 20, offsetId?: number): Promise<MessageInfo[]> {
     if (!this.client) throw new Error('Not connected');
 
+    // L1: in-memory cache
     const cacheKey = `${dialogId}|${limit}|${offsetId || 0}`;
-    const cached = this.messagesCache.get(cacheKey);
-    if (cached && (Date.now() - cached.ts) < 20_000) {
-      return cached.data;
+    const memCached = this.messagesCache.get(cacheKey);
+    if (memCached && (Date.now() - memCached.ts) < 20_000) {
+      return memCached.data;
     }
+
+    // L2: SQLite cache
+    const dbCached = this.cache.getMessages(dialogId, limit, offsetId);
+    if (dbCached.length >= limit) {
+      // Populate L1 and schedule background refresh
+      this.messagesCache.set(cacheKey, { ts: Date.now(), data: dbCached });
+      this.refreshMessagesBackground(dialogId, limit, offsetId);
+      return dbCached;
+    }
+
+    // Cache miss — fetch from Telegram, cache, return
+    const fresh = await this.fetchMessagesFromTelegram(dialogId, limit, offsetId);
+    this.messagesCache.set(cacheKey, { ts: Date.now(), data: fresh });
+    return fresh;
+  }
+
+  private async fetchMessagesFromTelegram(dialogId: string, limit: number, offsetId?: number): Promise<MessageInfo[]> {
+    if (!this.client) throw new Error('Not connected');
 
     const { chatId, topicId } = this.parseDialogId(dialogId);
     const entity = await this.client.getEntity(chatId);
@@ -551,8 +617,23 @@ export class TelegramService {
     }
 
     const out = results.reverse();
-    this.messagesCache.set(cacheKey, { ts: Date.now(), data: out });
+
+    // Persist to SQLite (L2)
+    try { this.cache.upsertMessages(dialogId, out); } catch (e) { console.error('[cache] messages upsert error:', e); }
+
     return out;
+  }
+
+  private refreshMessagesBackground(dialogId: string, limit: number, offsetId?: number): void {
+    this.fetchMessagesFromTelegram(dialogId, limit, offsetId)
+      .then((fresh) => {
+        // Update L1 with fresh data
+        const cacheKey = `${dialogId}|${limit}|${offsetId || 0}`;
+        this.messagesCache.set(cacheKey, { ts: Date.now(), data: fresh });
+      })
+      .catch((e) => {
+        console.error('[cache] background messages refresh error:', e);
+      });
   }
 
   async sendMessage(dialogId: string, text: string, replyTo?: number): Promise<MessageInfo> {
@@ -566,7 +647,12 @@ export class TelegramService {
 
     const msg = await this.client.sendMessage(entity, opts);
     this.messagesCache.clear();
-    return this.rawMessageToInfo(msg);
+    const messageInfo = this.rawMessageToInfo(msg);
+
+    // Upsert sent message into SQLite cache (L2)
+    try { this.cache.upsertMessages(dialogId, [messageInfo]); } catch (e) { console.error('[cache] send upsert error:', e); }
+
+    return messageInfo;
   }
 
   async editMessage(dialogId: string, messageId: number, text: string): Promise<void> {
@@ -757,12 +843,21 @@ export class TelegramService {
   async getProfilePhoto(userId: string): Promise<{ buffer: Buffer; mimeType: string } | null> {
     if (!this.client) throw new Error('Not connected');
 
-    // Check in-memory cache (1 hour TTL)
-    const cached = this.profilePhotoCache.get(userId);
-    if (cached && (Date.now() - cached.ts) < 3_600_000) {
-      return cached.data;
+    // L1: Check in-memory cache (1 hour TTL)
+    const memCached = this.profilePhotoCache.get(userId);
+    if (memCached && (Date.now() - memCached.ts) < 3_600_000) {
+      return memCached.data;
     }
 
+    // L2: Check SQLite cache
+    const dbCached = this.cache.getProfilePhoto(userId);
+    if (dbCached) {
+      const result = { buffer: dbCached.data, mimeType: dbCached.mimeType };
+      this.profilePhotoCache.set(userId, { ts: Date.now(), data: result });
+      return result;
+    }
+
+    // Cache miss — download from Telegram
     try {
       const entity = await this.client.getEntity(userId);
       const buffer = await this.client.downloadProfilePhoto(entity);
@@ -771,7 +866,9 @@ export class TelegramService {
         return null;
       }
       const result = { buffer, mimeType: 'image/jpeg' };
+      // Update both caches
       this.profilePhotoCache.set(userId, { ts: Date.now(), data: result });
+      try { this.cache.setProfilePhoto(userId, buffer, 'image/jpeg'); } catch (e) { console.error('[cache] photo set error:', e); }
       return result;
     } catch {
       this.profilePhotoCache.set(userId, { ts: Date.now(), data: null });
@@ -2668,6 +2765,7 @@ export class TelegramService {
       await this.client.disconnect();
       this.connected = false;
     }
+    try { this.cache.close(); } catch { /* ignore */ }
   }
 
   private parseDialogId(id: string): { chatId: string; topicId?: number } {
