@@ -210,11 +210,13 @@
       updateTabActive();
     }
 
-    // Show loading
-    loadingEl.style.display = '';
-    loadingEl.textContent = 'Loading messages...';
-    messagesEl.innerHTML = '';
-    messagesEl.appendChild(loadingEl);
+    // Show loading only if no cache
+    if (!messageCache[entry.dialogId] || messageCache[entry.dialogId].length === 0) {
+      loadingEl.style.display = '';
+      loadingEl.textContent = 'Loading messages...';
+      messagesEl.innerHTML = '';
+      messagesEl.appendChild(loadingEl);
+    }
 
     await loadMessages(entry.dialogId);
 
@@ -227,7 +229,24 @@
     setTimeout(() => composerInput.focus(), 100);
   }
 
+  // ── Message cache ──
+  const messageCache: Record<string, MessageLike[]> = {};
+
   async function loadMessages(dialogId: string): Promise<void> {
+    // Show cached messages instantly
+    if (messageCache[dialogId] && messageCache[dialogId].length > 0) {
+      loadingEl.style.display = 'none';
+      renderMessages(messageCache[dialogId]);
+      // Refresh in background
+      api.getMessages(dialogId, 30).then((messages: MessageLike[]) => {
+        if (Array.isArray(messages) && messages.length > 0 && selectedDialogId === dialogId) {
+          messageCache[dialogId] = messages;
+          renderMessages(messages);
+        }
+      }).catch(() => { /* keep cache */ });
+      return;
+    }
+
     try {
       const messages = await api.getMessages(dialogId, 30);
       loadingEl.style.display = 'none';
@@ -237,6 +256,7 @@
         return;
       }
 
+      messageCache[dialogId] = messages;
       renderMessages(messages);
     } catch {
       loadingEl.style.display = 'none';
@@ -390,6 +410,11 @@
 
     // Only care about tabs we're showing
     const isTabbed = allTabs.some((t) => t.dialogId === msgDialogId);
+
+    // Update cache for any tabbed dialog
+    if (isTabbed && messageCache[msgDialogId]) {
+      messageCache[msgDialogId] = [...messageCache[msgDialogId], msg];
+    }
 
     if (msgDialogId === selectedDialogId) {
       // Current chat — append message
