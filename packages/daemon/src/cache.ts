@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import initSqlJs, { Database as SqlJsDatabase } from 'sql.js';
 import * as path from 'path';
 import * as fs from 'fs';
 import type { DialogInfo, MessageInfo } from './telegram';
@@ -7,27 +7,42 @@ const DEFAULT_DB_DIR = path.join(process.env.HOME || '/root', '.oceangram');
 const DEFAULT_DB_PATH = path.join(DEFAULT_DB_DIR, 'cache.db');
 
 export class Cache {
-  private db: Database.Database;
+  private db: SqlJsDatabase | null = null;
+  private dbPath: string;
+  private dirty = false;
+  private saveTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(dbPath: string = DEFAULT_DB_PATH) {
-    // Ensure directory exists
-    const dir = path.dirname(dbPath);
+    this.dbPath = dbPath;
+  }
+
+  async init(): Promise<void> {
+    const dir = path.dirname(this.dbPath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     }
 
-    this.db = new Database(dbPath);
+    const SQL = await initSqlJs();
+
+    if (fs.existsSync(this.dbPath)) {
+      const buffer = fs.readFileSync(this.dbPath);
+      this.db = new SQL.Database(buffer);
+    } else {
+      this.db = new SQL.Database();
+    }
 
     // Performance pragmas
-    this.db.pragma('journal_mode = WAL');
-    this.db.pragma('synchronous = NORMAL');
-    this.db.pragma('foreign_keys = ON');
+    this.db.run('PRAGMA journal_mode = WAL');
+    this.db.run('PRAGMA synchronous = NORMAL');
 
     this.createSchema();
+
+    // Auto-save every 10s if dirty
+    this.saveTimer = setInterval(() => this.saveToDisk(), 10_000);
   }
 
   private createSchema(): void {
-    this.db.exec(`
+    this.db!.run(`
       CREATE TABLE IF NOT EXISTS messages (
         id INTEGER NOT NULL,
         dialog_id TEXT NOT NULL,
@@ -41,9 +56,11 @@ export class Cache {
         is_outgoing INTEGER DEFAULT 0,
         raw JSON,
         PRIMARY KEY (dialog_id, id)
-      );
-      CREATE INDEX IF NOT EXISTS idx_messages_dialog ON messages(dialog_id, date DESC);
+      )
+    `);
+    this.db!.run('CREATE INDEX IF NOT EXISTS idx_messages_dialog ON messages(dialog_id, date DESC)');
 
+    this.db!.run(`
       CREATE TABLE IF NOT EXISTS dialogs (
         id TEXT PRIMARY KEY,
         chat_id TEXT,
@@ -59,59 +76,90 @@ export class Cache {
         has_photo INTEGER DEFAULT 0,
         raw JSON,
         updated_at INTEGER
-      );
-      CREATE INDEX IF NOT EXISTS idx_dialogs_date ON dialogs(last_message_time DESC);
+      )
+    `);
+    this.db!.run('CREATE INDEX IF NOT EXISTS idx_dialogs_date ON dialogs(last_message_time DESC)');
 
+    this.db!.run(`
       CREATE TABLE IF NOT EXISTS profile_photos (
         user_id TEXT PRIMARY KEY,
         data BLOB,
         mime_type TEXT DEFAULT 'image/jpeg',
         updated_at INTEGER
-      );
+      )
     `);
+  }
+
+  private saveToDisk(): void {
+    if (!this.dirty || !this.db) return;
+    try {
+      const data = this.db.export();
+      fs.writeFileSync(this.dbPath, Buffer.from(data));
+      this.dirty = false;
+    } catch (e) {
+      console.error('[cache] Failed to save:', e);
+    }
   }
 
   // ─── Messages ──────────────────────────────────────────────────────────
 
   getMessages(dialogId: string, limit: number, offsetId?: number): MessageInfo[] {
-    let stmt;
-    if (offsetId) {
-      stmt = this.db.prepare(`
-        SELECT * FROM messages
-        WHERE dialog_id = ? AND id < ?
-        ORDER BY date DESC
-        LIMIT ?
-      `);
-      const rows = stmt.all(dialogId, offsetId, limit) as any[];
+    if (!this.db) return [];
+    try {
+      let stmt;
+      if (offsetId) {
+        stmt = this.db.prepare(`
+          SELECT * FROM messages WHERE dialog_id = ? AND id < ? ORDER BY date DESC LIMIT ?
+        `);
+        stmt.bind([dialogId, offsetId, limit]);
+      } else {
+        stmt = this.db.prepare(`
+          SELECT * FROM messages WHERE dialog_id = ? ORDER BY date DESC LIMIT ?
+        `);
+        stmt.bind([dialogId, limit]);
+      }
+
+      const rows: any[] = [];
+      while (stmt.step()) {
+        rows.push(stmt.getAsObject());
+      }
+      stmt.free();
       return rows.map(rowToMessageInfo).reverse();
-    } else {
-      stmt = this.db.prepare(`
-        SELECT * FROM messages
-        WHERE dialog_id = ?
-        ORDER BY date DESC
-        LIMIT ?
-      `);
-      const rows = stmt.all(dialogId, limit) as any[];
-      return rows.map(rowToMessageInfo).reverse();
+    } catch {
+      return [];
     }
   }
 
   getMessageCount(dialogId: string): number {
-    const row = this.db.prepare('SELECT COUNT(*) as cnt FROM messages WHERE dialog_id = ?').get(dialogId) as any;
-    return row?.cnt || 0;
+    if (!this.db) return 0;
+    try {
+      const stmt = this.db.prepare('SELECT COUNT(*) as cnt FROM messages WHERE dialog_id = ?');
+      stmt.bind([dialogId]);
+      if (stmt.step()) {
+        const row = stmt.getAsObject() as any;
+        stmt.free();
+        return row.cnt || 0;
+      }
+      stmt.free();
+      return 0;
+    } catch {
+      return 0;
+    }
   }
 
   upsertMessages(dialogId: string, messages: MessageInfo[]): void {
-    const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO messages (
-        id, dialog_id, from_id, sender_name, text, date, edit_date,
-        reply_to, media_type, is_outgoing, raw
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+    if (!this.db || messages.length === 0) return;
+    try {
+      this.db.run('BEGIN TRANSACTION');
+      const stmt = this.db.prepare(`
+        INSERT OR REPLACE INTO messages (
+          id, dialog_id, from_id, sender_name, text, date, edit_date,
+          reply_to, media_type, is_outgoing, raw
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
 
-    const tx = this.db.transaction((msgs: MessageInfo[]) => {
-      for (const m of msgs) {
-        stmt.run(
+      for (const m of messages) {
+        stmt.run([
           m.id,
           dialogId,
           m.senderId || null,
@@ -123,45 +171,74 @@ export class Cache {
           m.mediaType || null,
           m.isOutgoing ? 1 : 0,
           JSON.stringify(m),
-        );
+        ]);
       }
-    });
 
-    tx(messages);
+      stmt.free();
+      this.db.run('COMMIT');
+      this.dirty = true;
+    } catch (e) {
+      try { this.db.run('ROLLBACK'); } catch { /* ignore */ }
+      console.error('[cache] upsertMessages error:', e);
+    }
   }
 
   deleteMessage(dialogId: string, messageId: number): void {
-    this.db.prepare('DELETE FROM messages WHERE dialog_id = ? AND id = ?').run(dialogId, messageId);
+    if (!this.db) return;
+    try {
+      this.db.run('DELETE FROM messages WHERE dialog_id = ? AND id = ?', [dialogId, messageId]);
+      this.dirty = true;
+    } catch { /* ignore */ }
   }
 
   // ─── Dialogs ───────────────────────────────────────────────────────────
 
   getDialogs(limit: number): DialogInfo[] {
-    const rows = this.db.prepare(`
-      SELECT * FROM dialogs
-      ORDER BY last_message_time DESC
-      LIMIT ?
-    `).all(limit) as any[];
+    if (!this.db) return [];
+    try {
+      const stmt = this.db.prepare('SELECT * FROM dialogs ORDER BY last_message_time DESC LIMIT ?');
+      stmt.bind([limit]);
 
-    return rows.map(rowToDialogInfo);
+      const rows: any[] = [];
+      while (stmt.step()) {
+        rows.push(stmt.getAsObject());
+      }
+      stmt.free();
+      return rows.map(rowToDialogInfo);
+    } catch {
+      return [];
+    }
   }
 
   getDialogCount(): number {
-    const row = this.db.prepare('SELECT COUNT(*) as cnt FROM dialogs').get() as any;
-    return row?.cnt || 0;
+    if (!this.db) return 0;
+    try {
+      const stmt = this.db.prepare('SELECT COUNT(*) as cnt FROM dialogs');
+      if (stmt.step()) {
+        const row = stmt.getAsObject() as any;
+        stmt.free();
+        return row.cnt || 0;
+      }
+      stmt.free();
+      return 0;
+    } catch {
+      return 0;
+    }
   }
 
   upsertDialogs(dialogs: DialogInfo[]): void {
-    const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO dialogs (
-        id, chat_id, topic_id, name, type, last_message, last_message_time,
-        unread_count, is_forum, group_name, topic_name, has_photo, raw, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+    if (!this.db || dialogs.length === 0) return;
+    try {
+      this.db.run('BEGIN TRANSACTION');
+      const stmt = this.db.prepare(`
+        INSERT OR REPLACE INTO dialogs (
+          id, chat_id, topic_id, name, type, last_message, last_message_time,
+          unread_count, is_forum, group_name, topic_name, has_photo, raw, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
 
-    const tx = this.db.transaction((ds: DialogInfo[]) => {
-      for (const d of ds) {
-        stmt.run(
+      for (const d of dialogs) {
+        stmt.run([
           d.id,
           d.chatId || d.id,
           d.topicId || null,
@@ -176,50 +253,71 @@ export class Cache {
           d.hasPhoto ? 1 : 0,
           JSON.stringify(d),
           Math.floor(Date.now() / 1000),
-        );
+        ]);
       }
-    });
 
-    tx(dialogs);
+      stmt.free();
+      this.db.run('COMMIT');
+      this.dirty = true;
+    } catch (e) {
+      try { this.db.run('ROLLBACK'); } catch { /* ignore */ }
+      console.error('[cache] upsertDialogs error:', e);
+    }
   }
 
   // ─── Profile Photos ────────────────────────────────────────────────────
 
   getProfilePhoto(userId: string): { data: Buffer; mimeType: string } | null {
-    const row = this.db.prepare('SELECT data, mime_type FROM profile_photos WHERE user_id = ?').get(userId) as any;
-    if (!row || !row.data) return null;
-    return { data: Buffer.from(row.data), mimeType: row.mime_type || 'image/jpeg' };
+    if (!this.db) return null;
+    try {
+      const stmt = this.db.prepare('SELECT data, mime_type FROM profile_photos WHERE user_id = ?');
+      stmt.bind([userId]);
+      if (stmt.step()) {
+        const row = stmt.getAsObject() as any;
+        stmt.free();
+        if (!row.data) return null;
+        return { data: Buffer.from(row.data), mimeType: row.mime_type || 'image/jpeg' };
+      }
+      stmt.free();
+      return null;
+    } catch {
+      return null;
+    }
   }
 
   setProfilePhoto(userId: string, data: Buffer, mimeType: string): void {
-    this.db.prepare(`
-      INSERT OR REPLACE INTO profile_photos (user_id, data, mime_type, updated_at)
-      VALUES (?, ?, ?, ?)
-    `).run(userId, data, mimeType, Math.floor(Date.now() / 1000));
+    if (!this.db) return;
+    try {
+      this.db.run(
+        'INSERT OR REPLACE INTO profile_photos (user_id, data, mime_type, updated_at) VALUES (?, ?, ?, ?)',
+        [userId, data, mimeType, Math.floor(Date.now() / 1000)]
+      );
+      this.dirty = true;
+    } catch { /* ignore */ }
   }
 
   // ─── Lifecycle ─────────────────────────────────────────────────────────
 
   close(): void {
-    this.db.close();
+    if (this.saveTimer) clearInterval(this.saveTimer);
+    this.saveToDisk();
+    if (this.db) this.db.close();
   }
 }
 
 // ─── Row → Interface mappers ───────────────────────────────────────────────
 
 function rowToMessageInfo(row: any): MessageInfo {
-  // If we have full raw JSON, prefer that for richness (reactions, forward, etc.)
   if (row.raw) {
     try {
       const parsed = JSON.parse(row.raw);
-      // Ensure critical fields from DB columns override (they may be updated)
       return {
         ...parsed,
         id: row.id,
         text: row.text ?? parsed.text,
         isEdited: row.edit_date ? true : parsed.isEdited,
       };
-    } catch { /* fall through to manual mapping */ }
+    } catch { /* fall through */ }
   }
 
   return {
@@ -236,7 +334,6 @@ function rowToMessageInfo(row: any): MessageInfo {
 }
 
 function rowToDialogInfo(row: any): DialogInfo {
-  // Prefer raw JSON for full fidelity
   if (row.raw) {
     try {
       const parsed = JSON.parse(row.raw);

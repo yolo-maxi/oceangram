@@ -110,6 +110,7 @@ export class TelegramService {
 
   constructor() {
     this.cache = new Cache();
+    this.cache.init().catch(e => console.error('[telegram] Cache init failed:', e));
   }
 
   isConnected(): boolean { return this.connected; }
