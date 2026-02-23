@@ -68,7 +68,8 @@ export async function createServer(telegram: TelegramService) {
       return { ok: true };
     } catch (err: unknown) {
       if (err instanceof Error && err.message === '2FA_REQUIRED') {
-        return { ok: false, need2FA: true };
+        const hint = await telegram.get2FAHint();
+        return { ok: false, need2FA: true, hint };
       }
       throw err;
     }

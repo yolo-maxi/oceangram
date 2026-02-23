@@ -188,6 +188,12 @@ export class TelegramService {
     return sessionStr;
   }
 
+  async get2FAHint(): Promise<string | undefined> {
+    if (!this.client) return undefined;
+    const passwordInfo = await this.client.invoke(new Api.account.GetPassword());
+    return passwordInfo.hint || undefined;
+  }
+
   async complete2FA(password: string): Promise<string> {
     if (!this.client) throw new Error('Call startLogin first');
 

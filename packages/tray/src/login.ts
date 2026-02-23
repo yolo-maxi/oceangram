@@ -58,6 +58,7 @@ interface ApiResponse {
   ok?: boolean;
   phoneCodeHash?: string;
   need2FA?: boolean;
+  hint?: string;
   error?: string;
   connected?: boolean;
   id?: string;
@@ -117,6 +118,13 @@ verifyCodeBtn.addEventListener('click', async () => {
 
     if (result.need2FA) {
       showStep('step-2fa');
+      if (result.hint) {
+        const hintEl = document.getElementById('2fa-hint');
+        if (hintEl) {
+          hintEl.textContent = `Hint: ${result.hint}`;
+          hintEl.style.display = 'block';
+        }
+      }
       passwordInput.focus();
     } else if (result.ok) {
       onLoginSuccess();
