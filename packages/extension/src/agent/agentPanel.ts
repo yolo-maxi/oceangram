@@ -41,7 +41,11 @@ export class AgentPanel {
   private disposables: vscode.Disposable[] = [];
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
   private fileWatcher: vscode.FileSystemWatcher | undefined;
-  private currentTab: 'overview' | 'tools' | 'subagents' | 'crons' | 'costs' | 'memory' | 'livetools' = 'overview';
+  private currentTab: 'overview' | 'tools' | 'subagents' | 'crons' | 'costs' | 'memory' | 'livetools' | 'chat' = 'overview';
+  private chatMessages: Array<{ role: string; content: string; timestamp?: number }> = [];
+  private chatLoading = false;
+  private chatSessionKey: string | undefined;
+  private gatewayEventCleanup: (() => void) | undefined;
   private liveToolsFilter: string | null = null;
   private jsonlWatcher: vscode.FileSystemWatcher | undefined;
   private liveToolEntries: ToolCallEntry[] = [];
@@ -62,14 +66,18 @@ export class AgentPanel {
     AgentPanel.instance = new AgentPanel(panel, context);
   }
 
+  private readonly extensionUri: vscode.Uri;
+
   private constructor(panel: vscode.WebviewPanel, _context: vscode.ExtensionContext) {
     this.panel = panel;
+    this.extensionUri = _context.extensionUri;
 
     this.panel.onDidDispose(() => {
       AgentPanel.instance = undefined;
       if (this.refreshTimer) clearInterval(this.refreshTimer);
       if (this.fileWatcher) this.fileWatcher.dispose();
       if (this.jsonlWatcher) this.jsonlWatcher.dispose();
+      if (this.gatewayEventCleanup) this.gatewayEventCleanup();
       this.disposables.forEach(d => d.dispose());
     }, null, this.disposables);
 
@@ -82,6 +90,9 @@ export class AgentPanel {
           case 'switchTab':
             this.currentTab = msg.tab;
             this.refresh();
+            if (msg.tab === 'chat' && this.chatMessages.length === 0) {
+              this.loadChatHistory();
+            }
             break;
           case 'toggleCron': {
             const gw = getGatewayClient();
@@ -109,6 +120,42 @@ export class AgentPanel {
             this.liveToolsFilter = msg.filter;
             this.refreshLiveTools();
             break;
+          case 'chatSend': {
+            const gw = getGatewayClient();
+            if (!gw?.connected) {
+              vscode.window.showWarningMessage('Gateway not connected — cannot send chat');
+              break;
+            }
+            this.chatLoading = true;
+            this.chatMessages.push({ role: 'user', content: msg.text, timestamp: Date.now() });
+            this.refreshChatOnly();
+            try {
+              await gw.sendChat(msg.text, this.chatSessionKey);
+            } catch (e: any) {
+              this.chatMessages.push({ role: 'system', content: `Error: ${e.message}`, timestamp: Date.now() });
+            }
+            this.chatLoading = false;
+            this.refreshChatOnly();
+            break;
+          }
+          case 'chatAbort': {
+            const gw = getGatewayClient();
+            if (gw?.connected) {
+              await gw.abortChat(this.chatSessionKey);
+            }
+            this.chatLoading = false;
+            this.refreshChatOnly();
+            break;
+          }
+          case 'chatLoadHistory': {
+            await this.loadChatHistory();
+            break;
+          }
+          case 'chatSelectSession': {
+            this.chatSessionKey = msg.sessionKey || undefined;
+            await this.loadChatHistory();
+            break;
+          }
         }
       },
       null,
@@ -148,6 +195,77 @@ export class AgentPanel {
         this.refresh();
       }
     } catch { /* ignore */ }
+  }
+
+  private async loadChatHistory() {
+    const gw = getGatewayClient();
+    if (!gw?.connected) {
+      this.chatMessages = [{ role: 'system', content: 'Gateway not connected. Connect via settings to use chat.' }];
+      this.refreshChatOnly();
+      return;
+    }
+    try {
+      const { messages } = await gw.getChatHistory(this.chatSessionKey);
+      this.chatMessages = messages.map(m => ({
+        role: m.role,
+        content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+        timestamp: (m as any).timestamp,
+      }));
+    } catch (e: any) {
+      this.chatMessages = [{ role: 'system', content: `Failed to load history: ${e.message}` }];
+    }
+    this.refreshChatOnly();
+  }
+
+  private setupGatewayEvents() {
+    if (this.gatewayEventCleanup) return;
+    const gw = getGatewayClient();
+    if (!gw) return;
+
+    const onMessage = (data: any) => {
+      if (this.currentTab !== 'chat') return;
+      if (data?.role && data?.content) {
+        this.chatMessages.push({
+          role: data.role,
+          content: typeof data.content === 'string' ? data.content : JSON.stringify(data.content),
+          timestamp: Date.now(),
+        });
+        this.chatLoading = false;
+        this.refreshChatOnly();
+      }
+    };
+
+    const onStreamChunk = (data: any) => {
+      if (this.currentTab !== 'chat') return;
+      // Handle streaming token by token if gateway supports it
+      if (data?.delta) {
+        const last = this.chatMessages[this.chatMessages.length - 1];
+        if (last?.role === 'assistant' && last.content !== undefined) {
+          last.content += data.delta;
+        } else {
+          this.chatMessages.push({ role: 'assistant', content: data.delta, timestamp: Date.now() });
+        }
+        this.refreshChatOnly();
+      }
+    };
+
+    gw.on('event:chat.message', onMessage);
+    gw.on('event:chat.stream', onStreamChunk);
+
+    this.gatewayEventCleanup = () => {
+      gw.removeListener('event:chat.message', onMessage);
+      gw.removeListener('event:chat.stream', onStreamChunk);
+    };
+  }
+
+  private refreshChatOnly() {
+    if (this.currentTab === 'chat') {
+      this.panel.webview.postMessage({
+        command: 'chatUpdate',
+        messages: this.chatMessages,
+        loading: this.chatLoading,
+      });
+    }
   }
 
   private async refresh() {
@@ -484,6 +602,55 @@ export class AgentPanel {
     return '<span style="font-size:10px;background:#555;color:#aaa;padding:2px 6px;border-radius:4px;margin-left:8px;vertical-align:middle">File</span>';
   }
 
+  private renderChatTab(): string {
+    const gw = getGatewayClient();
+    const connected = gw?.connected ?? false;
+
+    if (!connected) {
+      return `
+        <div class="chat-container">
+          <div class="chat-empty">
+            <p>🔌 Gateway not connected</p>
+            <p style="font-size:12px;color:var(--dim)">Configure <code>oceangram.gatewayUrl</code> and <code>oceangram.gatewayToken</code> in settings to enable chat.</p>
+          </div>
+        </div>`;
+    }
+
+    const messagesHtml = this.chatMessages.length === 0
+      ? '<div class="chat-empty"><p>No messages yet. Load history or start typing.</p></div>'
+      : this.chatMessages.map(m => {
+          const roleClass = m.role === 'user' ? 'chat-msg-user' : m.role === 'assistant' ? 'chat-msg-assistant' : 'chat-msg-system';
+          const roleLabel = m.role === 'user' ? '👤 You' : m.role === 'assistant' ? '🤖 Agent' : '⚙️ System';
+          const contentHtml = this.esc(m.content).replace(/\n/g, '<br>');
+          return `
+            <div class="chat-msg ${roleClass}">
+              <div class="chat-msg-role">${roleLabel}</div>
+              <div class="chat-msg-content">${contentHtml}</div>
+            </div>`;
+        }).join('');
+
+    const loadingHtml = this.chatLoading
+      ? '<div class="chat-loading">⏳ Agent is thinking...</div>'
+      : '';
+
+    return `
+      <div class="chat-container">
+        <div class="chat-toolbar">
+          <button onclick="vscode.postMessage({command:'chatLoadHistory'})">📜 Load History</button>
+          ${this.chatLoading ? '<button onclick="vscode.postMessage({command:\'chatAbort\'})">⛔ Abort</button>' : ''}
+        </div>
+        <div class="chat-messages" id="chatMessages">
+          ${messagesHtml}
+          ${loadingHtml}
+        </div>
+        <div class="chat-input-row">
+          <textarea id="chatInput" class="chat-input" placeholder="Send a message to your agent..." rows="2"
+            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}"></textarea>
+          <button class="chat-send-btn" onclick="sendChat()" ${this.chatLoading ? 'disabled' : ''}>➤</button>
+        </div>
+      </div>`;
+  }
+
   private getHtml(data: AgentPanelData): string {
     const tabs = [
       { id: 'overview', label: '📊 Overview' },
@@ -493,7 +660,12 @@ export class AgentPanel {
       { id: 'costs', label: '💰 Costs' },
       { id: 'memory', label: '📂 Memory' },
       { id: 'livetools', label: '⚡ Live Tools' },
+      { id: 'chat', label: '💬 Chat' },
     ];
+
+    const jsUri = this.panel.webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'media', 'agentPanel.js')
+    );
 
     let tabContent = '';
     switch (this.currentTab) {
@@ -504,6 +676,7 @@ export class AgentPanel {
       case 'costs': tabContent = this.renderCostsTab(data); break;
       case 'memory': tabContent = this.renderMemoryTab(data); break;
       case 'livetools': tabContent = this.renderLiveToolsTab(); break;
+      case 'chat': tabContent = this.renderChatTab(); this.setupGatewayEvents(); break;
     }
 
     return `<!DOCTYPE html>
@@ -1049,6 +1222,28 @@ body {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* Chat tab */
+.chat-container { display: flex; flex-direction: column; height: calc(100vh - 120px); }
+.chat-toolbar { display: flex; gap: 8px; padding: 8px 0; }
+.chat-toolbar button { background: var(--bg2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 12px; cursor: pointer; font-size: 12px; }
+.chat-toolbar button:hover { background: var(--accent); color: var(--bg); }
+.chat-messages { flex: 1; overflow-y: auto; padding: 8px 0; display: flex; flex-direction: column; gap: 8px; }
+.chat-msg { padding: 8px 12px; border-radius: 8px; max-width: 85%; }
+.chat-msg-user { background: var(--accent); color: var(--bg); align-self: flex-end; }
+.chat-msg-assistant { background: var(--bg2); color: var(--text); align-self: flex-start; }
+.chat-msg-system { background: transparent; color: var(--dim); align-self: center; font-style: italic; font-size: 12px; }
+.chat-msg-role { font-size: 10px; opacity: 0.7; margin-bottom: 2px; }
+.chat-msg-content { font-size: 13px; line-height: 1.5; word-break: break-word; }
+.chat-msg-user .chat-msg-role { color: var(--bg); }
+.chat-loading { text-align: center; color: var(--dim); padding: 12px; animation: pulse 1.5s infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+.chat-input-row { display: flex; gap: 8px; padding: 8px 0; align-items: flex-end; }
+.chat-input { flex: 1; background: var(--bg2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-family: inherit; font-size: 13px; resize: none; outline: none; }
+.chat-input:focus { border-color: var(--accent); }
+.chat-send-btn { background: var(--accent); color: var(--bg); border: none; border-radius: 8px; padding: 8px 16px; cursor: pointer; font-size: 16px; }
+.chat-send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.chat-empty { text-align: center; color: var(--dim); padding: 40px; }
 </style>
 </head>
 <body>
