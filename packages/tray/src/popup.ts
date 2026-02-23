@@ -554,11 +554,16 @@
     isSendingFile = true;
     const file = pendingFile;
     const targetDialog = selectedDialogId;
-    console.log(`[popup] Sending file "${file.name}" to dialog ${targetDialog}`);
+    // Grab composer text as caption
+    const caption = composerInput.textContent?.trim() || '';
+    const currentReplyTo = replyTarget?.messageId;
+    console.log(`[popup] Sending file "${file.name}" to dialog ${targetDialog}, caption: "${caption}"`);
     hideFilePreview();
+    clearReplyTarget();
+    if (caption) composerInput.textContent = '';
     try {
       const base64 = await fileToBase64(file);
-      await api.sendFile(targetDialog, base64, file.name, file.type);
+      await api.sendFile(targetDialog, base64, file.name, file.type, caption || undefined);
     } catch (err) {
       console.error('[popup] File send failed:', err);
     } finally {
