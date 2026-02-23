@@ -103,6 +103,8 @@ export class TelegramService {
   private eventListeners: Set<EventListener> = new Set();
   private forumTopicsCache: Map<string, Api.ForumTopic[]> = new Map();
   private messagesCache: Map<string, { ts: number; data: MessageInfo[] }> = new Map();
+  private dialogsCache: { ts: number; data: DialogInfo[] } | null = null;
+  private profilePhotoCache: Map<string, { ts: number; data: { buffer: Buffer; mimeType: string } | null }> = new Map();
 
   isConnected(): boolean { return this.connected; }
   getClient(): TelegramClient | null { return this.client; }

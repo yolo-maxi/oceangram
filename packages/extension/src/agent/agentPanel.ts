@@ -633,11 +633,15 @@ export class AgentPanel {
       ? '<div class="chat-loading">⏳ Agent is thinking...</div>'
       : '';
 
+    const msgCount = this.chatMessages.filter(m => m.role !== 'system').length;
+    const sessionLabel = this.chatSessionKey ? `Session: ${this.chatSessionKey}` : 'Main session';
+
     return `
       <div class="chat-container">
         <div class="chat-toolbar">
           <button onclick="vscode.postMessage({command:'chatLoadHistory'})">📜 Load History</button>
           ${this.chatLoading ? '<button onclick="vscode.postMessage({command:\'chatAbort\'})">⛔ Abort</button>' : ''}
+          <span style="margin-left:auto;font-size:11px;color:var(--dim)">${this.esc(sessionLabel)} · ${msgCount} messages</span>
         </div>
         <div class="chat-messages" id="chatMessages">
           ${messagesHtml}
