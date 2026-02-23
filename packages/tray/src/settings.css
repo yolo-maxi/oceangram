@@ -193,10 +193,14 @@ html, body {
 .add-user {
   display: flex;
   gap: 8px;
+  min-width: 0;
 }
 
 .add-user select {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 8px;
