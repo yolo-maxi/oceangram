@@ -48,6 +48,20 @@
   const emptyState = document.getElementById('emptyState')!;
   const connectionBanner = document.getElementById('connectionBanner')!;
 
+  const contactAvatar = document.getElementById('contactAvatar')!;
+
+  function loadAvatar(entry: TabEntry): void {
+    const initial = (entry.displayName || '?').charAt(0).toUpperCase();
+    contactAvatar.innerHTML = `<span>${escapeHtml(initial)}</span>`;
+    // Try loading photo
+    const userId = entry.dialogId;
+    api.getProfilePhoto(userId).then((dataUrl: string | null) => {
+      if (dataUrl && selectedDialogId === entry.dialogId) {
+        contactAvatar.innerHTML = `<img src="${dataUrl}" alt="">`;
+      }
+    }).catch(() => { /* keep initial */ });
+  }
+
   function escapeHtml(str: string): string {
     const div = document.createElement('div');
     div.textContent = str;
@@ -155,6 +169,7 @@
       const hasUnread = (unreadCounts[entry.dialogId] || 0) > 0;
       return `
         <div class="tab${isActive ? ' active' : ''}${hasUnread ? ' has-unread' : ''}" data-dialog-id="${escapeHtml(entry.dialogId)}">
+          <span class="tab-avatar" id="tab-avatar-${escapeHtml(entry.dialogId)}">${escapeHtml((entry.displayName || '?').charAt(0).toUpperCase())}</span>
           ${escapeHtml(entry.displayName)}
           <span class="tab-badge"></span>
         </div>
@@ -188,6 +203,7 @@
 
     // Update contact bar (single mode)
     contactName.textContent = entry.displayName;
+    loadAvatar(entry);
 
     // Update tabs (multi mode)
     if (allTabs.length > 1) {
