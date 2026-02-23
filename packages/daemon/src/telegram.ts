@@ -60,6 +60,7 @@ export interface DialogInfo {
   name: string;
   lastMessage: string;
   lastMessageTime: number;
+  lastMessageOutgoing?: boolean;
   unreadCount: number;
   isForum: boolean;
   groupName?: string;
@@ -506,6 +507,7 @@ export class TelegramService {
             id: chatId, chatId, name,
             lastMessage: d.message?.message || '',
             lastMessageTime: d.message?.date || 0,
+            lastMessageOutgoing: d.message?.out || false,
             unreadCount: d.unreadCount || 0,
             isForum: true,
             hasPhoto,
@@ -517,6 +519,7 @@ export class TelegramService {
           id: chatId, chatId, name,
           lastMessage: d.message?.message || '',
           lastMessageTime: d.message?.date || 0,
+          lastMessageOutgoing: d.message?.out || false,
           unreadCount: d.unreadCount || 0,
           isForum: false,
           hasPhoto,

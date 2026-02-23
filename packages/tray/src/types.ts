@@ -20,6 +20,8 @@ export interface TelegramDialog {
   type?: 'user' | 'group' | 'channel' | 'supergroup';
   unreadCount?: number;
   lastMessage?: TelegramMessage;
+  lastMessageTime?: number;
+  lastMessageOutgoing?: boolean;
   photo?: string;
 }
 

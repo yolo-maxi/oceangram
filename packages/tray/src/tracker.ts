@@ -225,11 +225,9 @@ class MessageTracker extends EventEmitter {
 
     for (const d of dialogs) {
       const dialogId = String(d.id);
-      const lastMsg = d.lastMessage;
-      if (!lastMsg) continue;
-      if (!lastMsg.isOutgoing) continue;
+      if (!d.lastMessageOutgoing) continue;
 
-      const msgTime = lastMsg.date || lastMsg.timestamp || 0;
+      const msgTime = d.lastMessageTime || 0;
       // Convert to ms (daemon uses seconds)
       const msgTimeMs = msgTime < 1e12 ? msgTime * 1000 : msgTime;
       if (msgTimeMs < cutoff) continue;
