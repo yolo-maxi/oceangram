@@ -477,24 +477,43 @@
     });
   }
 
+  let isSendingFile = false;
+
   async function sendFileToChat(file: File): Promise<void> {
-    if (!selectedDialogId) return;
-    const base64 = await fileToBase64(file);
-    await api.sendFile(selectedDialogId, base64, file.name, file.type);
+    if (!selectedDialogId || isSendingFile) return;
+    isSendingFile = true;
+    const targetDialog = selectedDialogId; // capture at call time
+    console.log(`[popup] Sending file "${file.name}" to dialog ${targetDialog}`);
+    try {
+      const base64 = await fileToBase64(file);
+      await api.sendFile(targetDialog, base64, file.name, file.type);
+      // Visual feedback
+      const sendBtn = document.getElementById('sendBtn');
+      if (sendBtn) {
+        sendBtn.style.background = 'var(--green)';
+        setTimeout(() => { sendBtn.style.background = ''; }, 500);
+      }
+    } catch (err) {
+      console.error('[popup] File send failed:', err);
+    } finally {
+      isSendingFile = false;
+    }
   }
 
   // ── Paste images ──
 
   composerInput.addEventListener('paste', async (e: ClipboardEvent) => {
+    if (isSendingFile) return;
     const items = e.clipboardData?.items;
     if (!items) return;
 
     for (const item of Array.from(items)) {
       if (item.type.startsWith('image/')) {
         e.preventDefault();
+        e.stopPropagation();
         const file = item.getAsFile();
         if (file) await sendFileToChat(file);
-        return;
+        return; // only send first image
       }
     }
     // Non-image paste falls through to default text paste
