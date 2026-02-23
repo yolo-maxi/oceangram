@@ -1,6 +1,6 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { readRemoteFile, readRemoteDir, remoteFileExists, remoteFileStat, getOpenclawDir } from './remoteFs';
+import { readRemoteFile, readRemoteDir, remoteFileExists, remoteFileStat, getOpenclawDir } from '../services/remoteFs';
 
 // --- Types ---
 

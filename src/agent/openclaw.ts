@@ -1,7 +1,7 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { ToolCall, parseToolCallsFromJsonl } from './toolExecution';
-import { readRemoteFile, remoteFileExists, remoteFileStat, getOpenclawDir, watchRemoteFile } from './remoteFs';
+import { readRemoteFile, remoteFileExists, remoteFileStat, getOpenclawDir, watchRemoteFile } from '../services/remoteFs';
 
 export interface AgentSessionInfo {
   sessionKey: string;

@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { readRemoteFile, remoteFileExists, getOpenclawDir } from './remoteFs';
+import { readRemoteFile, remoteFileExists, getOpenclawDir } from '../services/remoteFs';
 
 export interface ToolCall {
   id: string;

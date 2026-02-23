@@ -1,9 +1,9 @@
 import * as vscode from 'vscode';
 import { TelegramService, ChatEvent, DialogInfo, ConnectionState, UserStatus, GroupMember, ChatInfoResult, ChatMember, SharedMediaItem } from './services/telegram';
 import { TelegramApiClient } from './services/telegramApi';
-import { getTelegramApi } from './extension';
-import { OpenClawService, AgentSessionInfo, AgentDetailedInfo } from './services/openclaw';
-import { ToolCall, getToolIcon, truncateParams, formatDuration, groupToolCallsByMessage, parseToolCallsFromText, messageHasToolCalls, EmbeddedToolCall, truncateString } from './services/toolExecution';
+import { getTelegramApi, isAgentEnabled } from './extension';
+import { OpenClawService, AgentSessionInfo, AgentDetailedInfo } from './agent/openclaw';
+import { ToolCall, getToolIcon, truncateParams, formatDuration, groupToolCallsByMessage, parseToolCallsFromText, messageHasToolCalls, EmbeddedToolCall, truncateString } from './agent/toolExecution';
 import { highlightMessageCodeBlocks, disposeHighlighter } from './services/highlighter';
 import { showSmartNotification } from './services/notifications';
 
@@ -418,16 +418,18 @@ export class ChatTab {
       }
     }, null, this.disposables);
 
-    // Start OpenClaw session polling if configured
-    const openclaw = getOpenClaw();
-    openclaw.initialize().then(async () => {
-      if (await openclaw.checkIsConfigured()) {
-        const { chatId: rawChatId, topicId } = TelegramService.parseDialogId(chatId);
-        openclaw.startPolling(rawChatId, topicId, (info) => {
-          this.panel.webview.postMessage({ type: 'agentInfo', info });
-        });
-      }
-    });
+    // Start OpenClaw session polling if configured and agent features enabled
+    if (isAgentEnabled()) {
+      const openclaw = getOpenClaw();
+      openclaw.initialize().then(async () => {
+        if (await openclaw.checkIsConfigured()) {
+          const { chatId: rawChatId, topicId } = TelegramService.parseDialogId(chatId);
+          openclaw.startPolling(rawChatId, topicId, (info) => {
+            this.panel.webview.postMessage({ type: 'agentInfo', info });
+          });
+        }
+      });
+    }
 
     // Subscribe to connection state changes
     const tgForState = getTelegram();
@@ -445,8 +447,10 @@ export class ChatTab {
       if (this.unsubscribeEvents) this.unsubscribeEvents();
       unsubConnState();
       unsubUserStatus();
-      const { chatId: rawChatId, topicId } = TelegramService.parseDialogId(this.chatId);
-      getOpenClaw().stopPolling(rawChatId, topicId);
+      if (isAgentEnabled()) {
+        const { chatId: rawChatId, topicId } = TelegramService.parseDialogId(this.chatId);
+        getOpenClaw().stopPolling(rawChatId, topicId);
+      }
       this.disposables.forEach(d => d.dispose());
     }, null, this.disposables);
 
@@ -734,6 +738,7 @@ export class ChatTab {
             }
             break;
           case 'getAgentDetails': {
+            if (!isAgentEnabled()) { break; }
             const openclaw = getOpenClaw();
             const { chatId: rawChatId, topicId: rawTopicId } = TelegramService.parseDialogId(this.chatId);
             const details = await openclaw.getDetailedSession(rawChatId, rawTopicId);
@@ -741,6 +746,7 @@ export class ChatTab {
             break;
           }
           case 'getToolCalls': {
+            if (!isAgentEnabled()) { break; }
             const oc = getOpenClaw();
             const { chatId: cId, topicId: tId } = TelegramService.parseDialogId(this.chatId);
             const toolCalls = await oc.getSessionToolCalls(cId, tId);

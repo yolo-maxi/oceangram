@@ -1,6 +1,6 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { readRemoteFile, readRemoteDir, remoteFileExists, remoteFileStat, getOpenclawDir, getMemoryDir } from './remoteFs';
+import { readRemoteFile, readRemoteDir, remoteFileExists, remoteFileStat, getOpenclawDir, getMemoryDir } from '../services/remoteFs';
 import type { OpenClawGatewayClient } from './openclawGateway';
 
 // --- Types ---

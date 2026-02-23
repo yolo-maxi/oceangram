@@ -8,7 +8,7 @@ import {
   getUniqueToolNames,
   ToolCallEntry,
   ParsedEntry,
-} from '../services/liveTools';
+} from '../agent/liveTools';
 
 // --- Sample JSONL lines ---
 

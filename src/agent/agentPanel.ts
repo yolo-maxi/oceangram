@@ -23,8 +23,8 @@ import {
   CronJobInfo,
   SubAgentInfo,
   MemoryFile,
-} from './services/agent';
-import { getGatewayClient } from './extension';
+} from './agent';
+import { getGatewayClient } from '../extension';
 import {
   ToolCallEntry,
   getActiveSessionId,
@@ -32,8 +32,8 @@ import {
   readToolCallsFromFile,
   getUniqueToolNames,
   filterByToolName,
-} from './services/liveTools';
-import { watchRemoteFile, remoteFileExists } from './services/remoteFs';
+} from './liveTools';
+import { watchRemoteFile, remoteFileExists } from '../services/remoteFs';
 
 export class AgentPanel {
   private static instance: AgentPanel | undefined;

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { WebSocketServer } from 'ws';
-import { OpenClawGatewayClient } from '../services/openclawGateway';
+import { OpenClawGatewayClient } from '../agent/openclawGateway';
 
 function createServer(): Promise<{ server: WebSocketServer; port: number }> {
   return new Promise((resolve) => {

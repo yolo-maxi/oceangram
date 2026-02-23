@@ -10,7 +10,7 @@ import {
   formatTokens,
   formatUptime,
   contextBarColor,
-} from '../services/agent';
+} from '../agent/agent';
 
 const SAMPLE_STATUS = `OpenClaw status
 

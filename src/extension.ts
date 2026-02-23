@@ -3,19 +3,24 @@ import { CommsPicker } from './commsPanel';
 import { KanbanPanel } from './kanbanPanel';
 import { SimplePanel } from './simplePanel';
 import { ResourcePanel } from './resourcePanel';
-import { AgentPanel } from './agentPanel';
+import { AgentPanel } from './agent/agentPanel';
 import { setStoragePath } from './services/telegram';
 import { DaemonManager } from './services/daemonManager';
 import { TelegramApiClient } from './services/telegramApi';
 import { showQuickPick } from './quickPick';
 import { showChatPicker } from './chatPicker';
-import { OpenClawGatewayClient } from './services/openclawGateway';
-import { AnnotationManager } from './services/annotations';
+import { OpenClawGatewayClient } from './agent/openclawGateway';
+import { AnnotationManager } from './agent/annotations';
 
 let daemonManager: DaemonManager | undefined;
 let telegramApi: TelegramApiClient | undefined;
 let gatewayClient: OpenClawGatewayClient | undefined;
 let annotationManager: AnnotationManager | undefined;
+
+/** Check if agent features are enabled via settings */
+export function isAgentEnabled(): boolean {
+  return vscode.workspace.getConfiguration('oceangram').get<boolean>('features.agent', true);
+}
 
 /** Get the shared TelegramApiClient (created on activate) */
 export function getTelegramApi(): TelegramApiClient | undefined {
@@ -54,52 +59,64 @@ export function activate(context: vscode.ExtensionContext) {
     console.error('[Oceangram] Daemon startup error:', err);
   });
 
-  // Initialize OpenClaw Gateway WS client
-  const gwUrl = vscode.workspace.getConfiguration('oceangram').get<string>('gatewayUrl') || 'ws://127.0.0.1:18789';
-  const gwToken = vscode.workspace.getConfiguration('oceangram').get<string>('gatewayToken') || '';
-  if (gwToken) {
-    gatewayClient = new OpenClawGatewayClient(gwUrl, gwToken);
-    context.subscriptions.push({ dispose: () => gatewayClient?.dispose() });
-    gatewayClient.connect().then(() => {
-      console.log('[Oceangram] Connected to OpenClaw Gateway WS');
-    }).catch(err => {
-      console.error('[Oceangram] Gateway WS connect failed:', err.message);
-    });
+  // --- Agent features (gated by oceangram.features.agent) ---
+  const agentEnabled = isAgentEnabled();
+
+  if (agentEnabled) {
+    // Initialize OpenClaw Gateway WS client
+    const gwUrl = vscode.workspace.getConfiguration('oceangram').get<string>('gatewayUrl') || 'ws://127.0.0.1:18789';
+    const gwToken = vscode.workspace.getConfiguration('oceangram').get<string>('gatewayToken') || '';
+    if (gwToken) {
+      gatewayClient = new OpenClawGatewayClient(gwUrl, gwToken);
+      context.subscriptions.push({ dispose: () => gatewayClient?.dispose() });
+      gatewayClient.connect().then(() => {
+        console.log('[Oceangram] Connected to OpenClaw Gateway WS');
+      }).catch(err => {
+        // Graceful degradation — gateway not available is fine
+        console.warn('[Oceangram] Gateway WS connect failed (agent features unavailable):', err.message);
+      });
+    } else {
+      console.log('[Oceangram] No gatewayToken configured, skipping Gateway WS');
+    }
+
+    // Initialize Annotation Manager
+    annotationManager = new AnnotationManager();
+    context.subscriptions.push(annotationManager);
+
+    // Wire gateway events to annotation manager
+    if (gatewayClient) {
+      // Listen for agent message events from the gateway
+      gatewayClient.on('event:chat.message', (data: any) => {
+        if (data?.role === 'assistant' && data?.content && annotationManager) {
+          const content = typeof data.content === 'string' ? data.content : String(data.content);
+          const created = annotationManager.processMessage(content);
+          if (created.length > 0) {
+            console.log(`[Oceangram] Created ${created.length} annotation(s) from agent message`);
+          }
+        }
+      });
+      // Also listen for generic message events
+      gatewayClient.on('event:message', (data: any) => {
+        if (data?.role === 'assistant' && data?.content && annotationManager) {
+          const content = typeof data.content === 'string' ? data.content : String(data.content);
+          const created = annotationManager.processMessage(content);
+          if (created.length > 0) {
+            console.log(`[Oceangram] Created ${created.length} annotation(s) from agent message`);
+          }
+        }
+      });
+    }
   } else {
-    console.log('[Oceangram] No gatewayToken configured, skipping Gateway WS');
+    console.log('[Oceangram] Agent features disabled via oceangram.features.agent setting');
   }
 
-  // Initialize Annotation Manager
-  annotationManager = new AnnotationManager();
-  context.subscriptions.push(annotationManager);
-
-  // Wire gateway events to annotation manager
-  if (gatewayClient) {
-    // Listen for agent message events from the gateway
-    gatewayClient.on('event:chat.message', (data: any) => {
-      if (data?.role === 'assistant' && data?.content && annotationManager) {
-        const content = typeof data.content === 'string' ? data.content : String(data.content);
-        const created = annotationManager.processMessage(content);
-        if (created.length > 0) {
-          console.log(`[Oceangram] Created ${created.length} annotation(s) from agent message`);
-        }
-      }
-    });
-    // Also listen for generic message events
-    gatewayClient.on('event:message', (data: any) => {
-      if (data?.role === 'assistant' && data?.content && annotationManager) {
-        const content = typeof data.content === 'string' ? data.content : String(data.content);
-        const created = annotationManager.processMessage(content);
-        if (created.length > 0) {
-          console.log(`[Oceangram] Created ${created.length} annotation(s) from agent message`);
-        }
-      }
-    });
-  }
-
-  // Clear Annotations command
+  // Clear Annotations command (always registered, graceful when disabled)
   context.subscriptions.push(
     vscode.commands.registerCommand('oceangram.clearAnnotations', () => {
+      if (!agentEnabled) {
+        vscode.window.showInformationMessage('Enable agent features in settings (oceangram.features.agent)');
+        return;
+      }
       if (annotationManager) {
         const count = annotationManager.count;
         annotationManager.clearAll();
@@ -108,9 +125,13 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // Toggle Annotations command
+  // Toggle Annotations command (always registered, graceful when disabled)
   context.subscriptions.push(
     vscode.commands.registerCommand('oceangram.toggleAnnotations', () => {
+      if (!agentEnabled) {
+        vscode.window.showInformationMessage('Enable agent features in settings (oceangram.features.agent)');
+        return;
+      }
       if (annotationManager) {
         const visible = annotationManager.toggle();
         vscode.window.showInformationMessage(
@@ -141,9 +162,13 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // Agent Status (Cmd+Shift+4)
+  // Agent Status (Cmd+Shift+4) — always registered, graceful when disabled
   context.subscriptions.push(
     vscode.commands.registerCommand('oceangram.openAgent', () => {
+      if (!agentEnabled) {
+        vscode.window.showInformationMessage('Enable agent features in settings (oceangram.features.agent)');
+        return;
+      }
       AgentPanel.createOrShow(context);
     })
   );
@@ -261,9 +286,14 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // Send to Agent — editor context menu
+  // Send to Agent — editor context menu (always registered, graceful when disabled)
   context.subscriptions.push(
     vscode.commands.registerCommand('oceangram.sendToAgent', async () => {
+      if (!agentEnabled) {
+        vscode.window.showInformationMessage('Enable agent features in settings (oceangram.features.agent)');
+        return;
+      }
+
       const editor = vscode.window.activeTextEditor;
       if (!editor || editor.selection.isEmpty) {
         vscode.window.showWarningMessage('Select some text first.');
@@ -298,51 +328,53 @@ export function activate(context: vscode.ExtensionContext) {
   // Auto-open chat picker
   CommsPicker.show(context);
 
-  // Cost ticker status bar item (TASK-038)
-  const costItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 50);
-  costItem.command = 'oceangram.openAgent';
-  costItem.tooltip = 'Oceangram: Today\'s estimated cost (click for details)';
-  costItem.text = '💰 $0.00 today';
-  costItem.show();
-  context.subscriptions.push(costItem);
+  // Cost ticker status bar item — only when agent features enabled
+  if (agentEnabled) {
+    const costItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 50);
+    costItem.command = 'oceangram.openAgent';
+    costItem.tooltip = 'Oceangram: Today\'s estimated cost (click for details)';
+    costItem.text = '💰 $0.00 today';
+    costItem.show();
+    context.subscriptions.push(costItem);
 
-  const updateCostTicker = async () => {
-    try {
-      const fs = require('fs');
-      const path = require('path');
-      const sessionsPath = path.join(
-        process.env.HOME || '~', '.openclaw', 'agents', 'main', 'sessions', 'sessions.json'
-      );
-      if (!fs.existsSync(sessionsPath)) { return; }
-      const data = JSON.parse(fs.readFileSync(sessionsPath, 'utf-8'));
-      const todayStart = new Date().setHours(0, 0, 0, 0);
-      const PRICING: Record<string, { input: number; output: number; cacheRead: number }> = {
-        'claude-opus-4-6': { input: 15, output: 75, cacheRead: 1.5 },
-        'claude-opus-4-5': { input: 15, output: 75, cacheRead: 1.5 },
-        'claude-sonnet-4-20250514': { input: 3, output: 15, cacheRead: 0.3 },
-        'default': { input: 15, output: 75, cacheRead: 1.5 },
-      };
-      let totalCost = 0;
-      for (const key of Object.keys(data)) {
-        const s = data[key];
-        if (!s.updatedAt || s.updatedAt < todayStart) { continue; }
-        const model = s.model || 'default';
-        const pricing = PRICING[model] || PRICING['default'];
-        const input = (s.inputTokens || 0) / 1_000_000;
-        const output = (s.outputTokens || 0) / 1_000_000;
-        const cacheReads = input * 0.8;
-        const freshInput = input * 0.2;
-        totalCost += freshInput * pricing.input + output * pricing.output + cacheReads * pricing.cacheRead;
+    const updateCostTicker = async () => {
+      try {
+        const fs = require('fs');
+        const path = require('path');
+        const sessionsPath = path.join(
+          process.env.HOME || '~', '.openclaw', 'agents', 'main', 'sessions', 'sessions.json'
+        );
+        if (!fs.existsSync(sessionsPath)) { return; }
+        const data = JSON.parse(fs.readFileSync(sessionsPath, 'utf-8'));
+        const todayStart = new Date().setHours(0, 0, 0, 0);
+        const PRICING: Record<string, { input: number; output: number; cacheRead: number }> = {
+          'claude-opus-4-6': { input: 15, output: 75, cacheRead: 1.5 },
+          'claude-opus-4-5': { input: 15, output: 75, cacheRead: 1.5 },
+          'claude-sonnet-4-20250514': { input: 3, output: 15, cacheRead: 0.3 },
+          'default': { input: 15, output: 75, cacheRead: 1.5 },
+        };
+        let totalCost = 0;
+        for (const key of Object.keys(data)) {
+          const s = data[key];
+          if (!s.updatedAt || s.updatedAt < todayStart) { continue; }
+          const model = s.model || 'default';
+          const pricing = PRICING[model] || PRICING['default'];
+          const input = (s.inputTokens || 0) / 1_000_000;
+          const output = (s.outputTokens || 0) / 1_000_000;
+          const cacheReads = input * 0.8;
+          const freshInput = input * 0.2;
+          totalCost += freshInput * pricing.input + output * pricing.output + cacheReads * pricing.cacheRead;
+        }
+        costItem.text = '💰 $' + totalCost.toFixed(2) + ' today';
+      } catch {
+        // silently ignore
       }
-      costItem.text = '💰 $' + totalCost.toFixed(2) + ' today';
-    } catch {
-      // silently ignore
-    }
-  };
+    };
 
-  updateCostTicker();
-  const costInterval = setInterval(updateCostTicker, 30000);
-  context.subscriptions.push({ dispose: () => clearInterval(costInterval) });
+    updateCostTicker();
+    const costInterval = setInterval(updateCostTicker, 30000);
+    context.subscriptions.push({ dispose: () => clearInterval(costInterval) });
+  }
 
   console.log('Oceangram activated — Cmd+Shift+1-4');
 }

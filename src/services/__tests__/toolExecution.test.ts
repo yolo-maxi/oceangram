@@ -6,7 +6,7 @@ import {
   truncateParams,
   truncateString,
   formatDuration
-} from '../toolExecution';
+} from '../../agent/toolExecution';
 
 describe('toolExecution', () => {
   describe('getToolIcon', () => {

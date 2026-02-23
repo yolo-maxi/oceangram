@@ -5,7 +5,7 @@ import {
   formatDuration,
   getToolIcon,
   groupToolCallsByMessage,
-} from '../services/toolExecution';
+} from '../agent/toolExecution';
 
 describe('parseToolCallsFromJsonl', () => {
   it('parses a simple tool call with result', () => {

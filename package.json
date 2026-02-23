@@ -188,6 +188,11 @@
           "type": "boolean",
           "default": false,
           "description": "Play a sound for high-priority notifications (direct mentions)."
+        },
+        "oceangram.features.agent": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable OpenClaw agent integration (session status, cost tracking, inline annotations)"
         }
       }
     },
