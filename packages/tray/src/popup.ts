@@ -419,12 +419,112 @@
     });
   }
 
+  // ── GitHub PR detection ──
+
+  let prCardCounter = 0;
+
+  function detectGitHubPRs(html: string): string {
+    return html.replace(
+      /<a href="(https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+))[^"]*"[^>]*>[^<]*<\/a>/g,
+      (_match, url: string, owner: string, repo: string, prNum: string) => {
+        const cardId = `pr-card-${++prCardCounter}`;
+        const prNumber = parseInt(prNum, 10);
+        // Schedule async fetch
+        setTimeout(() => loadPRCard(cardId, owner, repo, prNumber, url), 0);
+        // Return placeholder card
+        return `<div class="gh-pr-card loading" id="${cardId}">` +
+          `<div class="gh-pr-header">🔀 PR #${prNum} · ${escapeHtml(owner)}/${escapeHtml(repo)}</div>` +
+          `<div class="gh-pr-title">Loading...</div>` +
+          `</div>`;
+      }
+    );
+  }
+
+  async function loadPRCard(cardId: string, owner: string, repo: string, prNumber: number, url: string): Promise<void> {
+    const card = document.getElementById(cardId);
+    if (!card) return;
+
+    try {
+      const pr = await api.fetchGitHubPR(owner, repo, prNumber);
+      const statusClass = pr.merged ? 'merged' : pr.state === 'closed' ? 'closed' : 'open';
+      const statusLabel = pr.merged ? 'Merged' : pr.state === 'closed' ? 'Closed' : 'Open';
+      const showMerge = pr.state === 'open' && !pr.merged;
+
+      card.classList.remove('loading');
+      card.classList.add(statusClass);
+      card.innerHTML =
+        `<div class="gh-pr-header">🔀 PR #${pr.number} · ${escapeHtml(owner)}/${escapeHtml(repo)}</div>` +
+        `<div class="gh-pr-title">${escapeHtml(pr.title)}</div>` +
+        `<div class="gh-pr-meta">` +
+          `by @${escapeHtml(pr.user.login)} · ` +
+          `<span class="gh-pr-additions">+${pr.additions}</span> ` +
+          `<span class="gh-pr-deletions">-${pr.deletions}</span> · ` +
+          `<span class="gh-pr-status ${statusClass}">${statusLabel}</span>` +
+        `</div>` +
+        `<div class="gh-pr-actions">` +
+          `<a class="gh-pr-btn view" href="${escapeHtml(url)}" target="_blank" rel="noopener">View</a>` +
+          (showMerge ? `<button class="gh-pr-btn merge" data-owner="${escapeHtml(owner)}" data-repo="${escapeHtml(repo)}" data-pr="${pr.number}">Merge</button>` : '') +
+        `</div>`;
+
+      // Bind merge button
+      const mergeBtn = card.querySelector('.gh-pr-btn.merge') as HTMLButtonElement | null;
+      if (mergeBtn) {
+        mergeBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          mergeBtn.disabled = true;
+          mergeBtn.textContent = 'Merging...';
+          try {
+            const result = await api.mergeGitHubPR(owner, repo, prNumber);
+            if (result.merged) {
+              card.classList.remove('open');
+              card.classList.add('merged');
+              const statusEl = card.querySelector('.gh-pr-status');
+              if (statusEl) {
+                statusEl.className = 'gh-pr-status merged';
+                statusEl.textContent = 'Merged';
+              }
+              mergeBtn.remove();
+            } else {
+              mergeBtn.textContent = 'Failed';
+              mergeBtn.title = result.message;
+              setTimeout(() => {
+                mergeBtn.textContent = 'Merge';
+                mergeBtn.disabled = false;
+              }, 2000);
+            }
+          } catch {
+            mergeBtn.textContent = 'Error';
+            setTimeout(() => {
+              mergeBtn.textContent = 'Merge';
+              mergeBtn.disabled = false;
+            }, 2000);
+          }
+        });
+      }
+
+      // Prevent card clicks from triggering reply
+      card.addEventListener('click', (e) => e.stopPropagation());
+    } catch {
+      // API error — show basic link card
+      card.classList.remove('loading');
+      card.classList.add('error');
+      card.innerHTML =
+        `<div class="gh-pr-header">🔀 PR #${prNumber} · ${escapeHtml(owner)}/${escapeHtml(repo)}</div>` +
+        `<div class="gh-pr-actions">` +
+          `<a class="gh-pr-btn view" href="${escapeHtml(url)}" target="_blank" rel="noopener">View on GitHub</a>` +
+        `</div>`;
+      card.addEventListener('click', (e) => e.stopPropagation());
+    }
+  }
+
   // ── Formatting ──
 
   function formatText(text: string): string {
     if (!text) return '';
     let html = escapeHtml(text);
     html = html.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+    // Replace GitHub PR links with rich cards
+    html = detectGitHubPRs(html);
     html = html.replace(/```([\s\S]+?)```/g, '<pre>$1</pre>');
     html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
     html = html.replace(/(?<!\*)\*([^*]+?)\*(?!\*)/g, '<em>$1</em>');

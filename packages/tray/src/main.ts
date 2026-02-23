@@ -2,6 +2,9 @@
 import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, Notification, screen, IpcMainEvent, IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron';
 import path from 'path';
 import http from 'http';
+import https from 'https';
+import fs from 'fs';
+import os from 'os';
 import { DaemonManager } from './daemonManager';
 import { NewMessageEvent, AppSettings, WhitelistEntry, TelegramDialog } from './types';
 
@@ -9,10 +12,12 @@ import { NewMessageEvent, AppSettings, WhitelistEntry, TelegramDialog } from './
 type DaemonModule = typeof import('./daemon');
 type WhitelistModule = typeof import('./whitelist');
 type TrackerModule = typeof import('./tracker');
+type OpenClawModule = typeof import('./openclaw');
 
 let daemon: DaemonModule | null = null;
 let whitelist: WhitelistModule | null = null;
 let tracker: TrackerModule | null = null;
+let openclaw: OpenClawModule | null = null;
 
 // Globals
 let tray: Tray | null = null;
@@ -20,6 +25,50 @@ let settingsWindow: BrowserWindow | null = null;
 let loginWindow: BrowserWindow | null = null;
 let popupWindow: BrowserWindow | null = null;
 const daemonManager = new DaemonManager();
+
+// GitHub token (optional, read from ~/.oceangram/github-token)
+let githubToken: string | null = null;
+try {
+  const tokenPath = path.join(os.homedir(), '.oceangram', 'github-token');
+  if (fs.existsSync(tokenPath)) {
+    githubToken = fs.readFileSync(tokenPath, 'utf-8').trim();
+    if (!githubToken) githubToken = null;
+    console.log('[main] GitHub token loaded');
+  }
+} catch {
+  // No token — that's fine, merge button just won't show
+}
+
+// GitHub API helper
+function githubAPIRequest(method: string, apiPath: string, body?: string): Promise<{ status: number; data: string }> {
+  return new Promise((resolve, reject) => {
+    const headers: Record<string, string> = {
+      'User-Agent': 'Oceangram',
+      'Accept': 'application/vnd.github.v3+json',
+    };
+    if (githubToken) {
+      headers['Authorization'] = `token ${githubToken}`;
+    }
+    if (body) {
+      headers['Content-Type'] = 'application/json';
+      headers['Content-Length'] = String(Buffer.byteLength(body));
+    }
+    const req = https.request({
+      hostname: 'api.github.com',
+      path: apiPath,
+      method,
+      headers,
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk: Buffer) => data += chunk);
+      res.on('end', () => resolve({ status: res.statusCode || 0, data }));
+    });
+    req.on('error', reject);
+    req.setTimeout(10000, () => { req.destroy(); reject(new Error('GitHub API timeout')); });
+    if (body) req.write(body);
+    req.end();
+  });
+}
 
 // ── App setup ──
 
@@ -104,6 +153,7 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   if (daemon) daemon.stop();
   if (tracker) tracker.stop();
+  if (openclaw) openclaw.stop();
   daemonManager.stop();
 });
 
@@ -166,6 +216,7 @@ function initializeApp(): void {
   daemon = require('./daemon') as DaemonModule;
   whitelist = require('./whitelist') as WhitelistModule;
   tracker = require('./tracker') as TrackerModule;
+  openclaw = require('./openclaw') as OpenClawModule;
 
   // Setup
   setupIPC();
@@ -173,6 +224,9 @@ function initializeApp(): void {
   // Start daemon connection & message tracking
   daemon.start();
   tracker.start();
+
+  // Start OpenClaw (feature-flagged — no-op if disabled)
+  openclaw.start();
 
   // Update tray based on events
   daemon.on('connection-changed', (connected: boolean) => {
@@ -531,6 +585,31 @@ function setupIPC(): void {
     return tracker!.getActiveChats();
   });
 
+  // OpenClaw AI enrichments (feature-flagged)
+  ipcMain.handle('openclaw-enabled', () => {
+    return openclaw ? openclaw.isEnabled && openclaw.connected : false;
+  });
+
+  ipcMain.handle('openclaw-request-summary', async (_: IpcMainInvokeEvent, messages: string[]) => {
+    if (!openclaw || !openclaw.isEnabled || !openclaw.connected) return null;
+    try {
+      return await openclaw.requestSummary(messages);
+    } catch (err) {
+      console.error('[openclaw] Summary request failed:', err);
+      return null;
+    }
+  });
+
+  ipcMain.handle('openclaw-request-replies', async (_: IpcMainInvokeEvent, lastMessages: string[]) => {
+    if (!openclaw || !openclaw.isEnabled || !openclaw.connected) return null;
+    try {
+      return await openclaw.requestReplySuggestions(lastMessages);
+    } catch (err) {
+      console.error('[openclaw] Reply suggestions failed:', err);
+      return null;
+    }
+  });
+
   // Close popup (from renderer)
   ipcMain.on('close-popup', (event: IpcMainEvent) => {
     const win = BrowserWindow.fromWebContents(event.sender);
@@ -542,5 +621,47 @@ function setupIPC(): void {
   // Open settings from renderer
   ipcMain.on('open-settings', () => {
     openSettings();
+  });
+
+  // GitHub PR — fetch PR details
+  ipcMain.handle('fetch-github-pr', async (_: IpcMainInvokeEvent, owner: string, repo: string, prNumber: number) => {
+    try {
+      const result = await githubAPIRequest('GET', `/repos/${owner}/${repo}/pulls/${prNumber}`);
+      if (result.status === 200) {
+        const pr = JSON.parse(result.data);
+        return {
+          number: pr.number,
+          title: pr.title,
+          state: pr.state,
+          merged: pr.merged || false,
+          user: { login: pr.user?.login || 'unknown' },
+          additions: pr.additions || 0,
+          deletions: pr.deletions || 0,
+          html_url: pr.html_url,
+        };
+      }
+      throw new Error(`GitHub API returned ${result.status}`);
+    } catch (err) {
+      console.error('[main] GitHub PR fetch error:', err);
+      throw err;
+    }
+  });
+
+  // GitHub PR — merge
+  ipcMain.handle('merge-github-pr', async (_: IpcMainInvokeEvent, owner: string, repo: string, prNumber: number) => {
+    if (!githubToken) {
+      return { merged: false, message: 'No GitHub token configured' };
+    }
+    try {
+      const result = await githubAPIRequest('PUT', `/repos/${owner}/${repo}/pulls/${prNumber}/merge`, JSON.stringify({ merge_method: 'merge' }));
+      const data = JSON.parse(result.data);
+      if (result.status === 200) {
+        return { merged: true, message: data.message || 'Pull request merged' };
+      }
+      return { merged: false, message: data.message || `Merge failed (${result.status})` };
+    } catch (err) {
+      console.error('[main] GitHub PR merge error:', err);
+      return { merged: false, message: String(err) };
+    }
   });
 }

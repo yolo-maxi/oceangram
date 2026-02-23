@@ -516,6 +516,127 @@ html, body {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* ── GitHub PR cards ── */
+.gh-pr-card {
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 4px 0;
+  font-size: 12px;
+  cursor: default;
+  transition: border-color 0.15s;
+}
+
+.gh-pr-card.loading {
+  border-left: 3px solid var(--text-dim);
+}
+
+.gh-pr-card.open {
+  border-left: 3px solid var(--green);
+}
+
+.gh-pr-card.closed {
+  border-left: 3px solid var(--red);
+}
+
+.gh-pr-card.merged {
+  border-left: 3px solid var(--accent);
+}
+
+.gh-pr-card.error {
+  border-left: 3px solid var(--text-dim);
+}
+
+.gh-pr-header {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 2px;
+}
+
+.gh-pr-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 3px;
+  line-height: 1.3;
+}
+
+.gh-pr-meta {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.gh-pr-additions {
+  color: var(--green);
+  font-weight: 600;
+}
+
+.gh-pr-deletions {
+  color: var(--red);
+  font-weight: 600;
+}
+
+.gh-pr-status {
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.3px;
+}
+
+.gh-pr-status.open {
+  color: var(--green);
+}
+
+.gh-pr-status.closed {
+  color: var(--red);
+}
+
+.gh-pr-status.merged {
+  color: var(--accent);
+}
+
+.gh-pr-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.gh-pr-btn {
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  text-decoration: none;
+  transition: background 0.15s, opacity 0.15s;
+  font-family: inherit;
+}
+
+.gh-pr-btn.view {
+  background: rgba(255,255,255,0.08);
+  color: var(--text);
+}
+
+.gh-pr-btn.view:hover {
+  background: rgba(255,255,255,0.14);
+}
+
+.gh-pr-btn.merge {
+  background: var(--green);
+  color: #fff;
+}
+
+.gh-pr-btn.merge:hover {
+  opacity: 0.85;
+}
+
+.gh-pr-btn.merge:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* Drag-and-drop overlay */
 .app.drag-over::after {
   content: "Drop file to send";

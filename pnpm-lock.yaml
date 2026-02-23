@@ -87,9 +87,6 @@ importers:
 
   packages/tray:
     dependencies:
-      better-sqlite3:
-        specifier: ^12.6.2
-        version: 12.6.2
       ws:
         specifier: ^8.19.0
         version: 8.19.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)

@@ -11,6 +11,22 @@ import {
   NewMessageEvent,
 } from './types';
 
+interface GitHubPR {
+  number: number;
+  title: string;
+  state: string; // 'open' | 'closed'
+  merged: boolean;
+  user: { login: string };
+  additions: number;
+  deletions: number;
+  html_url: string;
+}
+
+interface GitHubMergeResult {
+  merged: boolean;
+  message: string;
+}
+
 interface OceangramAPI {
   // Chat messages
   getMessages(dialogId: string, limit?: number): Promise<TelegramMessage[]>;
@@ -61,6 +77,15 @@ interface OceangramAPI {
   // Login
   loginSuccess(): void;
   closeLogin?(): void;
+
+  // GitHub PR
+  fetchGitHubPR(owner: string, repo: string, prNumber: number): Promise<GitHubPR>;
+  mergeGitHubPR(owner: string, repo: string, prNumber: number): Promise<GitHubMergeResult>;
+
+  // OpenClaw AI enrichments (feature-flagged)
+  openclawEnabled(): Promise<boolean>;
+  openclawRequestSummary(messages: string[]): Promise<string | null>;
+  openclawRequestReplies(lastMessages: string[]): Promise<string[] | null>;
 }
 
 declare global {

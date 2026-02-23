@@ -96,4 +96,18 @@ contextBridge.exposeInMainWorld('oceangram', {
 
   // Login
   loginSuccess: (): void => ipcRenderer.send('login-success'),
+
+  // GitHub PR
+  fetchGitHubPR: (owner: string, repo: string, prNumber: number): Promise<unknown> =>
+    ipcRenderer.invoke('fetch-github-pr', owner, repo, prNumber),
+  mergeGitHubPR: (owner: string, repo: string, prNumber: number): Promise<unknown> =>
+    ipcRenderer.invoke('merge-github-pr', owner, repo, prNumber),
+
+  // OpenClaw AI enrichments (feature-flagged)
+  openclawEnabled: (): Promise<boolean> =>
+    ipcRenderer.invoke('openclaw-enabled'),
+  openclawRequestSummary: (messages: string[]): Promise<string | null> =>
+    ipcRenderer.invoke('openclaw-request-summary', messages),
+  openclawRequestReplies: (lastMessages: string[]): Promise<string[] | null> =>
+    ipcRenderer.invoke('openclaw-request-replies', lastMessages),
 });
