@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="settings.css">
+  <title>Oceangram — Settings</title>
+</head>
+<body>
+  <div class="app">
+    <div class="header">
+      <h1>⚙️ Settings</h1>
+      <button class="header-close" id="closeBtn" title="Close">✕</button>
+    </div>
+
+    <div class="content">
+      <!-- Daemon Status -->
+      <div class="section">
+        <div class="section-title">Connection</div>
+        <div class="status-card">
+          <div class="status-dot" id="statusDot"></div>
+          <div>
+            <div class="status-text" id="statusText">Checking...</div>
+            <div class="status-detail" id="statusDetail">localhost:7777</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Whitelist -->
+      <div class="section">
+        <div class="section-title">Whitelisted Contacts</div>
+        <div class="whitelist-list" id="whitelistList">
+          <div class="whitelist-empty">No contacts whitelisted</div>
+        </div>
+        <div class="add-user">
+          <select id="dialogSelect">
+            <option value="">— Select a contact to add —</option>
+          </select>
+          <button class="add-btn" id="addBtn" disabled>Add</button>
+        </div>
+      </div>
+
+      <!-- General Settings -->
+      <div class="section">
+        <div class="section-title">General</div>
+
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Always on Top</div>
+            <div class="setting-desc">Keep bubbles and popups above other windows</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="alwaysOnTop" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Notifications</div>
+            <div class="setting-desc">Show system notifications for new messages</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="showNotifications" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Bubble Position</div>
+            <div class="setting-desc">Which screen edge to show bubbles on</div>
+          </div>
+          <select class="setting-select" id="bubblePosition">
+            <option value="right">Right</option>
+            <option value="left">Left</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      Oceangram Tray v0.1.0 — connects to oceangram-daemon
+    </div>
+  </div>
+
+  <script src="../dist/settings.js"></script>
+</body>
+</html>

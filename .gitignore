@@ -1,10 +1,18 @@
-out/
 node_modules/
-.vscode-test/
-*.vsix
+dist/
 out/
+*.vsix
 .next/
+.vscode-test/
+*.tsbuildinfo
+*.dmg
+*.zip
+.DS_Store
+Thumbs.db
 
 # Credentials
 .oceangram/
 config.json
+
+# Daemon bundle (built artifact)
+resources/daemon-bundle.js

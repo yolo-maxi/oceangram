@@ -1,0 +1,76 @@
+{
+  "name": "oceangram-tray",
+  "version": "0.1.0",
+  "description": "Minimal Mac menu bar Telegram client — floating avatar bubbles for whitelisted contacts",
+  "main": "dist/main.js",
+  "scripts": {
+    "compile": "tsc",
+    "start": "tsc && electron dist/main.js",
+    "dev": "tsc && electron dist/main.js",
+    "build:daemon": "node build-daemon.mjs",
+    "build": "pnpm run build:daemon && pnpm run compile && electron-builder --mac",
+    "build:mac": "pnpm run build:daemon && pnpm run compile && electron-builder --mac",
+    "build:dir": "pnpm run build:daemon && pnpm run compile && electron-builder --mac --dir"
+  },
+  "build": {
+    "appId": "com.oceangram.tray",
+    "productName": "Oceangram",
+    "mac": {
+      "category": "public.app-category.social-networking",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "src/assets/icon.png",
+      "darkModeSupport": true
+    },
+    "dmg": {
+      "title": "Oceangram",
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
+    "extraResources": [
+      {
+        "from": "resources/daemon-bundle.js",
+        "to": "daemon-bundle.js"
+      }
+    ],
+    "files": [
+      "dist/**/*",
+      "src/**/*.html",
+      "src/**/*.css",
+      "src/assets/**/*",
+      "!src/**/*.ts",
+      "!src/**/*.js"
+    ]
+  },
+  "author": "Ocean Vael",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^25.3.0",
+    "@types/ws": "^8.18.1",
+    "electron": "^40.6.0",
+    "electron-builder": "^26.8.1",
+    "esbuild": "^0.27.3",
+    "typescript": "^5.9.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild"
+    ]
+  },
+  "dependencies": {
+    "ws": "^8.19.0"
+  }
+}

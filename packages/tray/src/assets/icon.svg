@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1e1b4b"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#c084fc"/>
+      <stop offset="100%" stop-color="#a855f7"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background rounded square -->
+  <rect x="16" y="16" width="480" height="480" rx="100" ry="100" fill="url(#bg)"/>
+
+  <!-- Ocean waves bottom -->
+  <path d="M 16 380 Q 80 340, 150 370 Q 220 400, 290 360 Q 360 320, 430 360 Q 470 380, 496 365 L 496 396 Q 496 496, 396 496 L 116 496 Q 16 496, 16 396 Z" fill="#1e3a5f" opacity="0.5"/>
+  <path d="M 16 400 Q 100 370, 180 400 Q 260 430, 340 395 Q 420 360, 496 390 L 496 396 Q 496 496, 396 496 L 116 496 Q 16 496, 16 396 Z" fill="#1e3a5f" opacity="0.7"/>
+  <path d="M 16 430 Q 110 405, 200 435 Q 290 465, 380 430 Q 440 405, 496 420 L 496 396 Q 496 496, 396 496 L 116 496 Q 16 496, 16 396 Z" fill="#1e3a5f" opacity="0.9"/>
+
+  <!-- Speech bubble -->
+  <rect x="120" y="100" width="272" height="180" rx="30" ry="30" fill="url(#accent)" opacity="0.15" stroke="#c084fc" stroke-width="3"/>
+  <!-- Bubble tail -->
+  <polygon points="200,280 230,320 260,280" fill="url(#accent)" opacity="0.15" stroke="#c084fc" stroke-width="3" stroke-linejoin="round"/>
+  <line x1="200" y1="280" x2="260" y2="280" stroke="#1e1b4b" stroke-width="5"/>
+
+  <!-- Coral emoji-style 🪸 -->
+  <!-- Main stem -->
+  <line x1="256" y1="250" x2="256" y2="155" stroke="#fb7185" stroke-width="8" stroke-linecap="round"/>
+  <!-- Left branch -->
+  <line x1="256" y1="200" x2="215" y2="170" stroke="#fb7185" stroke-width="7" stroke-linecap="round"/>
+  <line x1="215" y1="170" x2="200" y2="145" stroke="#fb7185" stroke-width="5" stroke-linecap="round"/>
+  <line x1="215" y1="170" x2="195" y2="165" stroke="#fb7185" stroke-width="5" stroke-linecap="round"/>
+  <!-- Right branch -->
+  <line x1="256" y1="190" x2="300" y2="165" stroke="#fb7185" stroke-width="7" stroke-linecap="round"/>
+  <line x1="300" y1="165" x2="318" y2="140" stroke="#fb7185" stroke-width="5" stroke-linecap="round"/>
+  <line x1="300" y1="165" x2="320" y2="162" stroke="#fb7185" stroke-width="5" stroke-linecap="round"/>
+  <!-- Tips -->
+  <circle cx="256" cy="150" r="6" fill="#fb923c"/>
+  <circle cx="200" cy="142" r="5" fill="#fb923c"/>
+  <circle cx="195" cy="162" r="4" fill="#fb923c"/>
+  <circle cx="318" cy="137" r="5" fill="#fb923c"/>
+  <circle cx="320" cy="159" r="4" fill="#fb923c"/>
+
+  <!-- Sparkle dots -->
+  <circle cx="150" cy="140" r="4" fill="#c084fc" opacity="0.6"/>
+  <circle cx="370" cy="130" r="3" fill="#c084fc" opacity="0.5"/>
+  <circle cx="160" cy="240" r="3" fill="#c084fc" opacity="0.4"/>
+  <circle cx="350" cy="250" r="3.5" fill="#c084fc" opacity="0.45"/>
+</svg>

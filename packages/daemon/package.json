@@ -1,0 +1,36 @@
+{
+  "name": "oceangram-daemon",
+  "version": "0.1.0",
+  "description": "Standalone Telegram client daemon — exposes gramjs over HTTP + WebSocket",
+  "main": "dist/cli.js",
+  "bin": {
+    "oceangram-daemon": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli.js start",
+    "dev": "tsc --watch"
+  },
+  "keywords": [
+    "telegram",
+    "gramjs",
+    "daemon"
+  ],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.28.2",
+  "dependencies": {
+    "@fastify/cors": "^11.2.0",
+    "@fastify/websocket": "^11.2.0",
+    "big-integer": "^1.6.52",
+    "fastify": "^5.7.4",
+    "input": "^1.0.1",
+    "telegram": "^2.26.22"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.0",
+    "@types/ws": "^8.18.1",
+    "esbuild": "^0.27.3",
+    "typescript": "^5.9.3"
+  }
+}
