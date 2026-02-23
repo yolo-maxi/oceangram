@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="popup.css">
+  <title>Oceangram</title>
+</head>
+<body>
+  <div class="app">
+    <div class="connection-banner" id="connectionBanner">
+      Disconnected from daemon
+    </div>
+
+    <div class="header">
+      <div class="header-avatar" id="headerAvatar">
+        <span id="headerLetter">?</span>
+        <img id="headerAvatarImg" style="display:none;">
+      </div>
+      <div class="header-info">
+        <div class="header-name" id="headerName">Loading...</div>
+        <div class="header-status" id="headerStatus">connecting</div>
+      </div>
+      <button class="header-close" id="closeBtn" title="Close">✕</button>
+    </div>
+
+    <div class="messages" id="messages">
+      <div class="loading" id="loadingState">Loading messages...</div>
+    </div>
+
+    <div class="composer">
+      <textarea
+        class="composer-input"
+        id="composerInput"
+        placeholder="Message..."
+        rows="1"
+      ></textarea>
+      <button class="composer-send" id="sendBtn" title="Send">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+          <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" fill="currentColor"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <script src="../dist/popup.js"></script>
+</body>
+</html>

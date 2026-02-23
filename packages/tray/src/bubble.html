@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 64px;
+      height: 64px;
+      overflow: hidden;
+      background: transparent;
+      user-select: none;
+      cursor: pointer;
+    }
+
+    .bubble {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      overflow: hidden;
+      position: relative;
+      background: #2d2d2d;
+      border: 2px solid #3a3a3a;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      animation: bubbleIn 0.3s ease-out;
+      -webkit-app-region: drag;
+    }
+
+    .bubble:hover {
+      transform: scale(1.1);
+      box-shadow: 0 4px 20px rgba(135, 116, 225, 0.4);
+      border-color: #8774e1;
+    }
+
+    .bubble:active {
+      transform: scale(0.95);
+    }
+
+    .avatar {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      border-radius: 50%;
+    }
+
+    .letter {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      font-weight: 600;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro', sans-serif;
+    }
+
+    .badge {
+      position: absolute;
+      top: -2px;
+      right: -2px;
+      min-width: 22px;
+      height: 22px;
+      border-radius: 11px;
+      background: #e53935;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 5px;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      border: 2px solid #212121;
+      animation: badgePop 0.3s ease-out;
+      -webkit-app-region: no-drag;
+    }
+
+    .badge.hidden { display: none; }
+
+    @keyframes bubbleIn {
+      from { opacity: 0; transform: scale(0.3); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    @keyframes badgePop {
+      0% { transform: scale(0); }
+      70% { transform: scale(1.2); }
+      100% { transform: scale(1); }
+    }
+  </style>
+</head>
+<body>
+  <div class="bubble" id="bubble">
+    <div class="letter" id="letter"></div>
+    <img class="avatar" id="avatar" style="display:none;">
+    <div class="badge hidden" id="badge">1</div>
+  </div>
+
+  <script>
+    const COLORS = ['#e53935','#d81b60','#8e24aa','#5e35b1','#3949ab','#1e88e5','#00897b','#43a047','#f4511e','#6d4c41'];
+
+    let currentUserId = null;
+
+    function getColor(id) {
+      let hash = 0;
+      const s = String(id);
+      for (let i = 0; i < s.length; i++) hash = ((hash << 5) - hash) + s.charCodeAt(i);
+      return COLORS[Math.abs(hash) % COLORS.length];
+    }
+
+    function updateBadge(count) {
+      const badge = document.getElementById('badge');
+      if (count > 1) {
+        badge.textContent = count > 99 ? '99+' : count;
+        badge.classList.remove('hidden');
+      } else {
+        badge.classList.add('hidden');
+      }
+    }
+
+    // Init from main process
+    window.oceangram.onBubbleInit((data) => {
+      currentUserId = data.userId;
+      const letter = document.getElementById('letter');
+      const avatar = document.getElementById('avatar');
+
+      const initial = (data.displayName || '?')[0].toUpperCase();
+      letter.textContent = initial;
+      letter.style.background = getColor(data.userId);
+
+      if (data.avatar) {
+        avatar.src = data.avatar;
+        avatar.style.display = 'block';
+        letter.style.display = 'none';
+        avatar.onerror = () => {
+          avatar.style.display = 'none';
+          letter.style.display = 'flex';
+        };
+      }
+
+      updateBadge(data.count);
+    });
+
+    // Update from main process
+    window.oceangram.onBubbleUpdate((data) => {
+      updateBadge(data.count);
+    });
+
+    // Click → open chat popup
+    document.getElementById('bubble').addEventListener('click', (e) => {
+      e.preventDefault();
+      if (currentUserId) {
+        window.oceangram.bubbleClicked(currentUserId);
+      }
+    });
+  </script>
+</body>
+</html>

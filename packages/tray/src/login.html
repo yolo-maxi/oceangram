@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Oceangram — Login</title>
+  <link rel="stylesheet" href="login.css">
+</head>
+<body>
+  <div class="titlebar">
+    <h1>🪸 Oceangram</h1>
+    <button class="close-btn" id="close-btn">✕</button>
+  </div>
+
+  <div class="content">
+    <div class="logo">🐙</div>
+    <p class="subtitle">Sign in to your Telegram account</p>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="phone">Phone</button>
+      <button class="tab" data-tab="qr">QR Code</button>
+    </div>
+
+    <!-- Phone login -->
+    <div id="phone-section">
+      <div class="step active" id="step-phone">
+        <label>Phone Number</label>
+        <input type="tel" id="phone-input" placeholder="+1234567890" autocomplete="tel">
+        <button class="primary" id="send-code-btn">Send Code</button>
+        <div class="error" id="phone-error"></div>
+        <div class="status" id="phone-status"></div>
+      </div>
+
+      <div class="step" id="step-code">
+        <label>Verification Code</label>
+        <input type="text" id="code-input" placeholder="12345" maxlength="6" autocomplete="one-time-code">
+        <button class="primary" id="verify-code-btn">Verify</button>
+        <div class="error" id="code-error"></div>
+      </div>
+
+      <div class="step" id="step-2fa">
+        <label>Two-Factor Password</label>
+        <input type="password" id="password-input" placeholder="Your 2FA password">
+        <button class="primary" id="verify-2fa-btn">Submit</button>
+        <div class="error" id="2fa-error"></div>
+      </div>
+    </div>
+
+    <!-- QR login -->
+    <div id="qr-section" style="display: none;">
+      <div id="qr-container">
+        <div class="spinner" id="qr-loading"></div>
+        <div id="qr-display" style="display: none;"></div>
+        <div class="qr-instructions">
+          <ol>
+            <li>Open Telegram on your phone</li>
+            <li>Go to Settings → Devices → Link Desktop Device</li>
+            <li>Scan this QR code</li>
+          </ol>
+        </div>
+        <div class="error" id="qr-error"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="../dist/login.js"></script>
+</body>
+</html>
