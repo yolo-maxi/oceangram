@@ -192,7 +192,7 @@ export class TelegramService {
     if (!this.client) throw new Error('Call startLogin first');
 
     const passwordInfo = await this.client.invoke(new Api.account.GetPassword());
-    const passwordCheck = await (this.client as any)._computePasswordSRPCheck(passwordInfo, password);
+    const passwordCheck = await computeCheck(passwordInfo, password);
     await this.client.invoke(new Api.auth.CheckPassword({ password: passwordCheck }));
 
     const sessionStr = this.client.session.save() as unknown as string;
