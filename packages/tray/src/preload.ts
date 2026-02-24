@@ -79,6 +79,10 @@ contextBridge.exposeInMainWorld('oceangram', {
   // Debug: check if WS is connected
   getDaemonWsStatus: (): Promise<{ connected: boolean; wsUrl: string }> =>
     ipcRenderer.invoke('get-daemon-ws-status'),
+  togglePin: (): Promise<boolean> =>
+    ipcRenderer.invoke('toggle-pin'),
+  getPinned: (): Promise<boolean> =>
+    ipcRenderer.invoke('get-pinned'),
 
   // Bubble-specific (kept for backward compat)
   getBubbleData: (): Promise<Record<string, { displayName: string; count: number }>> =>

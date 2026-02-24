@@ -62,6 +62,8 @@ interface OceangramAPI {
   onActiveChatsChanged(cb: (chats: Array<{ dialogId: string; displayName: string }>) => void): void;
   onTyping(cb: (data: { dialogId: string; userId: string; action: string }) => void): void;
   getDaemonWsStatus(): Promise<{ connected: boolean; wsUrl: string }>;
+  togglePin(): Promise<boolean>;
+  getPinned(): Promise<boolean>;
 
   // Bubble-specific (legacy)
   getBubbleData(): Promise<Record<string, { displayName: string; count: number }>>;

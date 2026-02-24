@@ -24,6 +24,7 @@ let tray: Tray | null = null;
 let settingsWindow: BrowserWindow | null = null;
 let loginWindow: BrowserWindow | null = null;
 let popupWindow: BrowserWindow | null = null;
+let popupPinned = false;
 const daemonManager = new DaemonManager();
 
 // GitHub token (optional, read from ~/.oceangram/github-token)
@@ -409,11 +410,10 @@ function openPopup(): void {
     }
   });
 
-  // Close on blur (clicking outside)
+  // Close on blur (clicking outside) — unless pinned
   popupWindow.on('blur', () => {
-    // Small delay to avoid closing when clicking tray icon to toggle
     setTimeout(() => {
-      if (popupWindow && !popupWindow.isDestroyed() && !popupWindow.isFocused()) {
+      if (popupWindow && !popupWindow.isDestroyed() && !popupWindow.isFocused() && !popupPinned) {
         closePopupAnimated();
       }
     }, 100);
@@ -584,6 +584,15 @@ function setupIPC(): void {
 
   ipcMain.handle('get-daemon-ws-status', () => {
     return { connected: daemon?.connected ?? false, wsUrl: 'ws://localhost:7777/events' };
+  });
+
+  ipcMain.handle('toggle-pin', () => {
+    popupPinned = !popupPinned;
+    return popupPinned;
+  });
+
+  ipcMain.handle('get-pinned', () => {
+    return popupPinned;
   });
 
   // User info

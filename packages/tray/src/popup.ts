@@ -48,6 +48,14 @@
   const composerEl = document.getElementById('composer')!;
   const emptyState = document.getElementById('emptyState')!;
   const connectionBanner = document.getElementById('connectionBanner')!;
+  const pinBtn = document.getElementById('pinBtn')!;
+
+  // Pin button
+  pinBtn.addEventListener('click', async () => {
+    const pinned = await api.togglePin();
+    pinBtn.classList.toggle('pinned', pinned);
+    pinBtn.title = pinned ? 'Unpin window' : 'Pin window';
+  });
 
   const contactAvatar = document.getElementById('contactAvatar')!;
   const replyBar = document.getElementById('replyBar')!;
