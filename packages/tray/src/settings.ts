@@ -22,6 +22,7 @@
   const addBtn = document.getElementById('addBtn') as HTMLButtonElement;
   const closeBtn = document.getElementById('closeBtn')!;
   const alwaysOnTopToggle = document.getElementById('alwaysOnTop') as HTMLInputElement;
+  const themeSelect = document.getElementById('themeSelect') as HTMLSelectElement;
 
   // ── Load state ──
 
@@ -110,6 +111,7 @@
     if (!settings) return;
 
     alwaysOnTopToggle.checked = settings.alwaysOnTop !== false;
+    themeSelect.value = settings.theme || 'system';
   }
 
   // ── Events ──
@@ -132,6 +134,10 @@
 
   alwaysOnTopToggle.addEventListener('change', () => {
     api.updateSettings({ alwaysOnTop: alwaysOnTopToggle.checked });
+  });
+
+  themeSelect.addEventListener('change', () => {
+    api.updateSettings({ theme: themeSelect.value as 'system' | 'dark' | 'light' });
   });
 
   closeBtn.addEventListener('click', () => {

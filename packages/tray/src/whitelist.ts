@@ -16,6 +16,7 @@ const DEFAULT_CONFIG: AppConfig = {
     maxBubbles: 5,
     pollIntervalMs: 3000,
     showNotifications: true,
+    theme: 'system',
   },
 };
 

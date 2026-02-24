@@ -173,7 +173,25 @@
 
   // ── Init ──
 
+  /** Apply theme to the app element */
+  function applyTheme(theme: string): void {
+    const appEl = document.querySelector('.app') as HTMLElement;
+    if (!appEl) return;
+    if (theme === 'system') {
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      appEl.setAttribute('data-theme', prefersDark ? 'dark' : 'light');
+    } else {
+      appEl.setAttribute('data-theme', theme);
+    }
+  }
+
   async function init(): Promise<void> {
+    // Apply theme
+    try {
+      const settings = await api.getSettings();
+      applyTheme(settings?.theme || 'system');
+    } catch { /* default dark */ }
+
     const me = await api.getMe();
     if (me && me.id) myId = String(me.id);
 
