@@ -24,7 +24,7 @@ let tray: Tray | null = null;
 let settingsWindow: BrowserWindow | null = null;
 let loginWindow: BrowserWindow | null = null;
 let popupWindow: BrowserWindow | null = null;
-let popupPinned = false;
+let popupPinned = true;
 const daemonManager = new DaemonManager();
 
 // GitHub token (optional, read from ~/.oceangram/github-token)
@@ -302,20 +302,25 @@ function createTray(): void {
   });
 
   // Right-click: context menu with Settings + Quit
-  const contextMenu = Menu.buildFromTemplate([
-    {
-      label: 'Settings',
-      click: openSettings,
-    },
-    { type: 'separator' },
-    {
-      label: 'Quit Oceangram',
-      click: () => {
-        app.quit();
-      },
-    },
-  ]);
   tray.on('right-click', () => {
+    const contextMenu = Menu.buildFromTemplate([
+      {
+        label: 'Sticky Pane',
+        type: 'checkbox' as const,
+        checked: popupPinned,
+        click: () => { popupPinned = !popupPinned; },
+      },
+      { type: 'separator' as const },
+      {
+        label: 'Settings',
+        click: openSettings,
+      },
+      { type: 'separator' as const },
+      {
+        label: 'Quit Oceangram',
+        click: () => { app.quit(); },
+      },
+    ]);
     tray!.popUpContextMenu(contextMenu);
   });
 }

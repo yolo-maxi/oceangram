@@ -48,14 +48,7 @@
   const composerEl = document.getElementById('composer')!;
   const emptyState = document.getElementById('emptyState')!;
   const connectionBanner = document.getElementById('connectionBanner')!;
-  const pinBtn = document.getElementById('pinBtn')!;
-
-  // Pin button
-  pinBtn.addEventListener('click', async () => {
-    const pinned = await api.togglePin();
-    pinBtn.classList.toggle('pinned', pinned);
-    pinBtn.title = pinned ? 'Unpin window' : 'Pin window';
-  });
+  // Pin state managed via tray right-click menu
 
   const contactAvatar = document.getElementById('contactAvatar')!;
   const replyBar = document.getElementById('replyBar')!;
@@ -315,6 +308,36 @@
       tab.appendChild(avatar);
 
       if (isActive) {
+        // Pin/unpin icon
+        const pinIcon = document.createElement('span');
+        pinIcon.className = `tab-pin${isPinned ? ' is-pinned' : ''}`;
+        pinIcon.textContent = '📌';
+        pinIcon.title = isPinned ? 'Unpin chat' : 'Pin chat';
+        pinIcon.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (isPinned) {
+            await api.removeUser(baseDialogId(entry.dialogId));
+          } else {
+            await api.addUser({ userId: entry.dialogId, displayName: entry.displayName });
+          }
+          // Refresh whitelist
+          const wl = await api.getWhitelist();
+          let dialogs: Array<{ id: string | number }> = [];
+          try { dialogs = await api.getDialogs(100); } catch { /* ignore */ }
+          whitelistEntries = wl.flatMap((we) => {
+            const uid = String(we.userId);
+            const exactMatch = dialogs.find((d) => String(d.id) === uid);
+            if (exactMatch) return [{ dialogId: String(exactMatch.id), displayName: we.displayName || we.username || uid, source: 'whitelist' as const }];
+            const topicMatches = dialogs.filter((d) => String(d.id).startsWith(uid + ':'));
+            if (topicMatches.length > 0) return topicMatches.map((d) => ({ dialogId: String(d.id), displayName: (d as any).name || String(d.id), source: 'whitelist' as const }));
+            return [{ dialogId: uid, displayName: we.displayName || we.username || uid, source: 'whitelist' as const }];
+          });
+          mergeTabs();
+          renderTabs();
+          updateTabActive();
+        });
+        tab.appendChild(pinIcon);
+
         const name = document.createElement('span');
         name.className = 'tab-name';
         name.textContent = entry.displayName;

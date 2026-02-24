@@ -792,30 +792,30 @@ html, body {
   background: rgba(255,255,255,0.08);
 }
 
-/* Pin button */
-.pin-btn {
-  position: absolute;
-  top: 6px;
-  right: 8px;
-  z-index: 200;
-  background: none;
-  border: none;
-  font-size: 14px;
+/* Tab pin icon */
+.tab-pin {
+  font-size: 11px;
+  margin-left: 4px;
   cursor: pointer;
-  opacity: 0.4;
-  transition: opacity 0.2s, transform 0.2s;
-  padding: 2px 4px;
-  border-radius: 4px;
-  -webkit-app-region: no-drag;
+  opacity: 0.35;
+  filter: grayscale(100%);
+  transition: opacity 0.2s, transform 0.2s, filter 0.2s;
+  pointer-events: auto;
+  flex-shrink: 0;
 }
 
-.pin-btn:hover {
-  opacity: 0.8;
+.tab-pin:hover {
+  opacity: 0.7;
 }
 
-.pin-btn.pinned {
-  opacity: 1;
+.tab-pin.is-pinned {
+  opacity: 0.5;
   transform: rotate(45deg);
+  filter: grayscale(100%);
+}
+
+.tab-pin.is-pinned:hover {
+  opacity: 0.8;
 }
 
 /* Typing indicator */
