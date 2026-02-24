@@ -854,9 +854,12 @@
     const msg = data.message;
     const msgDialogId = String(msg.dialogId || msg.chatId || data.dialogId || '');
 
+    console.log('[rt] new message dialogId:', msgDialogId, 'selected:', selectedDialogId, 'tabs:', allTabs.map(t => t.dialogId));
+
     // Find matching tab (handles forum topic ID mismatches)
     const matchedTab = findMatchingTab(msgDialogId);
     const tabDialogId = matchedTab?.dialogId;
+    console.log('[rt] matched tab:', tabDialogId, 'match?', tabDialogId === selectedDialogId);
 
     // Update cache using the tab's dialog ID (what we use for display)
     if (tabDialogId && messageCache[tabDialogId]) {
