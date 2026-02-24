@@ -225,6 +225,12 @@ function initializeApp(): void {
   daemon.start();
   tracker.start();
 
+  // Debug: log WS and new message events
+  daemon.on('ws-connected', () => console.log('[main] daemon WS connected'));
+  daemon.on('ws-disconnected', () => console.log('[main] daemon WS disconnected'));
+  daemon.on('newMessage', (e: unknown) => console.log('[main] got newMessage event:', JSON.stringify(e).substring(0, 200)));
+  tracker.on('new-message', (data: NewMessageEvent) => console.log('[main] tracker emitted new-message, dialogId:', data.dialogId));
+
   // Start OpenClaw (feature-flagged — no-op if disabled)
   openclaw.start();
 
