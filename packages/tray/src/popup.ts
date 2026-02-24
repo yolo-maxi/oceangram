@@ -567,8 +567,21 @@
   }
 
   let pollCount = 0;
+  let suppressPollUntil = 0;
   async function pollForNewMessages(): Promise<void> {
     if (!selectedDialogId) return;
+    if (Date.now() < suppressPollUntil) return;
+    // After suppress period ends, resync lastSeenMsgId
+    if (suppressPollUntil > 0) {
+      suppressPollUntil = 0;
+      try {
+        const latest = await api.getMessages(selectedDialogId, 1);
+        if (Array.isArray(latest) && latest.length > 0) {
+          lastSeenMsgId = Math.max(lastSeenMsgId, latest[latest.length - 1].id || 0);
+        }
+      } catch { /* ignore */ }
+      return;
+    }
     pollCount++;
     if (pollCount % 10 === 1) console.log('[poll]', pollCount, 'dialog:', selectedDialogId, 'lastSeen:', lastSeenMsgId);
     try {
@@ -917,13 +930,8 @@
       }
     }
 
-    // Bump lastSeenMsgId so the poll doesn't duplicate our sent message
-    try {
-      const latest = await api.getMessages(selectedDialogId, 1);
-      if (Array.isArray(latest) && latest.length > 0) {
-        lastSeenMsgId = Math.max(lastSeenMsgId, latest[latest.length - 1].id || 0);
-      }
-    } catch { /* ignore */ }
+    // Suppress poll duplicates: skip the next few poll cycles
+    suppressPollUntil = Date.now() + 3000;
 
     sendBtn.disabled = false;
     composerInput.focus();
