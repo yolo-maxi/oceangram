@@ -38,6 +38,9 @@ html, body {
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
   -webkit-app-region: drag;
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 
 .header h1 {
