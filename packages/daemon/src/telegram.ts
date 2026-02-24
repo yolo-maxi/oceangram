@@ -82,6 +82,7 @@ export interface DialogInfo {
   lastMessage: string;
   lastMessageTime: number;
   lastMessageOutgoing?: boolean;
+  lastOutgoingTime?: number;
   unreadCount: number;
   isForum: boolean;
   groupName?: string;
@@ -533,10 +534,29 @@ export class TelegramService {
           const topics = await this.getForumTopics(chatId);
           for (const topic of topics) {
             const topicOutgoing = this.isForumTopicLastMessageOutgoing(chatId, topic.topMessage);
-            // Get actual last message time from the message, not topic.date (which is creation date)
             const topMsgMap = this.forumTopicMessages.get(chatId);
             const topMsg = topMsgMap?.get(topic.topMessage);
             const lastMsgTime = topMsg?.date || topic.date || 0;
+
+            // Detect recent outgoing activity even if last message isn't ours.
+            // readOutboxMaxId > 0 means we've sent at least one message to this topic.
+            // Use the outbox message's timestamp if available, otherwise approximate
+            // from topMessage time (user was active around that time).
+            let lastOutgoingTime = 0;
+            if (topicOutgoing && topMsg) {
+              lastOutgoingTime = topMsg.date || 0;
+            } else if (topic.readOutboxMaxId > 0 && topMsgMap) {
+              const outboxMsg = topMsgMap.get(topic.readOutboxMaxId);
+              if (outboxMsg?.date) {
+                lastOutgoingTime = outboxMsg.date;
+              } else if (lastMsgTime) {
+                // readOutboxMaxId exists but message not in cache — 
+                // approximate: if close to topMessage, we sent recently
+                const gap = topic.topMessage - topic.readOutboxMaxId;
+                if (gap <= 20) lastOutgoingTime = lastMsgTime;
+              }
+            }
+
             results.push({
               id: `${chatId}:${topic.id}`,
               chatId,
@@ -545,6 +565,7 @@ export class TelegramService {
               lastMessage: topMsg?.message || '',
               lastMessageTime: lastMsgTime,
               lastMessageOutgoing: topicOutgoing,
+              lastOutgoingTime,
               unreadCount: topic.unreadCount || 0,
               isForum: true,
               groupName: name,

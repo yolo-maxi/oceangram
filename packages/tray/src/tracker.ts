@@ -226,11 +226,19 @@ class MessageTracker extends EventEmitter {
 
     for (const d of dialogs) {
       const dialogId = String(d.id);
-      if (!d.lastMessageOutgoing) continue;
 
-      const msgTime = d.lastMessageTime || 0;
+      // Use lastOutgoingTime if available (forum topics where last msg isn't ours),
+      // otherwise fall back to lastMessageTime if lastMessageOutgoing is true
+      let outgoingTimeRaw = 0;
+      if ((d as any).lastOutgoingTime) {
+        outgoingTimeRaw = (d as any).lastOutgoingTime;
+      } else if (d.lastMessageOutgoing) {
+        outgoingTimeRaw = d.lastMessageTime || 0;
+      }
+      if (!outgoingTimeRaw) continue;
+
       // Convert to ms (daemon uses seconds)
-      const msgTimeMs = msgTime < 1e12 ? msgTime * 1000 : msgTime;
+      const msgTimeMs = outgoingTimeRaw < 1e12 ? outgoingTimeRaw * 1000 : outgoingTimeRaw;
       if (msgTimeMs < cutoff) continue;
 
       // Only set if we don't already have a more recent send time
@@ -255,21 +263,14 @@ class MessageTracker extends EventEmitter {
   getActiveChats(): Array<{ dialogId: string; displayName: string }> {
     const now = Date.now();
     const cutoff = now - MessageTracker.ACTIVE_WINDOW_MS;
-    const seen = new Set<string>();
     const result: Array<{ dialogId: string; displayName: string }> = [];
 
-    // 1. Any chat with unreads — these are conversations that need attention
-    for (const [dialogId, data] of this.unreads) {
-      if (data.count <= 0) continue;
-      seen.add(dialogId);
-      const name = this.dialogNames.get(dialogId) || dialogId;
-      result.push({ dialogId, displayName: name });
-    }
-
-    // 2. Any chat where user sent recently (even if no unreads yet — awaiting reply)
+    // Only show chats where user sent recently AND has unreads (replies)
+    // This keeps the client minimal — Telegram is full of spam
     for (const [dialogId, sentTime] of this.lastSentTimes) {
       if (sentTime < cutoff) continue;
-      if (seen.has(dialogId)) continue;
+      const unread = this.unreads.get(dialogId);
+      if (!unread || unread.count <= 0) continue;
       const name = this.dialogNames.get(dialogId) || dialogId;
       result.push({ dialogId, displayName: name });
     }
