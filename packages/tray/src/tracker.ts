@@ -247,22 +247,33 @@ class MessageTracker extends EventEmitter {
   }
 
   /**
-   * Returns dialog IDs where:
-   *  - user sent a message within the last hour (from tray OR regular Telegram), AND
-   *  - dialog has unread messages
+   * Returns dialog IDs where EITHER:
+   *  - dialog has unread messages (unreadCount > 0), OR
+   *  - user sent a message within the last hour (from tray OR regular Telegram)
    * These are "active conversations" that should appear alongside whitelisted tabs.
    */
   getActiveChats(): Array<{ dialogId: string; displayName: string }> {
     const now = Date.now();
     const cutoff = now - MessageTracker.ACTIVE_WINDOW_MS;
+    const seen = new Set<string>();
     const result: Array<{ dialogId: string; displayName: string }> = [];
 
+    // Any dialog with unreads
+    for (const [dialogId, entry] of this.unreads) {
+      if (entry.count > 0 && !seen.has(dialogId)) {
+        seen.add(dialogId);
+        const name = this.dialogNames.get(dialogId) || dialogId;
+        result.push({ dialogId, displayName: name });
+      }
+    }
+
+    // Any dialog where user sent recently (even if no unreads)
     for (const [dialogId, sentTime] of this.lastSentTimes) {
-      if (sentTime < cutoff) continue; // expired
-      const unread = this.unreads.get(dialogId);
-      if (!unread || unread.count <= 0) continue; // no unreads
-      const name = this.dialogNames.get(dialogId) || dialogId;
-      result.push({ dialogId, displayName: name });
+      if (sentTime >= cutoff && !seen.has(dialogId)) {
+        seen.add(dialogId);
+        const name = this.dialogNames.get(dialogId) || dialogId;
+        result.push({ dialogId, displayName: name });
+      }
     }
 
     return result;

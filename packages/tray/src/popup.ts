@@ -7,6 +7,7 @@
   // State
   let myId: string | null = null;
   let selectedDialogId: string | null = null;
+  let isUserSelection = false; // true when user explicitly clicked a tab
   let unreadCounts: Record<string, number> = {};
   let replyTarget: { messageId: number; preview: string } | null = null;
 
@@ -15,6 +16,9 @@
   let activeChats: TabEntry[] = [];
   // Merged, deduplicated tab list
   let allTabs: TabEntry[] = [];
+
+  // Cached dialogs from daemon (refreshed every 10s)
+  let cachedDialogs: Array<{ id: string | number; name?: string; topicName?: string; title?: string; firstName?: string; username?: string; unreadCount?: number; lastMessageOutgoing?: boolean; lastMessageTime?: number }> = [];
 
   interface TabEntry {
     dialogId: string;
@@ -48,7 +52,6 @@
   const composerEl = document.getElementById('composer')!;
   const emptyState = document.getElementById('emptyState')!;
   const connectionBanner = document.getElementById('connectionBanner')!;
-  // Pin state managed via tray right-click menu
 
   const contactAvatar = document.getElementById('contactAvatar')!;
   const replyBar = document.getElementById('replyBar')!;
@@ -73,17 +76,12 @@
     contactAvatar.innerHTML = `<span>${escapeHtml(initial)}</span>`;
     // Try loading photo — strip topic suffix for API
     const userId = baseDialogId(entry.dialogId);
-    console.log('[avatar] Loading for', userId, 'displayName:', entry.displayName);
     const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000));
     Promise.race([api.getProfilePhoto(userId), timeout]).then((dataUrl: string | null) => {
-      console.log('[avatar] Result for', userId, ':', dataUrl ? 'got image' : 'null/timeout');
       if (dataUrl && selectedDialogId === entry.dialogId) {
         contactAvatar.innerHTML = `<img src="${dataUrl}" alt="">`;
       }
-    }).catch((err) => {
-      console.log('[avatar] Error for', userId, ':', err);
-      /* keep initial */
-    });
+    }).catch(() => { /* keep initial */ });
   }
 
   function escapeHtml(str: string): string {
@@ -95,26 +93,26 @@
   // ── Tab merging ──
 
   function mergeTabs(): void {
-    // Active chats (with messages) on the LEFT, pinned (whitelist-only) on the RIGHT
     const seen = new Set<string>();
-    const activeMerged: TabEntry[] = [];
-    const pinnedOnly: TabEntry[] = [];
+    const result: TabEntry[] = [];
 
-    // Collect active chats first
-    for (const entry of activeChats) {
-      seen.add(entry.dialogId);
-      activeMerged.push(entry);
+    // Active chats first (left side)
+    for (const chat of activeChats) {
+      if (!seen.has(chat.dialogId)) {
+        seen.add(chat.dialogId);
+        result.push({ ...chat, source: 'active' });
+      }
     }
 
-    // Whitelist entries that are also active go to active section
-    // Whitelist-only entries go to pinned section (greyed out)
-    for (const entry of whitelistEntries) {
-      if (seen.has(entry.dialogId)) continue;
-      seen.add(entry.dialogId);
-      pinnedOnly.push({ ...entry, source: 'whitelist' });
+    // Pinned chats that aren't already active (right side, dimmed)
+    for (const pin of whitelistEntries) {
+      if (!seen.has(pin.dialogId)) {
+        seen.add(pin.dialogId);
+        result.push({ ...pin, source: 'whitelist' });
+      }
     }
 
-    allTabs = [...activeMerged, ...pinnedOnly];
+    allTabs = result;
 
     // Update CSS variable for stacking density
     const count = allTabs.length;
@@ -185,38 +183,9 @@
     }
   }
 
-  async function init(): Promise<void> {
-    // Apply theme
-    try {
-      const settings = await api.getSettings();
-      applyTheme(settings?.theme || 'arctic');
-    } catch { /* default arctic */ }
-
-    // Listen for live theme changes from settings window
-    api.onThemeChanged((theme: string) => applyTheme(theme));
-
-    const me = await api.getMe();
-    if (me && me.id) myId = String(me.id);
-
-    // Debug WS status
-    try {
-      const wsStatus = await api.getDaemonWsStatus();
-      console.log('[popup] Daemon WS status:', wsStatus);
-    } catch (e) { console.error('[popup] WS status check failed:', e); }
-
-    // Load unread counts
-    try {
-      unreadCounts = await api.getUnreadCounts();
-    } catch { /* ignore */ }
-
-    // Get whitelist — resolve user IDs to actual dialog IDs
-    const wl = await api.getWhitelist();
-    let dialogs: Array<{ id: string | number }> = [];
-    try {
-      dialogs = await api.getDialogs(100);
-    } catch { /* ignore */ }
-
-    whitelistEntries = wl.flatMap((e) => {
+  /** Build whitelist entries from config + dialogs, expanding forum topics */
+  function buildWhitelistEntries(wl: Array<{ userId: string; username?: string; displayName?: string }>, dialogs: Array<{ id: string | number; name?: string; topicName?: string; title?: string; firstName?: string; username?: string }>): TabEntry[] {
+    return wl.flatMap((e) => {
       const uid = String(e.userId);
       // Exact match first (DMs, or full chatId:topicId)
       const exactMatch = dialogs.find((d) => String(d.id) === uid);
@@ -246,8 +215,35 @@
         source: 'whitelist' as const,
       }];
     });
+  }
 
-    // Get active chats
+  async function init(): Promise<void> {
+    // Apply theme
+    try {
+      const settings = await api.getSettings();
+      applyTheme(settings?.theme || 'arctic');
+    } catch { /* default arctic */ }
+
+    // Listen for live theme changes from settings window
+    api.onThemeChanged((theme: string) => applyTheme(theme));
+
+    const me = await api.getMe();
+    if (me && me.id) myId = String(me.id);
+
+    // Load unread counts
+    try {
+      unreadCounts = await api.getUnreadCounts();
+    } catch { /* ignore */ }
+
+    // Get whitelist — resolve user IDs to actual dialog IDs
+    const wl = await api.getWhitelist();
+    try {
+      cachedDialogs = await api.getDialogs(100);
+    } catch { /* ignore */ }
+
+    whitelistEntries = buildWhitelistEntries(wl, cachedDialogs);
+
+    // Get active chats from tracker
     try {
       const ac = await api.getActiveChats();
       activeChats = ac.map((e) => ({
@@ -260,8 +256,75 @@
     mergeTabs();
     renderLayout();
 
+    // Start periodic dialog refresh (every 10s)
+    startDialogRefresh();
+
     // Check if OpenClaw AI enrichments are available
     checkOpenClaw();
+  }
+
+  // ── Periodic dialog refresh ──
+
+  let dialogRefreshTimer: ReturnType<typeof setInterval> | null = null;
+
+  function startDialogRefresh(): void {
+    if (dialogRefreshTimer) clearInterval(dialogRefreshTimer);
+    dialogRefreshTimer = setInterval(refreshDialogs, 10000);
+  }
+
+  async function refreshDialogs(): Promise<void> {
+    try {
+      cachedDialogs = await api.getDialogs(100);
+    } catch { return; }
+
+    // Rebuild whitelist entries (forum topics may have changed)
+    try {
+      const wl = await api.getWhitelist();
+      whitelistEntries = buildWhitelistEntries(wl, cachedDialogs);
+    } catch { /* keep existing */ }
+
+    // Build active chats from dialogs: any dialog with unreads or recent sent
+    const newActive: TabEntry[] = [];
+    const whitelistIds = new Set(whitelistEntries.map(e => e.dialogId));
+
+    for (const d of cachedDialogs) {
+      const dialogId = String(d.id);
+      // Skip if already in whitelist
+      if (whitelistIds.has(dialogId)) continue;
+
+      const hasUnread = (d.unreadCount || 0) > 0;
+      const displayName = d.name || d.topicName || d.title || d.firstName || d.username || dialogId;
+
+      if (hasUnread) {
+        newActive.push({ dialogId, displayName, source: 'active' as const });
+      }
+    }
+
+    // Also include tracker active chats (covers sent-recently logic)
+    try {
+      const trackerActive = await api.getActiveChats();
+      const seen = new Set(newActive.map(e => e.dialogId));
+      for (const chat of trackerActive) {
+        if (!seen.has(chat.dialogId) && !whitelistIds.has(chat.dialogId)) {
+          seen.add(chat.dialogId);
+          newActive.push({ dialogId: chat.dialogId, displayName: chat.displayName, source: 'active' as const });
+        }
+      }
+    } catch { /* ignore */ }
+
+    const oldIds = activeChats.map(t => t.dialogId).sort().join(',');
+    const newIds = newActive.map(t => t.dialogId).sort().join(',');
+
+    activeChats = newActive;
+    mergeTabs();
+
+    if (oldIds !== newIds) {
+      // Tab list changed — rebuild DOM but preserve selection
+      renderLayout();
+    } else {
+      // Just update badges/highlights
+      if (allTabs.length > 1) updateTabActive();
+    }
   }
 
   /** Determine layout based on tab count and render accordingly. */
@@ -285,19 +348,18 @@
       // Single tab — show contact bar, no tabs
       contactBar.style.display = '';
       tabsEl.style.display = 'none';
+      // Only auto-select on first load
       if (!selectedDialogId) {
-        selectTab(allTabs[0]);
+        selectTab(allTabs[0].dialogId, allTabs[0].displayName, false);
       }
     } else {
       // Multiple tabs
       contactBar.style.display = 'none';
       tabsEl.style.display = 'flex';
       renderTabs();
-      // Only auto-select if nothing is selected yet
+      // Only auto-select on first load when nothing selected
       if (!selectedDialogId) {
-        selectTab(allTabs[0]);
-      } else {
-        updateTabActive();
+        selectTab(allTabs[0].dialogId, allTabs[0].displayName, false);
       }
     }
   }
@@ -305,7 +367,6 @@
   // ── Tabs ──
 
   function renderTabs(): void {
-    // Determine if active chats exist (for pinned styling)
     const activeDialogIds = new Set(activeChats.map((c) => c.dialogId));
 
     tabsEl.innerHTML = '';
@@ -342,20 +403,12 @@
             await api.addUser({ userId: entry.dialogId, displayName: entry.displayName });
           }
           // Refresh whitelist
-          const wl = await api.getWhitelist();
-          let dialogs: Array<{ id: string | number }> = [];
-          try { dialogs = await api.getDialogs(100); } catch { /* ignore */ }
-          whitelistEntries = wl.flatMap((we) => {
-            const uid = String(we.userId);
-            const exactMatch = dialogs.find((d) => String(d.id) === uid);
-            if (exactMatch) return [{ dialogId: String(exactMatch.id), displayName: we.displayName || we.username || uid, source: 'whitelist' as const }];
-            const topicMatches = dialogs.filter((d) => String(d.id).startsWith(uid + ':'));
-            if (topicMatches.length > 0) return topicMatches.map((d) => ({ dialogId: String(d.id), displayName: (d as any).name || String(d.id), source: 'whitelist' as const }));
-            return [{ dialogId: uid, displayName: we.displayName || we.username || uid, source: 'whitelist' as const }];
-          });
-          mergeTabs();
-          renderTabs();
-          updateTabActive();
+          try {
+            const wl = await api.getWhitelist();
+            whitelistEntries = buildWhitelistEntries(wl, cachedDialogs);
+            mergeTabs();
+            renderTabs();
+          } catch { /* ignore */ }
         });
         tab.appendChild(pinIcon);
 
@@ -370,9 +423,8 @@
       tab.appendChild(badge);
 
       tab.addEventListener('click', () => {
-        console.log('[tab-click]', entry.dialogId, entry.displayName, 'selected:', selectedDialogId);
         if (entry.dialogId !== selectedDialogId) {
-          selectTab(entry, true);
+          selectTab(entry.dialogId, entry.displayName, true);
         }
       });
 
@@ -382,11 +434,10 @@
       const photoId = baseDialogId(entry.dialogId);
       const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000));
       Promise.race([api.getProfilePhoto(photoId), timeout]).then((dataUrl: string | null) => {
-        console.log('[avatar-tab]', photoId, dataUrl ? 'loaded' : 'null');
         if (dataUrl && avatar.parentNode) {
           avatar.innerHTML = `<img src="${dataUrl}" alt="">`;
         }
-      }).catch((err) => { console.error('[avatar-tab] error', photoId, err); });
+      }).catch(() => { /* ignore */ });
     });
   }
 
@@ -424,63 +475,63 @@
     });
   }
 
-  // ── Select tab ──
+  // ── Select tab (clean rewrite) ──
+  // ONLY called by:
+  //   1. User clicking a tab (userClick = true)
+  //   2. Initial load / first tab (userClick = false)
+  //   3. Notification click via onSelectDialog (userClick = true)
+  // NEVER called by renderLayout/renderTabs (they only rebuild DOM)
 
-  let userSelectedDialogId: string | null = null; // tracks explicit user selection
-  async function selectTab(entry: TabEntry, userInitiated = false): Promise<void> {
-    // If user has explicitly selected a tab, block any automatic re-selection
-    if (!userInitiated && userSelectedDialogId && userSelectedDialogId !== entry.dialogId) {
-      console.log('[selectTab] BLOCKED auto-select, user chose:', userSelectedDialogId, 'attempted:', entry.dialogId);
-      return;
-    }
-    if (userInitiated) userSelectedDialogId = entry.dialogId;
-    console.log('[selectTab]', entry.dialogId, entry.displayName, 'userInitiated:', userInitiated);
-    const previousUnreads = unreadCounts[entry.dialogId] || 0;
-    selectedDialogId = entry.dialogId;
+  async function selectTab(dialogId: string, displayName: string, userClick = false): Promise<void> {
+    if (userClick) isUserSelection = true;
 
-    // Ensure selected tab stays in allTabs so renderLayout won't override
-    if (!allTabs.some((t) => t.dialogId === entry.dialogId)) {
-      allTabs.push(entry);
-    }
+    const previousUnreads = unreadCounts[dialogId] || 0;
+    selectedDialogId = dialogId;
 
     // Clear pending state when switching tabs
     clearReplyTarget();
     clearAttachment();
 
-    // Update contact bar (single mode)
-    contactName.textContent = entry.displayName;
-    loadAvatar(entry);
+    // Update header INSTANTLY (before loading messages)
+    contactName.textContent = displayName;
+    // Show initial letter immediately, then load photo async
+    const initial = (displayName || '?').charAt(0).toUpperCase();
+    contactAvatar.innerHTML = `<span>${escapeHtml(initial)}</span>`;
+    // Fire-and-forget avatar load
+    const photoId = baseDialogId(dialogId);
+    const avatarTimeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000));
+    Promise.race([api.getProfilePhoto(photoId), avatarTimeout]).then((dataUrl: string | null) => {
+      if (dataUrl && selectedDialogId === dialogId) {
+        contactAvatar.innerHTML = `<img src="${dataUrl}" alt="">`;
+      }
+    }).catch(() => { /* keep initial */ });
 
-    // Update tabs (multi mode)
+    // Update tab highlight immediately
     if (allTabs.length > 1) {
       updateTabActive();
     }
 
     // Show loading only if no cache
-    if (!messageCache[entry.dialogId] || messageCache[entry.dialogId].length === 0) {
+    if (!messageCache[dialogId] || messageCache[dialogId].length === 0) {
       loadingEl.style.display = '';
       loadingEl.textContent = 'Loading messages...';
       messagesEl.innerHTML = '';
       messagesEl.appendChild(loadingEl);
     }
 
-    await loadMessages(entry.dialogId);
+    await loadMessages(dialogId);
 
     // Reset poll tracker for new tab
-    const cached = messageCache[entry.dialogId];
+    const cached = messageCache[dialogId];
     if (cached && cached.length > 0) {
       lastSeenMsgId = Math.max(...cached.map((m: MessageLike) => m.id || 0));
     } else {
       lastSeenMsgId = 0;
     }
 
-    // Request AI summary if there were 5+ unreads (before marking read)
-    if (previousUnreads >= 5) {
-    }
-
     // Mark as read
-    api.markRead(entry.dialogId);
-    unreadCounts[entry.dialogId] = 0;
+    api.markRead(dialogId);
+    unreadCounts[dialogId] = 0;
     if (allTabs.length > 1) updateTabActive();
 
     // Focus composer
@@ -495,14 +546,11 @@
     if (messageCache[dialogId] && messageCache[dialogId].length > 0) {
       loadingEl.style.display = 'none';
       renderMessages(messageCache[dialogId]);
-      // No background refresh — polling handles new messages
       return;
     }
 
     try {
-      console.log('[loadMessages] fetching', dialogId);
       const messages = await api.getMessages(dialogId, 30);
-      console.log('[loadMessages] got', Array.isArray(messages) ? messages.length : 'non-array', 'messages for', dialogId);
       loadingEl.style.display = 'none';
 
       if (!Array.isArray(messages) || messages.length === 0) {
@@ -662,7 +710,6 @@
     const replyToId = (msg as any).replyToId;
     let replyHtml = '';
     if (replyToId) {
-      // Try to find in cached messages
       const cached = selectedDialogId ? messageCache[selectedDialogId] : null;
       const replyMsg = cached?.find(m => m.id === replyToId);
       const replyText = replyMsg ? (replyMsg.text || replyMsg.message || '').substring(0, 80) : `Message #${replyToId}`;
@@ -685,7 +732,6 @@
   }
 
   function bindMessageClicks(): void {
-    // Click message → set reply target
     messagesEl.querySelectorAll('.message[data-msg-id]').forEach((el) => {
       el.addEventListener('click', () => {
         const msgId = parseInt((el as HTMLElement).dataset.msgId || '0', 10);
@@ -695,7 +741,6 @@
         setReplyTarget(msgId, preview);
       });
     });
-    // Click reply context → scroll to original message
     messagesEl.querySelectorAll('.reply-context[data-reply-to]').forEach((el) => {
       el.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -727,9 +772,7 @@
       (_match, url: string, owner: string, repo: string, prNum: string) => {
         const cardId = `pr-card-${++prCardCounter}`;
         const prNumber = parseInt(prNum, 10);
-        // Schedule async fetch
         setTimeout(() => loadPRCard(cardId, owner, repo, prNumber, url), 0);
-        // Return placeholder card
         return `<div class="gh-pr-card loading" id="${cardId}">` +
           `<div class="gh-pr-header">🔀 PR #${prNum} · ${escapeHtml(owner)}/${escapeHtml(repo)}</div>` +
           `<div class="gh-pr-title">Loading...</div>` +
@@ -764,7 +807,6 @@
           (showMerge ? `<button class="gh-pr-btn merge" data-owner="${escapeHtml(owner)}" data-repo="${escapeHtml(repo)}" data-pr="${pr.number}">Merge</button>` : '') +
         `</div>`;
 
-      // Bind merge button
       const mergeBtn = card.querySelector('.gh-pr-btn.merge') as HTMLButtonElement | null;
       if (mergeBtn) {
         mergeBtn.addEventListener('click', async (e) => {
@@ -800,10 +842,8 @@
         });
       }
 
-      // Prevent card clicks from triggering reply
       card.addEventListener('click', (e) => e.stopPropagation());
     } catch {
-      // API error — show basic link card
       card.classList.remove('loading');
       card.classList.add('error');
       card.innerHTML =
@@ -821,7 +861,6 @@
     if (!text) return '';
     let html = escapeHtml(text);
     html = html.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
-    // Replace GitHub PR links with rich cards
     html = detectGitHubPRs(html);
     html = html.replace(/```([\s\S]+?)```/g, '<pre>$1</pre>');
     html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
@@ -864,7 +903,6 @@
     clearReplyTarget();
 
     if (hasFile && pendingFile) {
-      // Send file with optional caption
       const file = pendingFile;
       clearAttachment();
       appendMessage({
@@ -880,7 +918,6 @@
         console.error('File send failed:', err);
       }
     } else {
-      // Text-only message
       appendMessage({
         fromId: myId || undefined,
         text,
@@ -920,9 +957,6 @@
   composerInput.addEventListener('input', () => {
     composerInput.style.height = 'auto';
     composerInput.style.height = Math.min(composerInput.scrollHeight, 100) + 'px';
-    // Hide AI suggestions when user starts typing their own message
-    if (composerInput.value.length > 0) {
-      }
   });
 
   // ── File helper ──
@@ -932,7 +966,6 @@
       const reader = new FileReader();
       reader.onload = () => {
         const result = reader.result as string;
-        // Strip data URL prefix to get raw base64
         const base64 = result.includes(',') ? result.split(',')[1] : result;
         resolve(base64);
       };
@@ -983,15 +1016,13 @@
   function handleImagePaste(e: ClipboardEvent): boolean {
     if (isSendingFile) return false;
     const items = e.clipboardData?.items;
-    if (!items) { console.log('[paste] no clipboardData items'); return false; }
+    if (!items) return false;
 
-    console.log('[paste] items:', Array.from(items).map(i => `${i.kind}:${i.type}`));
     for (const item of Array.from(items)) {
       if (item.type.startsWith('image/')) {
         e.preventDefault();
         e.stopPropagation();
         const file = item.getAsFile();
-        console.log('[paste] got image file:', file?.name, file?.size, file?.type);
         if (file) attachFile(file);
         return true;
       }
@@ -999,15 +1030,12 @@
     return false;
   }
 
-  // Listen on composer for paste
   composerInput.addEventListener('paste', (e: ClipboardEvent) => {
     handleImagePaste(e);
-    // Non-image paste falls through to default text paste
   });
 
-  // Window-level fallback — catches paste even when composer isn't focused
   document.addEventListener('paste', (e: ClipboardEvent) => {
-    if (e.target === composerInput) return; // already handled above
+    if (e.target === composerInput) return;
     handleImagePaste(e);
   });
 
@@ -1035,16 +1063,13 @@
     const files = e.dataTransfer?.files;
     if (!files || files.length === 0) return;
 
-    // Preview first file only
     if (files[0]) attachFile(files[0]);
   });
 
   // ── Real-time updates ──
 
-  // Match dialog IDs — handles forum topics (chatId:topicId vs chatId)
   function dialogMatches(eventId: string, tabId: string): boolean {
     if (eventId === tabId) return true;
-    // Forum: event has "chatId:topicId", tab might have just "chatId"
     const baseId = eventId.split(':')[0];
     return baseId === tabId;
   }
@@ -1059,14 +1084,11 @@
     const msg = data.message;
     const msgDialogId = String(msg.dialogId || msg.chatId || data.dialogId || '');
 
-    console.log('[rt] new message dialogId:', msgDialogId, 'selected:', selectedDialogId, 'tabs:', allTabs.map(t => t.dialogId));
-
     // Find matching tab (handles forum topic ID mismatches)
     const matchedTab = findMatchingTab(msgDialogId);
     const tabDialogId = matchedTab?.dialogId;
-    console.log('[rt] matched tab:', tabDialogId, 'match?', tabDialogId === selectedDialogId);
 
-    // Update cache using the tab's dialog ID (what we use for display)
+    // Update cache using the tab's dialog ID
     if (tabDialogId && messageCache[tabDialogId]) {
       messageCache[tabDialogId] = [...messageCache[tabDialogId], msg];
     }
@@ -1080,8 +1102,7 @@
       unreadCounts[tabDialogId] = (unreadCounts[tabDialogId] || 0) + 1;
       updateTabActive();
     }
-    // Note: active-chats-changed event from main process will handle
-    // adding new tabs for non-whitelisted active conversations
+    // New tabs from non-whitelisted chats are handled by the periodic dialog refresh
   });
 
   // ── Typing indicator ──
@@ -1105,7 +1126,6 @@
   }
 
   api.onTyping((data) => {
-    // Only show for currently selected dialog, and not our own typing
     const matchedTab = findMatchingTab(data.dialogId);
     const tabDialogId = matchedTab?.dialogId;
     if (tabDialogId === selectedDialogId && String(data.userId) !== String(myId)) {
@@ -1123,12 +1143,12 @@
   });
 
   api.onActiveChatsChanged((chats) => {
+    // Tracker emitted new active chats — merge them in
     const newActive = chats.map((e) => ({
       dialogId: e.dialogId,
       displayName: e.displayName,
       source: 'active' as const,
     }));
-    // Only rebuild if the tab list actually changed
     const oldIds = activeChats.map(t => t.dialogId).sort().join(',');
     const newIds = newActive.map(t => t.dialogId).sort().join(',');
     activeChats = newActive;
@@ -1144,8 +1164,18 @@
 
   // Select dialog from main process (e.g., notification click)
   api.onSelectDialog((dialogId) => {
+    // Find tab entry or create one on the fly
     const entry = allTabs.find((t) => t.dialogId === dialogId);
-    if (entry) selectTab(entry, true);
+    if (entry) {
+      selectTab(entry.dialogId, entry.displayName, true);
+    } else {
+      // Dialog not in tabs yet — add it as active and select
+      const displayName = dialogId; // will get resolved on next dialog refresh
+      activeChats.push({ dialogId, displayName, source: 'active' });
+      mergeTabs();
+      renderLayout();
+      selectTab(dialogId, displayName, true);
+    }
   });
 
   // ── Keyboard shortcuts ──
