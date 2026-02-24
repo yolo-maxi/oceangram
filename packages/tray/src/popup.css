@@ -127,11 +127,13 @@ html, body {
 /* ── Tabs (multiple contacts) ── */
 .tabs {
   display: flex;
+  align-items: center;
   background: var(--bg-dark);
   border-bottom: 1px solid var(--border);
-  overflow-x: auto;
   flex-shrink: 0;
   -webkit-app-region: no-drag;
+  padding: 6px 10px;
+  gap: 0;
 }
 
 .tabs::-webkit-scrollbar {
@@ -139,8 +141,8 @@ html, body {
 }
 
 .tab-avatar {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   background: var(--accent);
   display: flex;
@@ -151,7 +153,8 @@ html, body {
   color: #fff;
   flex-shrink: 0;
   overflow: hidden;
-  transition: box-shadow 0.15s;
+  border: 2px solid var(--bg-dark);
+  transition: transform 0.15s, box-shadow 0.15s;
 }
 
 .tab-avatar img {
@@ -165,40 +168,74 @@ html, body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: 12px;
 }
 
 .tab {
-  padding: 6px 8px;
-  font-size: 12px;
-  font-weight: 500;
   display: flex;
   align-items: center;
-  color: var(--text-dim);
   cursor: pointer;
-  white-space: nowrap;
-  border-bottom: 2px solid transparent;
-  transition: color 0.15s, border-color 0.15s;
   position: relative;
+  transition: margin 0.2s ease, transform 0.15s;
+  z-index: 1;
+  border-bottom: none;
+  padding: 0;
 }
 
-.tab:hover {
-  color: var(--text);
+/* Inactive tabs: stack with overlap */
+.tab:not(.active) {
+  margin-left: -8px;
 }
 
+.tab:not(.active) .tab-name {
+  display: none;
+}
+
+/* First inactive tab needs no negative margin if active is before it */
+.tab:first-child {
+  margin-left: 0;
+}
+
+/* Hover: pop out from stack */
+.tab:not(.active):hover {
+  z-index: 10;
+  transform: translateY(-2px);
+}
+
+.tab:not(.active):hover .tab-avatar {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  transform: scale(1.1);
+}
+
+/* Expand siblings on hover — give space */
+.tabs:hover .tab:not(.active) {
+  margin-left: 2px;
+  transition: margin 0.25s ease;
+}
+
+/* Active tab: show name, sits on the left */
 .tab.active {
-  color: #fff;
-  border-bottom-color: var(--accent);
+  z-index: 5;
+  margin-right: 8px;
+  margin-left: 0;
+  order: -1;
+}
+
+.tab.active .tab-avatar {
+  border-color: var(--accent);
 }
 
 .tab .tab-badge {
   position: absolute;
-  top: 3px;
-  right: 3px;
-  width: 7px;
-  height: 7px;
+  top: -1px;
+  right: -1px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: var(--accent);
+  background: #ff3b30;
+  border: 2px solid var(--bg-dark);
   display: none;
+  z-index: 2;
 }
 
 .tab.has-unread .tab-badge {

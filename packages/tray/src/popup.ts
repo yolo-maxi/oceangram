@@ -264,14 +264,42 @@
         }
       });
     });
+
+    // Load avatars for all tabs
+    for (const entry of allTabs) {
+      const avatarEl = document.getElementById(`tab-avatar-${entry.dialogId}`);
+      if (!avatarEl) continue;
+      const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000));
+      Promise.race([api.getProfilePhoto(entry.dialogId), timeout]).then((dataUrl: string | null) => {
+        if (dataUrl) {
+          const el = document.getElementById(`tab-avatar-${entry.dialogId}`);
+          if (el) el.innerHTML = `<img src="${dataUrl}" alt="">`;
+        }
+      }).catch(() => { /* keep initial */ });
+    }
   }
 
   function updateTabActive(): void {
     tabsEl.querySelectorAll('.tab').forEach((el) => {
       const did = (el as HTMLElement).dataset.dialogId;
-      el.classList.toggle('active', did === selectedDialogId);
+      const isActive = did === selectedDialogId;
+      el.classList.toggle('active', isActive);
       const hasUnread = did ? (unreadCounts[did] || 0) > 0 : false;
-      el.classList.toggle('has-unread', hasUnread && did !== selectedDialogId);
+      el.classList.toggle('has-unread', hasUnread && !isActive);
+
+      // Show/hide name based on active state
+      let nameEl = el.querySelector('.tab-name') as HTMLElement | null;
+      if (isActive) {
+        if (!nameEl) {
+          const entry = allTabs.find((t) => t.dialogId === did);
+          nameEl = document.createElement('span');
+          nameEl.className = 'tab-name';
+          nameEl.textContent = entry?.displayName || '';
+          el.querySelector('.tab-avatar')?.after(nameEl);
+        }
+      } else if (nameEl) {
+        nameEl.remove();
+      }
     });
   }
 
