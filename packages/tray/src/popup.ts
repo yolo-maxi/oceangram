@@ -14,6 +14,8 @@
   // Tab sources
   let whitelistEntries: TabEntry[] = [];
   let activeChats: TabEntry[] = [];
+  // Whether the currently selected dialog is a group/forum (show sender names)
+  let currentDialogIsGroup = false;
   // Merged, deduplicated tab list
   let allTabs: TabEntry[] = [];
 
@@ -501,6 +503,11 @@
     const previousUnreads = unreadCounts[dialogId] || 0;
     selectedDialogId = dialogId;
 
+    // Detect if this is a group/forum (show sender names in messages)
+    const dialog = cachedDialogs.find(d => String(d.id) === dialogId);
+    const dialogType = (dialog as any)?.type;
+    currentDialogIsGroup = dialogId.includes(':') || dialogType === 'group' || dialogType === 'supergroup' || dialogType === 'channel';
+
     // Clear pending state when switching tabs
     clearReplyTarget();
     clearAttachment();
@@ -771,12 +778,14 @@
 
     let html = '';
     let lastDate = '';
+    let prevSenderId = '';
 
     for (const msg of sorted) {
       const date = formatDate(msg.date || msg.timestamp);
       if (date !== lastDate) {
         html += `<div class="date-separator"><span>${date}</span></div>`;
         lastDate = date;
+        prevSenderId = ''; // reset on date change
       }
 
       const fromId = String(msg.fromId || msg.senderId || '');
@@ -793,9 +802,23 @@
         replyHtml = `<div class="reply-context" data-reply-to="${replyToId}">${escapeHtml(replyText)}</div>`;
       }
 
+      // Show sender name in groups for incoming messages (collapse consecutive from same sender)
+      let senderHtml = '';
+      if (currentDialogIsGroup && !isOutgoing && fromId !== prevSenderId) {
+        const name = (msg as any).senderName || '';
+        if (name) {
+          const hash = name.split('').reduce((a: number, c: string) => a + c.charCodeAt(0), 0);
+          const colors = ['#e17076', '#7bc862', '#e5ca77', '#65aadd', '#a695e7', '#ee7aae', '#6ec9cb', '#faa774'];
+          const color = colors[hash % colors.length];
+          senderHtml = `<div class="sender-name" style="color:${color}">${escapeHtml(name)}</div>`;
+        }
+      }
+      prevSenderId = fromId;
+
       html += `
         <div class="message ${isOutgoing ? 'outgoing' : 'incoming'}" data-msg-id="${msgId}">
           ${replyHtml}
+          ${senderHtml}
           <div class="text">${text}</div>
           <div class="time">${time}</div>
         </div>
@@ -831,8 +854,22 @@
       replyHtml = `<div class="reply-context" data-reply-to="${replyToId}">${escapeHtml(replyText)}</div>`;
     }
 
+    // Show sender name in groups/forums for incoming messages
+    let senderHtml = '';
+    if (currentDialogIsGroup && !isOutgoing) {
+      const name = (msg as any).senderName || '';
+      if (name) {
+        // Consistent color per sender based on name hash
+        const hash = name.split('').reduce((a: number, c: string) => a + c.charCodeAt(0), 0);
+        const colors = ['#e17076', '#7bc862', '#e5ca77', '#65aadd', '#a695e7', '#ee7aae', '#6ec9cb', '#faa774'];
+        const color = colors[hash % colors.length];
+        senderHtml = `<div class="sender-name" style="color:${color}">${escapeHtml(name)}</div>`;
+      }
+    }
+
     div.innerHTML = `
       ${replyHtml}
+      ${senderHtml}
       <div class="text">${text}</div>
       <div class="time">${time}</div>
     `;
