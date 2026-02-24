@@ -168,13 +168,22 @@
       unreadCounts = await api.getUnreadCounts();
     } catch { /* ignore */ }
 
-    // Get whitelist
+    // Get whitelist — resolve user IDs to actual dialog IDs
     const wl = await api.getWhitelist();
-    whitelistEntries = wl.map((e) => ({
-      dialogId: e.userId,
-      displayName: e.displayName || e.username || e.userId,
-      source: 'whitelist' as const,
-    }));
+    let dialogs: Array<{ id: string | number }> = [];
+    try {
+      dialogs = await api.getDialogs(100);
+    } catch { /* ignore */ }
+
+    whitelistEntries = wl.map((e) => {
+      // For DMs, userId IS the dialogId. For groups, try to find a matching dialog.
+      const matchedDialog = dialogs.find((d) => String(d.id) === String(e.userId));
+      return {
+        dialogId: matchedDialog ? String(matchedDialog.id) : e.userId,
+        displayName: e.displayName || e.username || e.userId,
+        source: 'whitelist' as const,
+      };
+    });
 
     // Get active chats
     try {
@@ -800,30 +809,39 @@
 
   // ── Real-time updates ──
 
+  // Match dialog IDs — handles forum topics (chatId:topicId vs chatId)
+  function dialogMatches(eventId: string, tabId: string): boolean {
+    if (eventId === tabId) return true;
+    // Forum: event has "chatId:topicId", tab might have just "chatId"
+    const baseId = eventId.split(':')[0];
+    return baseId === tabId;
+  }
+
+  function findMatchingTab(eventDialogId: string): TabEntry | undefined {
+    return allTabs.find((t) => dialogMatches(eventDialogId, t.dialogId));
+  }
+
   api.onNewMessage((data) => {
     if (!data || !data.message) return;
     const msg = data.message;
     const msgDialogId = String(msg.dialogId || msg.chatId || data.dialogId || '');
 
-    // Only care about tabs we're showing
-    const isTabbed = allTabs.some((t) => t.dialogId === msgDialogId);
+    // Find matching tab (handles forum topic ID mismatches)
+    const matchedTab = findMatchingTab(msgDialogId);
+    const tabDialogId = matchedTab?.dialogId;
 
-    // Update cache for any tabbed dialog
-    if (isTabbed && messageCache[msgDialogId]) {
-      messageCache[msgDialogId] = [...messageCache[msgDialogId], msg];
+    // Update cache using the tab's dialog ID (what we use for display)
+    if (tabDialogId && messageCache[tabDialogId]) {
+      messageCache[tabDialogId] = [...messageCache[tabDialogId], msg];
     }
 
-    if (msgDialogId === selectedDialogId) {
+    if (tabDialogId && tabDialogId === selectedDialogId) {
       // Current chat — append message
       appendMessage(msg);
       api.markRead(selectedDialogId);
-      // Request AI reply suggestions for incoming messages
-      const isOutgoing = msg.isOutgoing === true || String(msg.fromId || msg.senderId || '') === myId;
-      if (!isOutgoing) {
-      }
-    } else if (isTabbed) {
+    } else if (tabDialogId) {
       // Other visible tab — update unread
-      unreadCounts[msgDialogId] = (unreadCounts[msgDialogId] || 0) + 1;
+      unreadCounts[tabDialogId] = (unreadCounts[tabDialogId] || 0) + 1;
       updateTabActive();
     }
     // Note: active-chats-changed event from main process will handle
