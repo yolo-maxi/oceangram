@@ -401,6 +401,14 @@
 
     await loadMessages(entry.dialogId);
 
+    // Reset poll tracker for new tab
+    const cached = messageCache[entry.dialogId];
+    if (cached && cached.length > 0) {
+      lastSeenMsgId = Math.max(...cached.map((m: MessageLike) => m.id || 0));
+    } else {
+      lastSeenMsgId = 0;
+    }
+
     // Request AI summary if there were 5+ unreads (before marking read)
     if (previousUnreads >= 5) {
     }
@@ -448,6 +456,56 @@
       messagesEl.innerHTML = `<div class="loading">Failed to load messages</div>`;
     }
   }
+
+  // ── Polling fallback for real-time messages ──
+  let lastSeenMsgId: number = 0;
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+  function startPolling(): void {
+    if (pollTimer) return;
+    pollTimer = setInterval(pollForNewMessages, 1500);
+  }
+
+  function stopPolling(): void {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  }
+
+  async function pollForNewMessages(): Promise<void> {
+    if (!selectedDialogId) return;
+    try {
+      const messages = await api.getMessages(selectedDialogId, 5);
+      if (!Array.isArray(messages) || messages.length === 0) return;
+
+      const newest = messages[messages.length - 1];
+      const newestId = newest.id || 0;
+
+      if (lastSeenMsgId > 0 && newestId > lastSeenMsgId) {
+        // New messages found — find ones we haven't seen
+        const newMsgs = messages.filter((m: MessageLike) => (m.id || 0) > lastSeenMsgId);
+        for (const msg of newMsgs) {
+          // Check if already in DOM
+          const existing = messagesEl.querySelector(`[data-msg-id="${msg.id}"]`);
+          if (!existing) {
+            appendMessage(msg);
+          }
+        }
+        // Update cache
+        const cached = messageCache[selectedDialogId] || [];
+        const cachedIds = new Set(cached.map((m: MessageLike) => m.id));
+        for (const msg of newMsgs) {
+          if (!cachedIds.has(msg.id)) cached.push(msg);
+        }
+        messageCache[selectedDialogId] = cached;
+
+        api.markRead(selectedDialogId);
+      }
+
+      lastSeenMsgId = newestId;
+    } catch { /* ignore poll errors */ }
+  }
+
+  // Start polling immediately
+  startPolling();
 
   // ── Reply bar ──
 
