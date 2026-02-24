@@ -256,8 +256,10 @@ export class TelegramService {
 
   private setupEventHandlers(): void {
     if (!this.client) return;
+    console.log('[telegram] Setting up event handlers...');
 
     this.client.addEventHandler((event: NewMessageEvent) => {
+      console.log('[telegram] NewMessage event received, chatId:', event.message?.chatId?.toString());
       const msg = event.message;
       if (!msg) return;
       const chatId = msg.chatId?.toString() || (msg as any).peerId?.toString() || '';

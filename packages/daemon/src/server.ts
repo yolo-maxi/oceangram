@@ -881,17 +881,35 @@ export async function createServer(telegram: TelegramService) {
   );
 
   // --- WebSocket Events ---
+  let wsClientCount = 0;
   app.register(async function (fastify) {
     fastify.get('/events', { websocket: true }, (socket) => {
+      wsClientCount++;
+      console.log(`[ws] Client connected (${wsClientCount} total)`);
+
       const unsubscribe = telegram.onEvent((event: TelegramEvent) => {
         try {
           socket.send(JSON.stringify(event));
         } catch { /* client disconnected */ }
       });
 
-      socket.on('close', () => unsubscribe());
+      socket.on('close', () => {
+        wsClientCount--;
+        console.log(`[ws] Client disconnected (${wsClientCount} remaining)`);
+        unsubscribe();
+      });
       socket.on('error', () => unsubscribe());
     });
+  });
+
+  // Debug: emit a test event to all WS clients
+  app.get('/debug/ws-test', async () => {
+    (telegram as any).emit({
+      type: 'newMessage',
+      dialogId: 'test',
+      message: { id: Date.now(), text: '🔔 WS test event', date: Math.floor(Date.now() / 1000), fromId: '0', senderName: 'System', isOutgoing: false },
+    });
+    return { sent: true, wsClients: wsClientCount };
   });
 
   // --- Error handler ---
