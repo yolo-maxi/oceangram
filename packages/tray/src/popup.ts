@@ -318,6 +318,7 @@
       tab.appendChild(badge);
 
       tab.addEventListener('click', () => {
+        console.log('[tab-click]', entry.dialogId, entry.displayName, 'selected:', selectedDialogId);
         if (entry.dialogId !== selectedDialogId) {
           selectTab(entry);
         }
