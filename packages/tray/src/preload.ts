@@ -118,4 +118,10 @@ contextBridge.exposeInMainWorld('oceangram', {
     ipcRenderer.invoke('openclaw-enabled'),
   openclawGetStatus: (): Promise<{ model: string; activeSessions: number; totalTokens: number; estimatedCost: number } | null> =>
     ipcRenderer.invoke('openclaw-get-status'),
+
+  // Theme change notification (settings → main → popup)
+  notifyThemeChanged: (theme: string): void => ipcRenderer.send('theme-changed', theme),
+  onThemeChanged: (cb: (theme: string) => void): void => {
+    ipcRenderer.on('theme-changed', (_: IpcRendererEvent, theme: string) => cb(theme));
+  },
 });

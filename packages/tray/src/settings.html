@@ -5,6 +5,33 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="stylesheet" href="settings.css">
   <title>Oceangram — Settings</title>
+  <style>
+    /* Theme variables for settings page — synced with popup.css */
+    [data-theme="day"] {
+      --bg-primary: #ffffff; --bg-secondary: #f4f4f5; --bg-card: #ffffff;
+      --accent: #3390ec; --accent-hover: #4ea4f6;
+      --text-primary: #000000; --text-secondary: #707579;
+      --border: #e7e7e7; --red: #e53935; --green: #4fae4e;
+    }
+    [data-theme="night"] {
+      --bg-primary: #212121; --bg-secondary: #181818; --bg-card: #2b2b2b;
+      --accent: #8774e1; --accent-hover: #9a8aee;
+      --text-primary: #ffffff; --text-secondary: #aaaaaa;
+      --border: #303030; --red: #e53935; --green: #4fae4e;
+    }
+    [data-theme="tinted"] {
+      --bg-primary: #17212b; --bg-secondary: #0e1621; --bg-card: #182533;
+      --accent: #5eb5f7; --accent-hover: #79c4fc;
+      --text-primary: #f5f5f5; --text-secondary: #708499;
+      --border: #1f2f3f; --red: #e53935; --green: #4fae4e;
+    }
+    [data-theme="arctic"] {
+      --bg-primary: #1a1a2e; --bg-secondary: #13131f; --bg-card: #252540;
+      --accent: #b066ff; --accent-hover: #c088ff;
+      --text-primary: #e0e0f0; --text-secondary: #8888aa;
+      --border: #2a2a45; --red: #ff5252; --green: #4caf50;
+    }
+  </style>
 </head>
 <body>
   <div class="app">
@@ -61,9 +88,11 @@
             <div class="setting-desc">Choose the appearance of the chat popup</div>
           </div>
           <select class="setting-select" id="themeSelect">
-            <option value="system">System</option>
-            <option value="dark">Dark</option>
-            <option value="light">Light</option>
+            <option value="day">Day</option>
+            <option value="night">Night</option>
+            <option value="tinted">Tinted</option>
+            <option value="arctic">Arctic</option>
+            <option value="system">System (auto)</option>
           </select>
         </div>
       </div>

@@ -89,6 +89,10 @@ interface OceangramAPI {
   // OpenClaw AI enrichments (feature-flagged)
   openclawEnabled(): Promise<boolean>;
   openclawGetStatus(): Promise<{ model: string; activeSessions: number; totalTokens: number; estimatedCost: number } | null>;
+
+  // Theme change notification
+  notifyThemeChanged(theme: string): void;
+  onThemeChanged(cb: (theme: string) => void): void;
 }
 
 declare global {

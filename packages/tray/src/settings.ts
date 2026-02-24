@@ -24,6 +24,16 @@
   const alwaysOnTopToggle = document.getElementById('alwaysOnTop') as HTMLInputElement;
   const themeSelect = document.getElementById('themeSelect') as HTMLSelectElement;
 
+  // ── Theme ──
+
+  function applySettingsTheme(theme: string): void {
+    let resolved = theme;
+    if (theme === 'system') {
+      resolved = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day';
+    }
+    document.documentElement.setAttribute('data-theme', resolved);
+  }
+
   // ── Load state ──
 
   async function init(): Promise<void> {
@@ -111,7 +121,9 @@
     if (!settings) return;
 
     alwaysOnTopToggle.checked = settings.alwaysOnTop !== false;
-    themeSelect.value = settings.theme || 'system';
+    const theme = settings.theme || 'arctic';
+    themeSelect.value = theme;
+    applySettingsTheme(theme);
   }
 
   // ── Events ──
@@ -137,7 +149,11 @@
   });
 
   themeSelect.addEventListener('change', () => {
-    api.updateSettings({ theme: themeSelect.value as 'system' | 'dark' | 'light' });
+    const newTheme = themeSelect.value as 'system' | 'day' | 'night' | 'tinted' | 'arctic';
+    api.updateSettings({ theme: newTheme });
+    applySettingsTheme(newTheme);
+    // Notify popup window of theme change
+    api.notifyThemeChanged(newTheme);
   });
 
   closeBtn.addEventListener('click', () => {

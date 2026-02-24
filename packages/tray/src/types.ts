@@ -57,7 +57,7 @@ export interface AppSettings {
   maxBubbles: number;
   pollIntervalMs: number;
   showNotifications: boolean;
-  theme: 'system' | 'dark' | 'light';
+  theme: 'system' | 'day' | 'night' | 'tinted' | 'arctic';
 }
 
 export interface AppConfig {

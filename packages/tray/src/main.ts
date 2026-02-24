@@ -699,6 +699,13 @@ function setupIPC(): void {
     openSettings();
   });
 
+  // Theme changed in settings → forward to popup
+  ipcMain.on('theme-changed', (_: IpcMainEvent, theme: string) => {
+    if (popupWindow && !popupWindow.isDestroyed()) {
+      popupWindow.webContents.send('theme-changed', theme);
+    }
+  });
+
   // GitHub PR — fetch PR details
   ipcMain.handle('fetch-github-pr', async (_: IpcMainInvokeEvent, owner: string, repo: string, prNumber: number) => {
     try {

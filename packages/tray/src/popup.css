@@ -1,48 +1,102 @@
 /* popup.css — Minimal Oceangram popup */
-/* ── Dark theme (default) ── */
-:root,
-[data-theme="dark"] {
-  --bg: #1a1a2e;
-  --bg-dark: #151528;
-  --bg-bubble-in: #252540;
-  --bg-bubble-out: #7c5cff;
-  --accent: #7c5cff;
-  --accent-hover: #9078ff;
-  --text: #e0e0e0;
-  --text-dim: #8888aa;
-  --text-ts: #666688;
-  --border: #2a2a45;
-  --scrollbar: #3a3a55;
-  --scrollbar-hover: #4a4a65;
-  --red: #e53935;
-  --green: #43a047;
-  --code-bg: rgba(255,255,255,0.1);
-  --pre-bg: rgba(0,0,0,0.3);
-  --hover-overlay: rgba(255,255,255,0.04);
-  --link-color: #64b5f6;
-}
 
-/* ── Light theme (Telegram-inspired) ── */
-[data-theme="light"] {
+/* ── Day theme (Telegram default light) ── */
+[data-theme="day"] {
   --bg: #ffffff;
-  --bg-dark: #f0f2f5;
-  --bg-bubble-in: #e8ecf0;
-  --bg-bubble-out: #3390ec;
+  --bg-dark: #f4f4f5;
+  --bg-bubble-in: #ffffff;
+  --bg-bubble-out: #effdde;
   --accent: #3390ec;
   --accent-hover: #4ea4f6;
-  --text: #1a1a1a;
+  --text: #000000;
   --text-dim: #707579;
-  --text-ts: #8e9396;
-  --border: #dce1e6;
+  --text-ts: #a1aab3;
+  --border: #e7e7e7;
   --scrollbar: #c4c9cc;
   --scrollbar-hover: #a8adb1;
   --red: #e53935;
-  --green: #43a047;
+  --green: #4fae4e;
   --code-bg: rgba(0,0,0,0.06);
-  --pre-bg: rgba(0,0,0,0.05);
+  --pre-bg: rgba(0,0,0,0.04);
   --hover-overlay: rgba(0,0,0,0.04);
   --link-color: #3390ec;
 }
+
+/* ── Night theme (Telegram dark) ── */
+[data-theme="night"] {
+  --bg: #212121;
+  --bg-dark: #181818;
+  --bg-bubble-in: #2b2b2b;
+  --bg-bubble-out: #766ac8;
+  --accent: #8774e1;
+  --accent-hover: #9a8aee;
+  --text: #ffffff;
+  --text-dim: #aaaaaa;
+  --text-ts: #6e6e6e;
+  --border: #303030;
+  --scrollbar: #484848;
+  --scrollbar-hover: #5a5a5a;
+  --red: #e53935;
+  --green: #4fae4e;
+  --code-bg: rgba(255,255,255,0.08);
+  --pre-bg: rgba(255,255,255,0.06);
+  --hover-overlay: rgba(255,255,255,0.05);
+  --link-color: #8774e1;
+}
+
+/* ── Tinted theme (Telegram dark blue/tinted) ── */
+[data-theme="tinted"] {
+  --bg: #17212b;
+  --bg-dark: #0e1621;
+  --bg-bubble-in: #182533;
+  --bg-bubble-out: #2b5278;
+  --accent: #5eb5f7;
+  --accent-hover: #79c4fc;
+  --text: #f5f5f5;
+  --text-dim: #708499;
+  --text-ts: #546778;
+  --border: #1f2f3f;
+  --scrollbar: #384958;
+  --scrollbar-hover: #4a5f72;
+  --red: #e53935;
+  --green: #4fae4e;
+  --code-bg: rgba(255,255,255,0.08);
+  --pre-bg: rgba(255,255,255,0.06);
+  --hover-overlay: rgba(255,255,255,0.05);
+  --link-color: #5eb5f7;
+}
+
+/* ── Arctic theme (Classic blue, default) ── */
+:root,
+[data-theme="arctic"] {
+  --bg: #1a1a2e;
+  --bg-dark: #13131f;
+  --bg-bubble-in: #252540;
+  --bg-bubble-out: #7c5cff;
+  --accent: #b066ff;
+  --accent-hover: #c088ff;
+  --text: #e0e0f0;
+  --text-dim: #8888aa;
+  --text-ts: #6666aa;
+  --border: #2a2a45;
+  --scrollbar: #3a3a5a;
+  --scrollbar-hover: #4a4a6a;
+  --red: #ff5252;
+  --green: #4caf50;
+  --code-bg: rgba(255,255,255,0.08);
+  --pre-bg: rgba(255,255,255,0.06);
+  --hover-overlay: rgba(255,255,255,0.06);
+  --link-color: #64b5f6;
+}
+
+/* ── Day theme: outgoing bubble text stays dark (green bubble) ── */
+[data-theme="day"] .message.outgoing { color: var(--text); }
+[data-theme="day"] .message.outgoing .text { color: var(--text); }
+[data-theme="day"] .message.outgoing .time { color: var(--text-ts); }
+[data-theme="day"] .message.outgoing .text a { color: var(--link-color); }
+
+/* ── Day theme: incoming bubble border (white-on-white) ── */
+[data-theme="day"] .message.incoming { border: 1px solid var(--border); }
 
 * {
   margin: 0;

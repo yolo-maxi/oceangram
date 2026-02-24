@@ -179,7 +179,7 @@
     if (!appEl) return;
     if (theme === 'system') {
       const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      appEl.setAttribute('data-theme', prefersDark ? 'dark' : 'light');
+      appEl.setAttribute('data-theme', prefersDark ? 'night' : 'day');
     } else {
       appEl.setAttribute('data-theme', theme);
     }
@@ -189,8 +189,11 @@
     // Apply theme
     try {
       const settings = await api.getSettings();
-      applyTheme(settings?.theme || 'system');
-    } catch { /* default dark */ }
+      applyTheme(settings?.theme || 'arctic');
+    } catch { /* default arctic */ }
+
+    // Listen for live theme changes from settings window
+    api.onThemeChanged((theme: string) => applyTheme(theme));
 
     const me = await api.getMe();
     if (me && me.id) myId = String(me.id);
