@@ -265,6 +265,7 @@ function initializeApp(): void {
   });
 
   tracker.on('new-message', (data: NewMessageEvent) => {
+    console.log('[main] Forwarding new-message to popup, dialogId:', data.dialogId, 'popupExists:', !!popupWindow);
     // Forward to popup
     if (popupWindow && !popupWindow.isDestroyed()) {
       popupWindow.webContents.send('new-message', data);

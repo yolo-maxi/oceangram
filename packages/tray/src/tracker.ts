@@ -129,6 +129,7 @@ class MessageTracker extends EventEmitter {
   }
 
   private _handleNewMessage(event: DaemonEvent): void {
+    console.log('[tracker] _handleNewMessage called, event type:', (event as any).type, 'dialogId:', (event as any).dialogId);
     const msg = (event.message || event) as TelegramMessage;
     const fromId = String(msg.fromId || msg.senderId || '');
     const dialogId = String(msg.dialogId || msg.chatId || '');
