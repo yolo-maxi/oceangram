@@ -620,11 +620,23 @@
         // Find ones we haven't seen
         const newMsgs = messages.filter((m: MessageLike) => (m.id || 0) > lastSeenMsgId);
         for (const msg of newMsgs) {
-          // Check if already in DOM
+          // Check if already in DOM by ID
           const existing = messagesEl.querySelector(`[data-msg-id="${msg.id}"]`);
-          if (!existing) {
-            appendMessage(msg);
+          if (existing) continue;
+
+          // Check for optimistic duplicate (id=0, same text, outgoing)
+          const msgText = msg.text || msg.message || '';
+          const isOutgoing = msg.isOutgoing === true || String(msg.fromId || msg.senderId || '') === String(myId);
+          if (isOutgoing && msgText) {
+            const optimistic = messagesEl.querySelector('[data-msg-id="0"]');
+            if (optimistic && optimistic.querySelector('.text')?.textContent?.trim() === msgText.trim()) {
+              // Replace optimistic with real message (updates the ID)
+              optimistic.setAttribute('data-msg-id', String(msg.id || 0));
+              continue;
+            }
           }
+
+          appendMessage(msg);
         }
         // Update cache
         const cached = messageCache[selectedDialogId] || [];
