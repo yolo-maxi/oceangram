@@ -332,7 +332,7 @@ export class TelegramService {
         else if (fromId instanceof Api.PeerChat) userId = fromId.chatId.toString();
         this.emit({
           type: 'typing',
-          dialogId: update.chatId.toString(),
+          dialogId: `-${update.chatId.toString()}`,
           userId,
           action: actionName,
         });
@@ -343,9 +343,14 @@ export class TelegramService {
         if (fromId instanceof Api.PeerUser) userId = fromId.userId.toString();
         else if (fromId instanceof Api.PeerChannel) userId = fromId.channelId.toString();
         else if (fromId instanceof Api.PeerChat) userId = fromId.chatId.toString();
+        // Use negative channel ID + topic for forum groups
+        const channelDialogId = `-100${update.channelId.toString()}`;
+        const topicId = (update as any).topMsgId;
+        const typingDialogId = topicId ? `${channelDialogId}:${topicId}` : channelDialogId;
+        console.log('[telegram] typing event:', typingDialogId, 'from:', userId, 'action:', actionName);
         this.emit({
           type: 'typing',
-          dialogId: update.channelId.toString(),
+          dialogId: typingDialogId,
           userId,
           action: actionName,
         });
