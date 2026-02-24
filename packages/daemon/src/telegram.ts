@@ -531,13 +531,19 @@ export class TelegramService {
         try {
           const topics = await this.getForumTopics(chatId);
           for (const topic of topics) {
+            const topicOutgoing = this.isForumTopicLastMessageOutgoing(chatId, topic.topMessage);
+            // Get actual last message time from the message, not topic.date (which is creation date)
+            const topMsgMap = this.forumTopicMessages.get(chatId);
+            const topMsg = topMsgMap?.get(topic.topMessage);
+            const lastMsgTime = topMsg?.date || topic.date || 0;
             results.push({
               id: `${chatId}:${topic.id}`,
               chatId,
               topicId: topic.id,
               name: `${name} / ${topic.title || 'General'}`,
-              lastMessage: '',
-              lastMessageTime: topic.date || 0,
+              lastMessage: topMsg?.message || '',
+              lastMessageTime: lastMsgTime,
+              lastMessageOutgoing: topicOutgoing,
               unreadCount: topic.unreadCount || 0,
               isForum: true,
               groupName: name,
@@ -584,6 +590,8 @@ export class TelegramService {
     });
   }
 
+  private forumTopicMessages: Map<string, Map<number, Api.Message>> = new Map();
+
   private async getForumTopics(chatId: string): Promise<Api.ForumTopic[]> {
     if (!this.client) throw new Error('Not connected');
     const cached = this.forumTopicsCache.get(chatId);
@@ -602,8 +610,26 @@ export class TelegramService {
     const topics = (result.topics || []).filter(
       (t): t is Api.ForumTopic => t instanceof Api.ForumTopic
     );
+
+    // Index top messages by ID so we can check `out` flag for each topic
+    const msgMap = new Map<number, Api.Message>();
+    for (const msg of (result.messages || [])) {
+      if (msg instanceof Api.Message) {
+        msgMap.set(msg.id, msg);
+      }
+    }
+    this.forumTopicMessages.set(chatId, msgMap);
+
     this.forumTopicsCache.set(chatId, topics);
     return topics;
+  }
+
+  /** Check if the last message in a forum topic was sent by us */
+  isForumTopicLastMessageOutgoing(chatId: string, topMessage: number): boolean {
+    const msgMap = this.forumTopicMessages.get(chatId);
+    if (!msgMap) return false;
+    const msg = msgMap.get(topMessage);
+    return msg?.out ?? false;
   }
 
   async getMessages(dialogId: string, limit = 20, offsetId?: number): Promise<MessageInfo[]> {
