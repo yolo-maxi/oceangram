@@ -264,7 +264,7 @@
       // Single tab — show contact bar, no tabs
       contactBar.style.display = '';
       tabsEl.style.display = 'none';
-      if (selectedDialogId !== allTabs[0].dialogId) {
+      if (!selectedDialogId) {
         selectTab(allTabs[0]);
       }
     } else {
@@ -272,8 +272,8 @@
       contactBar.style.display = 'none';
       tabsEl.style.display = 'flex';
       renderTabs();
-      // Select first if nothing selected, or re-select current if still valid
-      if (!selectedDialogId || !allTabs.some((t) => t.dialogId === selectedDialogId)) {
+      // Only auto-select if nothing is selected yet
+      if (!selectedDialogId) {
         selectTab(allTabs[0]);
       } else {
         updateTabActive();

@@ -206,7 +206,7 @@ class MessageTracker extends EventEmitter {
 
   // ── Active chats (sent recently + has unreads) ──
 
-  private static readonly ACTIVE_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
+  private static readonly ACTIVE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 
   /** Record that the user sent a message to a dialog. */
   recordSent(dialogId: string): void {
