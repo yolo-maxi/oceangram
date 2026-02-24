@@ -320,13 +320,14 @@
       tabsEl.appendChild(tab);
 
       // Load avatar async
+      const photoId = baseDialogId(entry.dialogId);
       const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000));
-      Promise.race([api.getProfilePhoto(baseDialogId(entry.dialogId)), timeout]).then((dataUrl: string | null) => {
-        if (dataUrl) {
+      Promise.race([api.getProfilePhoto(photoId), timeout]).then((dataUrl: string | null) => {
+        console.log('[avatar-tab]', photoId, dataUrl ? 'loaded' : 'null');
+        if (dataUrl && avatar.parentNode) {
           avatar.innerHTML = `<img src="${dataUrl}" alt="">`;
-          avatar.textContent = '';
         }
-      }).catch(() => { /* keep initial */ });
+      }).catch((err) => { console.error('[avatar-tab] error', photoId, err); });
     });
   }
 
