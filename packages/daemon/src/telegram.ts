@@ -538,40 +538,18 @@ export class TelegramService {
         try {
           const topics = await this.getForumTopics(chatId);
           const topMsgMap = this.forumTopicMessages.get(chatId);
-          // Fetch our outbox message timestamps when not the top message (so non-whitelisted forums show if we posted)
-          const outboxIdsToFetch = topics
-            .filter((t) => t.readOutboxMaxId > 0 && !topMsgMap?.has(t.readOutboxMaxId))
-            .map((t) => t.readOutboxMaxId)
-            .slice(0, 50);
-          const outboxDates = new Map<number, number>();
-          if (outboxIdsToFetch.length > 0 && this.client) {
-            try {
-              const msgs = await this.client.getMessages(entity as any, { ids: outboxIdsToFetch });
-              for (const m of msgs || []) {
-                const msg = m as any;
-                // Only use date if this message is actually ours (outgoing); avoid marking topics we never posted in
-                if (msg?.id != null && msg?.date != null && msg?.out === true) outboxDates.set(msg.id, msg.date);
-              }
-            } catch {
-              // ignore fetch errors (rate limit, etc.)
-            }
-          }
 
           for (const topic of topics) {
             const topicOutgoing = this.isForumTopicLastMessageOutgoing(chatId, topic.topMessage);
             const topMsg = topMsgMap?.get(topic.topMessage);
             const lastMsgTime = topMsg?.date || topic.date || 0;
 
-            // Real timestamp of our last send only (no proxy from topic's last message).
+            // Only set lastOutgoingTime when WE are the top message in this topic.
+            // We do not use readOutboxMaxId / batch fetch: it can attribute another topic's or bot message to this one,
+            // causing forums like "CNC - admin / Search" to appear when the user hasn't posted there in years.
             let lastOutgoingTime = 0;
             if (topicOutgoing && topMsg) {
               lastOutgoingTime = topMsg.date || 0;
-            } else if (topic.readOutboxMaxId > 0) {
-              // Only use topMsgMap when readOutboxMaxId is THIS topic's top message; otherwise we'd use another topic's top message date
-              const fromTopMap = topic.readOutboxMaxId === topic.topMessage ? topMsgMap?.get(topic.readOutboxMaxId)?.date : undefined;
-              const fromFetch = outboxDates.get(topic.readOutboxMaxId);
-              if (fromTopMap) lastOutgoingTime = fromTopMap;
-              else if (fromFetch) lastOutgoingTime = fromFetch;
             }
 
             results.push({
