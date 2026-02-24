@@ -1054,13 +1054,19 @@
   });
 
   api.onActiveChatsChanged((chats) => {
-    activeChats = chats.map((e) => ({
+    const newActive = chats.map((e) => ({
       dialogId: e.dialogId,
       displayName: e.displayName,
       source: 'active' as const,
     }));
-    mergeTabs();
-    renderLayout();
+    // Only rebuild if the tab list actually changed
+    const oldIds = activeChats.map(t => t.dialogId).sort().join(',');
+    const newIds = newActive.map(t => t.dialogId).sort().join(',');
+    activeChats = newActive;
+    if (oldIds !== newIds) {
+      mergeTabs();
+      renderLayout();
+    }
   });
 
   api.onConnectionChanged((connected: boolean) => {
