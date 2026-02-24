@@ -255,14 +255,21 @@ class MessageTracker extends EventEmitter {
   getActiveChats(): Array<{ dialogId: string; displayName: string }> {
     const now = Date.now();
     const cutoff = now - MessageTracker.ACTIVE_WINDOW_MS;
+    const seen = new Set<string>();
     const result: Array<{ dialogId: string; displayName: string }> = [];
 
-    // Only show chats where user sent recently AND has unreads (replies)
-    // This keeps the client minimal — Telegram is full of spam
+    // 1. Any chat with unreads — these are conversations that need attention
+    for (const [dialogId, data] of this.unreads) {
+      if (data.count <= 0) continue;
+      seen.add(dialogId);
+      const name = this.dialogNames.get(dialogId) || dialogId;
+      result.push({ dialogId, displayName: name });
+    }
+
+    // 2. Any chat where user sent recently (even if no unreads yet — awaiting reply)
     for (const [dialogId, sentTime] of this.lastSentTimes) {
       if (sentTime < cutoff) continue;
-      const unread = this.unreads.get(dialogId);
-      if (!unread || unread.count <= 0) continue;
+      if (seen.has(dialogId)) continue;
       const name = this.dialogNames.get(dialogId) || dialogId;
       result.push({ dialogId, displayName: name });
     }

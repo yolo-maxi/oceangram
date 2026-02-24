@@ -292,26 +292,30 @@
     try {
       const trackerActive = await api.getActiveChats();
       for (const chat of trackerActive) {
-        // Expand forum topics: if tracker has base chatId (e.g. "-1003850294102"),
-        // check if daemon dialogs have topic entries (e.g. "-1003850294102:8547")
-        const topicEntries = cachedDialogs.filter((d) => {
-          const id = String(d.id);
-          return id.startsWith(chat.dialogId + ':');
-        });
+        if (whitelistIds.has(chat.dialogId)) continue;
 
-        if (topicEntries.length > 0) {
-          // Forum group — expand each topic as a separate active tab
-          for (const topic of topicEntries) {
-            const topicId = String(topic.id);
-            if (!whitelistIds.has(topicId)) {
-              const topicName = (topic as any).name || (topic as any).topicName || topicId;
-              newActive.push({ dialogId: topicId, displayName: topicName, source: 'active' as const });
+        // Try to get a better display name from cached dialogs
+        const matchedDialog = cachedDialogs.find(d => String(d.id) === chat.dialogId);
+        const displayName = matchedDialog
+          ? ((matchedDialog as any).name || (matchedDialog as any).topicName || matchedDialog.title || chat.displayName)
+          : chat.displayName;
+
+        // If tracker returned a base forum group ID (no colon), expand into topic tabs
+        if (!chat.dialogId.includes(':')) {
+          const topicEntries = cachedDialogs.filter(d => String(d.id).startsWith(chat.dialogId + ':'));
+          if (topicEntries.length > 0) {
+            for (const topic of topicEntries) {
+              const topicId = String(topic.id);
+              if (!whitelistIds.has(topicId)) {
+                const topicName = (topic as any).name || (topic as any).topicName || topicId;
+                newActive.push({ dialogId: topicId, displayName: topicName, source: 'active' as const });
+              }
             }
+            continue;
           }
-        } else if (!whitelistIds.has(chat.dialogId)) {
-          // Regular chat or already a topic ID — use as-is
-          newActive.push({ dialogId: chat.dialogId, displayName: chat.displayName, source: 'active' as const });
         }
+
+        newActive.push({ dialogId: chat.dialogId, displayName, source: 'active' as const });
       }
     } catch { /* ignore */ }
 
