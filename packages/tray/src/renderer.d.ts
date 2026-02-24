@@ -74,6 +74,12 @@ interface OceangramAPI {
   // Popup-specific (legacy)
   onPopupInit(cb: (data: PopupInitData) => void): void;
 
+  // Tab context menu
+  showTabContextMenu(dialogId: string, displayName: string, isPinned: boolean): void;
+
+  // Whitelist changed notification
+  onWhitelistChanged(cb: () => void): void;
+
   // Window control
   startDrag(): void;
   openSettings(): void;

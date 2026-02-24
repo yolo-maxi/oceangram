@@ -145,6 +145,22 @@ class DaemonClient extends EventEmitter {
     }
   }
 
+  async muteChat(dialogId: string): Promise<unknown> {
+    try {
+      return await this._request('POST', `/dialogs/${dialogId}/mute`);
+    } catch {
+      return null;
+    }
+  }
+
+  async unmuteChat(dialogId: string): Promise<unknown> {
+    try {
+      return await this._request('POST', `/dialogs/${dialogId}/unmute`);
+    } catch {
+      return null;
+    }
+  }
+
   async getProfilePhoto(userId: string): Promise<string | null> {
     const cachePath = path.join(AVATAR_DIR, `${userId}.jpg`);
     // Return cached if fresh (< 24h)

@@ -228,6 +228,8 @@ html, body {
   -webkit-app-region: no-drag;
   padding: 8px 14px;
   gap: 0;
+  overflow: visible;
+  position: relative;
 }
 
 .tabs::-webkit-scrollbar {
@@ -270,6 +272,8 @@ html, body {
   font-size: 12px;
   color: var(--text);
   font-weight: 600;
+  position: relative;
+  z-index: -1; /* sits behind other tab avatars when they overlap */
 }
 
 .tab {
@@ -286,6 +290,7 @@ html, body {
 /* Inactive tabs: stack with overlap (dynamic via --tab-overlap) */
 .tab:not(.active) {
   margin-left: var(--tab-overlap, -8px);
+  z-index: 10;
 }
 
 .tab:not(.active) .tab-name {

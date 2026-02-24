@@ -686,6 +686,40 @@ function setupIPC(): void {
     }
   });
 
+  // Tab context menu (right-click on avatar)
+  ipcMain.on('show-tab-context-menu', (event: IpcMainEvent, dialogId: string, displayName: string, isPinned: boolean) => {
+    const menu = Menu.buildFromTemplate([
+      {
+        label: isPinned ? '📌 Unpin Chat' : '📌 Pin Chat',
+        click: async () => {
+          if (isPinned) {
+            whitelist!.removeUser(dialogId.split(':')[0]);
+          } else {
+            whitelist!.addUser({ userId: dialogId, displayName });
+          }
+          // Notify popup to refresh
+          if (popupWindow && !popupWindow.isDestroyed()) {
+            popupWindow.webContents.send('whitelist-changed');
+          }
+        },
+      },
+      { type: 'separator' as const },
+      {
+        label: '🔇 Mute Chat',
+        click: () => {
+          daemon!.muteChat(dialogId);
+        },
+      },
+      {
+        label: '🔊 Unmute Chat',
+        click: () => {
+          daemon!.unmuteChat(dialogId);
+        },
+      },
+    ]);
+    menu.popup();
+  });
+
   // Close popup (from renderer)
   ipcMain.on('close-popup', (event: IpcMainEvent) => {
     const win = BrowserWindow.fromWebContents(event.sender);

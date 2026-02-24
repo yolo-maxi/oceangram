@@ -100,6 +100,15 @@ contextBridge.exposeInMainWorld('oceangram', {
     ipcRenderer.on('popup-init', (_: IpcRendererEvent, data: PopupInitData) => cb(data));
   },
 
+  // Tab context menu
+  showTabContextMenu: (dialogId: string, displayName: string, isPinned: boolean): void =>
+    ipcRenderer.send('show-tab-context-menu', dialogId, displayName, isPinned),
+
+  // Whitelist changed (from main process after context menu action)
+  onWhitelistChanged: (cb: () => void): void => {
+    ipcRenderer.on('whitelist-changed', () => cb());
+  },
+
   // Window control
   startDrag: (): void => ipcRenderer.send('start-drag'),
   openSettings: (): void => ipcRenderer.send('open-settings'),

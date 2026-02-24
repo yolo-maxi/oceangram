@@ -292,7 +292,24 @@
     try {
       const trackerActive = await api.getActiveChats();
       for (const chat of trackerActive) {
-        if (!whitelistIds.has(chat.dialogId)) {
+        // Expand forum topics: if tracker has base chatId (e.g. "-1003850294102"),
+        // check if daemon dialogs have topic entries (e.g. "-1003850294102:8547")
+        const topicEntries = cachedDialogs.filter((d) => {
+          const id = String(d.id);
+          return id.startsWith(chat.dialogId + ':');
+        });
+
+        if (topicEntries.length > 0) {
+          // Forum group — expand each topic as a separate active tab
+          for (const topic of topicEntries) {
+            const topicId = String(topic.id);
+            if (!whitelistIds.has(topicId)) {
+              const topicName = (topic as any).name || (topic as any).topicName || topicId;
+              newActive.push({ dialogId: topicId, displayName: topicName, source: 'active' as const });
+            }
+          }
+        } else if (!whitelistIds.has(chat.dialogId)) {
+          // Regular chat or already a topic ID — use as-is
           newActive.push({ dialogId: chat.dialogId, displayName: chat.displayName, source: 'active' as const });
         }
       }
@@ -412,6 +429,12 @@
         if (entry.dialogId !== selectedDialogId) {
           selectTab(entry.dialogId, entry.displayName, true);
         }
+      });
+
+      // Right-click context menu
+      tab.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        api.showTabContextMenu(entry.dialogId, entry.displayName, isPinned);
       });
 
       tabsEl.appendChild(tab);
@@ -1154,6 +1177,16 @@
 
   api.onConnectionChanged((connected: boolean) => {
     connectionBanner.classList.toggle('visible', !connected);
+  });
+
+  // Whitelist changed from context menu (pin/unpin) — refresh everything
+  api.onWhitelistChanged(async () => {
+    try {
+      const wl = await api.getWhitelist();
+      whitelistEntries = buildWhitelistEntries(wl, cachedDialogs);
+      mergeTabs();
+      renderLayout();
+    } catch { /* ignore */ }
   });
 
   // Select dialog from main process (e.g., notification click)
