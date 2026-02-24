@@ -147,6 +147,14 @@ class DaemonClient extends EventEmitter {
     }
   }
 
+  async markAllAsRead(dialogId: string): Promise<unknown> {
+    try {
+      return await this._request('POST', `/dialogs/${dialogId}/readAll`);
+    } catch {
+      return null;
+    }
+  }
+
   async muteChat(dialogId: string): Promise<unknown> {
     try {
       return await this._request('POST', `/dialogs/${dialogId}/mute`);
