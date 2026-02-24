@@ -537,29 +537,39 @@ export class TelegramService {
       if (isForum) {
         try {
           const topics = await this.getForumTopics(chatId);
+          const topMsgMap = this.forumTopicMessages.get(chatId);
+          // Fetch our outbox message timestamps when not the top message (so non-whitelisted forums show if we posted)
+          const outboxIdsToFetch = topics
+            .filter((t) => t.readOutboxMaxId > 0 && !topMsgMap?.has(t.readOutboxMaxId))
+            .map((t) => t.readOutboxMaxId)
+            .slice(0, 50);
+          const outboxDates = new Map<number, number>();
+          if (outboxIdsToFetch.length > 0 && this.client) {
+            try {
+              const msgs = await this.client.getMessages(entity as any, { ids: outboxIdsToFetch });
+              for (const m of msgs || []) {
+                const msg = m as any;
+                if (msg?.id != null && msg?.date != null) outboxDates.set(msg.id, msg.date);
+              }
+            } catch {
+              // ignore fetch errors (rate limit, etc.)
+            }
+          }
+
           for (const topic of topics) {
             const topicOutgoing = this.isForumTopicLastMessageOutgoing(chatId, topic.topMessage);
-            const topMsgMap = this.forumTopicMessages.get(chatId);
             const topMsg = topMsgMap?.get(topic.topMessage);
             const lastMsgTime = topMsg?.date || topic.date || 0;
 
-            // Detect recent outgoing activity even if last message isn't ours.
-            // readOutboxMaxId > 0 means we've sent at least one message to this topic.
-            // Use the outbox message's timestamp if available, otherwise approximate
-            // from topMessage time (user was active around that time).
+            // Real timestamp of our last send only (no proxy from topic's last message).
             let lastOutgoingTime = 0;
             if (topicOutgoing && topMsg) {
               lastOutgoingTime = topMsg.date || 0;
-            } else if (topic.readOutboxMaxId > 0 && topMsgMap) {
-              const outboxMsg = topMsgMap.get(topic.readOutboxMaxId);
-              if (outboxMsg?.date) {
-                lastOutgoingTime = outboxMsg.date;
-              } else if (lastMsgTime) {
-                // readOutboxMaxId exists but message not in cache — 
-                // approximate: if close to topMessage, we sent recently
-                const gap = topic.topMessage - topic.readOutboxMaxId;
-                if (gap <= 20) lastOutgoingTime = lastMsgTime;
-              }
+            } else if (topic.readOutboxMaxId > 0) {
+              const fromTopMap = topMsgMap?.get(topic.readOutboxMaxId)?.date;
+              const fromFetch = outboxDates.get(topic.readOutboxMaxId);
+              if (fromTopMap) lastOutgoingTime = fromTopMap;
+              else if (fromFetch) lastOutgoingTime = fromFetch;
             }
 
             results.push({
