@@ -455,7 +455,14 @@ export class TelegramService {
       }
     }
 
-    if (msg.replyTo?.replyToMsgId) info.replyToId = msg.replyTo.replyToMsgId;
+    // Set replyToId only for real replies, not forum topic anchors
+    const rt = msg.replyTo as any;
+    if (rt?.replyToMsgId && !rt.forumTopic) {
+      // In forum topics, replyToTopId is the topic ID — only expose replyToMsgId if it's a genuine reply
+      if (!rt.replyToTopId || rt.replyToMsgId !== rt.replyToTopId) {
+        info.replyToId = rt.replyToMsgId;
+      }
+    }
     if (msg.fwdFrom?.fromName) info.forwardFrom = msg.fwdFrom.fromName;
 
     return info;
