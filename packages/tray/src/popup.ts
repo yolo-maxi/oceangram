@@ -375,6 +375,7 @@
   // ── Select tab ──
 
   async function selectTab(entry: TabEntry): Promise<void> {
+    console.log('[selectTab]', entry.dialogId, entry.displayName);
     const previousUnreads = unreadCounts[entry.dialogId] || 0;
     selectedDialogId = entry.dialogId;
 
@@ -441,7 +442,9 @@
     }
 
     try {
+      console.log('[loadMessages] fetching', dialogId);
       const messages = await api.getMessages(dialogId, 30);
+      console.log('[loadMessages] got', Array.isArray(messages) ? messages.length : 'non-array', 'messages for', dialogId);
       loadingEl.style.display = 'none';
 
       if (!Array.isArray(messages) || messages.length === 0) {
@@ -451,7 +454,8 @@
 
       messageCache[dialogId] = messages;
       renderMessages(messages);
-    } catch {
+    } catch (err) {
+      console.error('[loadMessages] ERROR for', dialogId, err);
       loadingEl.style.display = 'none';
       messagesEl.innerHTML = `<div class="loading">Failed to load messages</div>`;
     }
