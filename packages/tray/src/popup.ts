@@ -62,11 +62,16 @@
   let openclawAvailable = false;
   let agentStatusTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /** Strip topic suffix from dialog ID for API calls (e.g. "-123:456" → "-123") */
+  function baseDialogId(dialogId: string): string {
+    return dialogId.split(':')[0];
+  }
+
   function loadAvatar(entry: TabEntry): void {
     const initial = (entry.displayName || '?').charAt(0).toUpperCase();
     contactAvatar.innerHTML = `<span>${escapeHtml(initial)}</span>`;
-    // Try loading photo with a 3-second timeout
-    const userId = entry.dialogId;
+    // Try loading photo — strip topic suffix for API
+    const userId = baseDialogId(entry.dialogId);
     console.log('[avatar] Loading for', userId, 'displayName:', entry.displayName);
     const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000));
     Promise.race([api.getProfilePhoto(userId), timeout]).then((dataUrl: string | null) => {
@@ -270,7 +275,7 @@
       const avatarEl = document.getElementById(`tab-avatar-${entry.dialogId}`);
       if (!avatarEl) continue;
       const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000));
-      Promise.race([api.getProfilePhoto(entry.dialogId), timeout]).then((dataUrl: string | null) => {
+      Promise.race([api.getProfilePhoto(baseDialogId(entry.dialogId)), timeout]).then((dataUrl: string | null) => {
         if (dataUrl) {
           const el = document.getElementById(`tab-avatar-${entry.dialogId}`);
           if (el) el.innerHTML = `<img src="${dataUrl}" alt="">`;
