@@ -148,7 +148,8 @@ export async function createServer(telegram: TelegramService) {
     async (request) => {
       const { dialogId } = request.body;
       if (!dialogId) throw { statusCode: 400, message: 'dialogId required' };
-      await telegram.markAsRead(dialogId, parseInt(request.params.messageId, 10));
+      const messageId = parseInt(request.params.messageId, 10);
+      await telegram.readHistory(dialogId, messageId);
       return { ok: true };
     }
   );
