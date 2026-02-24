@@ -60,6 +60,7 @@ interface OceangramAPI {
   onUnreadCountsUpdated(cb: (counts: Record<string, number>) => void): void;
   onSelectDialog(cb: (dialogId: string) => void): void;
   onActiveChatsChanged(cb: (chats: Array<{ dialogId: string; displayName: string }>) => void): void;
+  onTyping(cb: (data: { dialogId: string; userId: string; action: string }) => void): void;
 
   // Bubble-specific (legacy)
   getBubbleData(): Promise<Record<string, { displayName: string; count: number }>>;

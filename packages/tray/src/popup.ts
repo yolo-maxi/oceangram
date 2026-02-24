@@ -876,6 +876,7 @@
   }
 
   api.onNewMessage((data) => {
+    hideTyping();
     if (!data || !data.message) return;
     const msg = data.message;
     const msgDialogId = String(msg.dialogId || msg.chatId || data.dialogId || '');
@@ -903,6 +904,39 @@
     }
     // Note: active-chats-changed event from main process will handle
     // adding new tabs for non-whitelisted active conversations
+  });
+
+  // ── Typing indicator ──
+  let typingTimeout: ReturnType<typeof setTimeout> | null = null;
+  const typingBubble = document.createElement('div');
+  typingBubble.className = 'message typing-indicator';
+  typingBubble.innerHTML = '<div class="typing-dots"><span></span><span></span><span></span></div>';
+
+  function showTyping(): void {
+    if (!messagesEl.contains(typingBubble)) {
+      messagesEl.appendChild(typingBubble);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+    if (typingTimeout) clearTimeout(typingTimeout);
+    typingTimeout = setTimeout(hideTyping, 5000);
+  }
+
+  function hideTyping(): void {
+    if (typingTimeout) { clearTimeout(typingTimeout); typingTimeout = null; }
+    typingBubble.remove();
+  }
+
+  api.onTyping((data) => {
+    // Only show for currently selected dialog, and not our own typing
+    const matchedTab = findMatchingTab(data.dialogId);
+    const tabDialogId = matchedTab?.dialogId;
+    if (tabDialogId === selectedDialogId && String(data.userId) !== String(myId)) {
+      if (data.action === 'SendMessageCancelAction') {
+        hideTyping();
+      } else {
+        showTyping();
+      }
+    }
   });
 
   api.onUnreadCountsUpdated((counts) => {

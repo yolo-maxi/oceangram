@@ -229,6 +229,11 @@ function initializeApp(): void {
   daemon.on('ws-connected', () => console.log('[main] daemon WS connected'));
   daemon.on('ws-disconnected', () => console.log('[main] daemon WS disconnected'));
   daemon.on('newMessage', (e: unknown) => console.log('[main] got newMessage event:', JSON.stringify(e).substring(0, 200)));
+  daemon.on('typing', (e: { type: string; dialogId: string; userId: string; action: string }) => {
+    if (popupWindow && !popupWindow.isDestroyed()) {
+      popupWindow.webContents.send('typing', { dialogId: e.dialogId, userId: e.userId, action: e.action });
+    }
+  });
   tracker.on('new-message', (data: NewMessageEvent) => console.log('[main] tracker emitted new-message, dialogId:', data.dialogId));
 
   // Start OpenClaw (feature-flagged — no-op if disabled)

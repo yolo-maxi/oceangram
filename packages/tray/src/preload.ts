@@ -73,6 +73,9 @@ contextBridge.exposeInMainWorld('oceangram', {
   onActiveChatsChanged: (cb: (chats: Array<{ dialogId: string; displayName: string }>) => void): void => {
     ipcRenderer.on('active-chats-changed', (_: IpcRendererEvent, chats: Array<{ dialogId: string; displayName: string }>) => cb(chats));
   },
+  onTyping: (cb: (data: { dialogId: string; userId: string; action: string }) => void): void => {
+    ipcRenderer.on('typing', (_: IpcRendererEvent, data: { dialogId: string; userId: string; action: string }) => cb(data));
+  },
 
   // Bubble-specific (kept for backward compat)
   getBubbleData: (): Promise<Record<string, { displayName: string; count: number }>> =>
