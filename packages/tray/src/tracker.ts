@@ -266,14 +266,20 @@ class MessageTracker extends EventEmitter {
       }
     }
 
-    // Daemon is source of truth: clear lastSentTimes for dialogs that appear in this batch
-    // but are not in the "recent" set (so we stop showing them as active)
+    // Only clear lastSentTimes when daemon explicitly says "no recent send" (0 or old), not when
+    // we simply didn't add to recentFromDaemon (e.g. forum topic where we're not top message —
+    // daemon returns lastOutgoingTime=0 but user may have sent from tray).
     for (const d of dialogs) {
       const dialogId = String(d.id);
-      if (this.lastSentTimes.has(dialogId) && !recentFromDaemon.has(dialogId)) {
-        this.lastSentTimes.delete(dialogId);
-        changed = true;
-      }
+      if (!this.lastSentTimes.has(dialogId)) continue;
+      let outgoingTimeRaw = 0;
+      if ((d as any).lastOutgoingTime) outgoingTimeRaw = (d as any).lastOutgoingTime;
+      else if (d.lastMessageOutgoing) outgoingTimeRaw = d.lastMessageTime || 0;
+      if (outgoingTimeRaw === 0) continue; // daemon says no send info — don't clear (could be tray send)
+      const msgTimeMs = outgoingTimeRaw < 1e12 ? outgoingTimeRaw * 1000 : outgoingTimeRaw;
+      if (msgTimeMs >= cutoff && msgTimeMs <= now + FUTURE_TOLERANCE_MS) continue; // daemon says recent — don't clear
+      this.lastSentTimes.delete(dialogId);
+      changed = true;
     }
 
     if (changed) {

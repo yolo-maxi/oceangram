@@ -538,18 +538,38 @@ export class TelegramService {
         try {
           const topics = await this.getForumTopics(chatId);
           const topMsgMap = this.forumTopicMessages.get(chatId);
+          // For topics where we're not the top message, fetch our outbox message in this topic only (replyTo)
+          // so we get lastOutgoingTime without attributing another topic's message. Limit to avoid rate limit.
+          const topicsToFetch = topics.filter(
+            (t) => t.readOutboxMaxId > 0 && t.readOutboxMaxId !== t.topMessage
+          ).slice(0, 20);
+          const outboxDateByTopic = new Map<number, number>();
+          if (topicsToFetch.length > 0 && this.client) {
+            for (const topic of topicsToFetch) {
+              try {
+                const msgs = await this.client.getMessages(entity as any, {
+                  ids: [topic.readOutboxMaxId],
+                  replyTo: topic.id,
+                });
+                const msg = (msgs && msgs[0]) as any;
+                if (msg?.id != null && msg?.date != null && msg?.out === true) {
+                  outboxDateByTopic.set(topic.id, msg.date);
+                }
+              } catch { /* ignore */ }
+            }
+          }
 
           for (const topic of topics) {
             const topicOutgoing = this.isForumTopicLastMessageOutgoing(chatId, topic.topMessage);
             const topMsg = topMsgMap?.get(topic.topMessage);
             const lastMsgTime = topMsg?.date || topic.date || 0;
 
-            // Only set lastOutgoingTime when WE are the top message in this topic.
-            // We do not use readOutboxMaxId / batch fetch: it can attribute another topic's or bot message to this one,
-            // causing forums like "CNC - admin / Search" to appear when the user hasn't posted there in years.
             let lastOutgoingTime = 0;
             if (topicOutgoing && topMsg) {
               lastOutgoingTime = topMsg.date || 0;
+            } else if (topic.readOutboxMaxId > 0) {
+              const fromFetch = outboxDateByTopic.get(topic.id);
+              if (fromFetch) lastOutgoingTime = fromFetch;
             }
 
             results.push({
