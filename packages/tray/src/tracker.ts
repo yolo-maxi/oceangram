@@ -215,7 +215,7 @@ class MessageTracker extends EventEmitter {
 
   /**
    * Sync active chats from daemon dialog data.
-   * Checks each dialog's lastMessage — if it's outgoing and within 30 min, record it.
+   * Checks each dialog's lastMessage — if it's outgoing and within the active window, record it.
    * This captures sends from regular Telegram (not just the tray composer).
    */
   syncActiveChatsFromDaemon(dialogs: TelegramDialog[]): void {
@@ -248,7 +248,7 @@ class MessageTracker extends EventEmitter {
 
   /**
    * Returns dialog IDs where:
-   *  - user sent a message within the last 30 min (from tray OR regular Telegram), AND
+   *  - user sent a message within the last hour (from tray OR regular Telegram), AND
    *  - dialog has unread messages
    * These are "active conversations" that should appear alongside whitelisted tabs.
    */
