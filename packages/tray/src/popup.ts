@@ -283,30 +283,16 @@
       whitelistEntries = buildWhitelistEntries(wl, cachedDialogs);
     } catch { /* keep existing */ }
 
-    // Build active chats from dialogs: any dialog with unreads or recent sent
+    // Build active chats ONLY from tracker (user sent recently + has unreads)
+    // This is intentionally strict — Telegram is full of spam, only show chats
+    // where the user has actively engaged in the last hour
     const newActive: TabEntry[] = [];
     const whitelistIds = new Set(whitelistEntries.map(e => e.dialogId));
 
-    for (const d of cachedDialogs) {
-      const dialogId = String(d.id);
-      // Skip if already in whitelist
-      if (whitelistIds.has(dialogId)) continue;
-
-      const hasUnread = (d.unreadCount || 0) > 0;
-      const displayName = d.name || d.topicName || d.title || d.firstName || d.username || dialogId;
-
-      if (hasUnread) {
-        newActive.push({ dialogId, displayName, source: 'active' as const });
-      }
-    }
-
-    // Also include tracker active chats (covers sent-recently logic)
     try {
       const trackerActive = await api.getActiveChats();
-      const seen = new Set(newActive.map(e => e.dialogId));
       for (const chat of trackerActive) {
-        if (!seen.has(chat.dialogId) && !whitelistIds.has(chat.dialogId)) {
-          seen.add(chat.dialogId);
+        if (!whitelistIds.has(chat.dialogId)) {
           newActive.push({ dialogId: chat.dialogId, displayName: chat.displayName, source: 'active' as const });
         }
       }
