@@ -451,13 +451,7 @@
     if (messageCache[dialogId] && messageCache[dialogId].length > 0) {
       loadingEl.style.display = 'none';
       renderMessages(messageCache[dialogId]);
-      // Refresh in background
-      api.getMessages(dialogId, 30).then((messages: MessageLike[]) => {
-        if (Array.isArray(messages) && messages.length > 0 && selectedDialogId === dialogId) {
-          messageCache[dialogId] = messages;
-          renderMessages(messages);
-        }
-      }).catch(() => { /* keep cache */ });
+      // No background refresh — polling handles new messages
       return;
     }
 
@@ -558,7 +552,8 @@
 
   // ── Message rendering ──
 
-  function renderMessages(messages: MessageLike[]): void {
+  function renderMessages(messages: MessageLike[], preserveTyping = true): void {
+    const wasTyping = preserveTyping && messagesEl.contains(typingBubble);
     const sorted = [...messages].sort((a, b) => {
       const tA = a.date || a.timestamp || 0;
       const tB = b.date || b.timestamp || 0;
@@ -599,6 +594,7 @@
     }
 
     messagesEl.innerHTML = html;
+    if (wasTyping) messagesEl.appendChild(typingBubble);
     bindMessageClicks();
     scrollToBottom();
   }
