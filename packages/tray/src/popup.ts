@@ -194,8 +194,17 @@
     }
   }
 
-  /** Build whitelist entries from config + dialogs, expanding forum topics */
-  function buildWhitelistEntries(wl: Array<{ userId: string; username?: string; displayName?: string }>, dialogs: Array<{ id: string | number; name?: string; topicName?: string; title?: string; firstName?: string; username?: string }>): TabEntry[] {
+  /**
+   * Build whitelist entries from config + dialogs.
+   * When a pinned entry is a forum (base chatId), we only expand to topics that are "active"
+   * (user sent recently + has unreads) so we don't flood the bar with every topic.
+   * @param activeDialogIds - optional set of dialog IDs that qualify as active (recent send + unreads)
+   */
+  function buildWhitelistEntries(
+    wl: Array<{ userId: string; username?: string; displayName?: string }>,
+    dialogs: Array<{ id: string | number; name?: string; topicName?: string; title?: string; firstName?: string; username?: string }>,
+    activeDialogIds?: Set<string>
+  ): TabEntry[] {
     return wl.flatMap((e) => {
       const uid = String(e.userId);
       // Exact match first (DMs, or full chatId:topicId)
@@ -207,13 +216,16 @@
           source: 'whitelist' as const,
         }];
       }
-      // For forum groups: userId might be the base chatId — find all topics
+      // For forum groups: userId might be the base chatId — only show topics that are active
       const topicMatches = dialogs.filter((d) => {
         const id = String(d.id);
         return id.startsWith(uid + ':');
       });
       if (topicMatches.length > 0) {
-        return topicMatches.map((d) => ({
+        const toShow = activeDialogIds
+          ? topicMatches.filter((d) => activeDialogIds.has(String(d.id)))
+          : [];
+        return toShow.map((d) => ({
           dialogId: String(d.id),
           displayName: (d as any).name || (d as any).topicName || String(d.id),
           source: 'whitelist' as const,
@@ -255,9 +267,7 @@
       cachedDialogs = await api.getDialogs(100);
     } catch { /* ignore */ }
 
-    whitelistEntries = buildWhitelistEntries(wl, cachedDialogs);
-
-    // Get active chats from tracker
+    // Get active chats first so we can filter whitelist forum expansion (only show active topics)
     try {
       const ac = await api.getActiveChats();
       activeChats = ac.map((e) => ({
@@ -266,6 +276,9 @@
         source: 'active' as const,
       }));
     } catch { /* ignore */ }
+
+    const activeIds = new Set(activeChats.map((c) => c.dialogId));
+    whitelistEntries = buildWhitelistEntries(wl, cachedDialogs, activeIds);
 
     mergeTabs();
     renderLayout();
@@ -291,47 +304,27 @@
       cachedDialogs = await api.getDialogs(100);
     } catch { return; }
 
-    // Rebuild whitelist entries (forum topics may have changed)
-    try {
-      const wl = await api.getWhitelist();
-      whitelistEntries = buildWhitelistEntries(wl, cachedDialogs);
-    } catch { /* keep existing */ }
-
     // Build active chats ONLY from tracker (user sent recently + has unreads)
-    // This is intentionally strict — Telegram is full of spam, only show chats
-    // where the user has actively engaged in the last hour
     const newActive: TabEntry[] = [];
-    const whitelistIds = new Set(whitelistEntries.map(e => e.dialogId));
-
     try {
       const trackerActive = await api.getActiveChats();
       for (const chat of trackerActive) {
-        if (whitelistIds.has(chat.dialogId)) continue;
-
         // Try to get a better display name from cached dialogs
         const matchedDialog = cachedDialogs.find(d => String(d.id) === chat.dialogId);
         const displayName = matchedDialog
           ? ((matchedDialog as any).name || (matchedDialog as any).topicName || matchedDialog.title || chat.displayName)
           : chat.displayName;
-
-        // If tracker returned a base forum group ID (no colon), expand into topic tabs
-        if (!chat.dialogId.includes(':')) {
-          const topicEntries = cachedDialogs.filter(d => String(d.id).startsWith(chat.dialogId + ':'));
-          if (topicEntries.length > 0) {
-            for (const topic of topicEntries) {
-              const topicId = String(topic.id);
-              if (!whitelistIds.has(topicId)) {
-                const topicName = (topic as any).name || (topic as any).topicName || topicId;
-                newActive.push({ dialogId: topicId, displayName: topicName, source: 'active' as const });
-              }
-            }
-            continue;
-          }
-        }
-
         newActive.push({ dialogId: chat.dialogId, displayName, source: 'active' as const });
       }
     } catch { /* ignore */ }
+
+    const activeIds = new Set(newActive.map((c) => c.dialogId));
+
+    // Rebuild whitelist entries (forum expansion only includes active topics)
+    try {
+      const wl = await api.getWhitelist();
+      whitelistEntries = buildWhitelistEntries(wl, cachedDialogs, activeIds);
+    } catch { /* keep existing */ }
 
     const oldIds = activeChats.map(t => t.dialogId).sort().join(',');
     const newIds = newActive.map(t => t.dialogId).sort().join(',');
@@ -1303,7 +1296,8 @@
   api.onWhitelistChanged(async () => {
     try {
       const wl = await api.getWhitelist();
-      whitelistEntries = buildWhitelistEntries(wl, cachedDialogs);
+      const activeIds = new Set(activeChats.map((c) => c.dialogId));
+      whitelistEntries = buildWhitelistEntries(wl, cachedDialogs, activeIds);
       mergeTabs();
       renderLayout();
     } catch { /* ignore */ }
