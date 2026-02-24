@@ -607,7 +607,7 @@ export class TelegramService {
     // L1: in-memory cache
     const cacheKey = `${dialogId}|${limit}|${offsetId || 0}`;
     const memCached = this.messagesCache.get(cacheKey);
-    if (memCached && (Date.now() - memCached.ts) < 20_000) {
+    if (memCached && (Date.now() - memCached.ts) < 2_000) {
       return memCached.data;
     }
 
