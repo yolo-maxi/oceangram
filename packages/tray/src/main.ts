@@ -27,6 +27,10 @@ let popupWindow: BrowserWindow | null = null;
 let popupPinned = true;
 const daemonManager = new DaemonManager();
 
+// Tray icon flashing state
+let flashInterval: ReturnType<typeof setInterval> | null = null;
+let flashState = false; // toggles between normal and unread icon
+
 // GitHub token (optional, read from ~/.oceangram/github-token)
 let githubToken: string | null = null;
 try {
@@ -272,10 +276,21 @@ function initializeApp(): void {
       popupWindow.webContents.send('new-message', data);
     }
 
+    const popupFocused = popupWindow && !popupWindow.isDestroyed() && popupWindow.isFocused();
+
+    // Flash tray icon if popup is not focused
+    if (!popupFocused) {
+      startTrayFlash();
+
+      // macOS: bounce dock icon
+      if (process.platform === 'darwin') {
+        app.dock?.bounce('informational');
+      }
+    }
+
     // Show notification if enabled and popup is not focused
     const settings = whitelist!.getSettings();
     if (settings.showNotifications) {
-      const popupFocused = popupWindow && !popupWindow.isDestroyed() && popupWindow.isFocused();
       if (!popupFocused) {
         showNotification(data);
       }
@@ -415,6 +430,11 @@ function openPopup(): void {
     }
   });
 
+  // Stop tray flash when popup gets focus
+  popupWindow.on('focus', () => {
+    stopTrayFlash();
+  });
+
   // Close on blur (clicking outside) — unless pinned
   popupWindow.on('blur', () => {
     setTimeout(() => {
@@ -447,10 +467,46 @@ function updateTrayIcon(): void {
     tooltip = 'Oceangram — Connected';
   }
 
-  const icon = nativeImage.createFromPath(path.join(__dirname, '..', 'src', 'assets', iconName));
-  icon.setTemplateImage(true);
-  tray.setImage(icon);
+  // Only update icon if not currently flashing (flash handles its own icon)
+  if (!flashInterval) {
+    const icon = nativeImage.createFromPath(path.join(__dirname, '..', 'src', 'assets', iconName));
+    icon.setTemplateImage(true);
+    tray.setImage(icon);
+  }
   tray.setToolTip(tooltip);
+
+  // Set macOS badge count
+  if (process.platform === 'darwin') {
+    app.setBadgeCount(totalUnreads);
+  }
+}
+
+function startTrayFlash(): void {
+  if (flashInterval) return; // already flashing
+
+  const normalIconPath = path.join(__dirname, '..', 'src', 'assets', 'tray-icon.png');
+  const unreadIconPath = path.join(__dirname, '..', 'src', 'assets', 'tray-unread.png');
+  const normalIcon = nativeImage.createFromPath(normalIconPath);
+  normalIcon.setTemplateImage(true);
+  const unreadIcon = nativeImage.createFromPath(unreadIconPath);
+  unreadIcon.setTemplateImage(true);
+
+  flashState = false;
+  flashInterval = setInterval(() => {
+    if (!tray) return;
+    flashState = !flashState;
+    tray.setImage(flashState ? unreadIcon : normalIcon);
+  }, 500);
+}
+
+function stopTrayFlash(): void {
+  if (flashInterval) {
+    clearInterval(flashInterval);
+    flashInterval = null;
+    flashState = false;
+  }
+  // Restore correct icon state
+  updateTrayIcon();
 }
 
 // ── Notifications ──
