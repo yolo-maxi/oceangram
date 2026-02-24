@@ -474,8 +474,11 @@
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   }
 
+  let pollCount = 0;
   async function pollForNewMessages(): Promise<void> {
     if (!selectedDialogId) return;
+    pollCount++;
+    if (pollCount % 10 === 1) console.log('[poll]', pollCount, 'dialog:', selectedDialogId, 'lastSeen:', lastSeenMsgId);
     try {
       const messages = await api.getMessages(selectedDialogId, 5);
       if (!Array.isArray(messages) || messages.length === 0) return;
