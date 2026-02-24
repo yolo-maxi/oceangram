@@ -323,6 +323,7 @@ html, body {
 }
 
 .message.incoming {
+  color: var(--text);
   align-self: flex-start;
   background: var(--bg-bubble-in);
   border-bottom-left-radius: 4px;
@@ -332,6 +333,20 @@ html, body {
   align-self: flex-end;
   background: var(--bg-bubble-out);
   border-bottom-right-radius: 4px;
+  color: #fff;
+}
+
+.message.outgoing .text {
+  color: #fff;
+}
+
+.message.outgoing .time {
+  color: rgba(255,255,255,0.6);
+}
+
+.message.outgoing .text a {
+  color: rgba(255,255,255,0.9);
+  text-decoration: underline;
 }
 
 .message .sender {
