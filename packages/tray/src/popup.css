@@ -20,6 +20,9 @@
   --pre-bg: rgba(0,0,0,0.04);
   --hover-overlay: rgba(0,0,0,0.04);
   --link-color: #3390ec;
+  --chat-bg: #c8daea;
+  --chat-bg-gradient: linear-gradient(180deg, #c6ddea, #a8c6da);
+  --chat-bg-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><path fill='%235b8fc9' fill-opacity='0.08' d='M22 15c0-5 5-10 10-10s10 5 10 10c0-5 5-10 10-10s10 5 10 10c0 10-20 20-20 20S22 25 22 15z' transform='translate(5,8) scale(0.45)'/><circle fill='%235b8fc9' fill-opacity='0.08' cx='95' cy='22' r='4.5'/><ellipse fill='%235b8fc9' fill-opacity='0.08' cx='158' cy='18' rx='3' ry='7'/><ellipse fill='%235b8fc9' fill-opacity='0.08' cx='158' cy='30' rx='3' ry='7'/><ellipse fill='%235b8fc9' fill-opacity='0.08' cx='151' cy='24' rx='7' ry='3'/><ellipse fill='%235b8fc9' fill-opacity='0.08' cx='165' cy='24' rx='7' ry='3'/><circle fill='%235b8fc9' fill-opacity='0.08' cx='158' cy='24' r='2.5'/><path fill='%235b8fc9' fill-opacity='0.08' d='M32 68l2.5-7.5 2.5 7.5h7.5l-6 4.5 2.3 7.2-6.3-4.5-6.3 4.5 2.3-7.2-6-4.5z' transform='scale(0.8)'/><circle fill='%235b8fc9' fill-opacity='0.08' cx='140' cy='72' r='3'/><circle fill='%235b8fc9' fill-opacity='0.08' cx='149' cy='66' r='2'/><circle fill='%235b8fc9' fill-opacity='0.08' cx='145' cy='79' r='2.2'/><path fill='%235b8fc9' fill-opacity='0.08' d='M22 15c0-5 5-10 10-10s10 5 10 10c0-5 5-10 10-10s10 5 10 10c0 10-20 20-20 20S22 25 22 15z' transform='translate(160,88) scale(0.4) rotate(20,32,20)'/><path fill='%235b8fc9' fill-opacity='0.08' d='M68 118l7 7-7 7-7-7z'/><circle fill='%235b8fc9' fill-opacity='0.08' cx='22' cy='145' r='4'/><ellipse fill='%235b8fc9' fill-opacity='0.08' cx='112' cy='128' rx='2' ry='5'/><ellipse fill='%235b8fc9' fill-opacity='0.08' cx='112' cy='138' rx='2' ry='5'/><ellipse fill='%235b8fc9' fill-opacity='0.08' cx='107' cy='133' rx='5' ry='2'/><ellipse fill='%235b8fc9' fill-opacity='0.08' cx='117' cy='133' rx='5' ry='2'/><circle fill='%235b8fc9' fill-opacity='0.08' cx='112' cy='133' r='2'/><path fill='%235b8fc9' fill-opacity='0.08' d='M168 162l2-6 2 6h6.5l-5.2 3.8 2 6.2-5.3-3.8-5.3 3.8 2-6.2-5.2-3.8z'/><circle fill='%235b8fc9' fill-opacity='0.08' cx='50' cy='178' r='3.5'/><path fill='none' stroke='%235b8fc9' stroke-opacity='0.08' stroke-width='1.8' stroke-linecap='round' d='M82 180q9-9 18 0t18 0'/></svg>");
 }
 
 /* ── Night theme (Telegram dark) ── */
@@ -42,6 +45,9 @@
   --pre-bg: rgba(255,255,255,0.06);
   --hover-overlay: rgba(255,255,255,0.05);
   --link-color: #8774e1;
+  --chat-bg: #1a1a1a;
+  --chat-bg-gradient: linear-gradient(180deg, #1e1e1e, #151515);
+  --chat-bg-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><path fill='%238774e1' fill-opacity='0.07' d='M22 15c0-5 5-10 10-10s10 5 10 10c0-5 5-10 10-10s10 5 10 10c0 10-20 20-20 20S22 25 22 15z' transform='translate(5,8) scale(0.45)'/><circle fill='%238774e1' fill-opacity='0.07' cx='95' cy='22' r='4.5'/><ellipse fill='%238774e1' fill-opacity='0.07' cx='158' cy='18' rx='3' ry='7'/><ellipse fill='%238774e1' fill-opacity='0.07' cx='158' cy='30' rx='3' ry='7'/><ellipse fill='%238774e1' fill-opacity='0.07' cx='151' cy='24' rx='7' ry='3'/><ellipse fill='%238774e1' fill-opacity='0.07' cx='165' cy='24' rx='7' ry='3'/><circle fill='%238774e1' fill-opacity='0.07' cx='158' cy='24' r='2.5'/><path fill='%238774e1' fill-opacity='0.07' d='M32 68l2.5-7.5 2.5 7.5h7.5l-6 4.5 2.3 7.2-6.3-4.5-6.3 4.5 2.3-7.2-6-4.5z' transform='scale(0.8)'/><circle fill='%238774e1' fill-opacity='0.07' cx='140' cy='72' r='3'/><circle fill='%238774e1' fill-opacity='0.07' cx='149' cy='66' r='2'/><circle fill='%238774e1' fill-opacity='0.07' cx='145' cy='79' r='2.2'/><path fill='%238774e1' fill-opacity='0.07' d='M22 15c0-5 5-10 10-10s10 5 10 10c0-5 5-10 10-10s10 5 10 10c0 10-20 20-20 20S22 25 22 15z' transform='translate(160,88) scale(0.4) rotate(20,32,20)'/><path fill='%238774e1' fill-opacity='0.07' d='M68 118l7 7-7 7-7-7z'/><circle fill='%238774e1' fill-opacity='0.07' cx='22' cy='145' r='4'/><ellipse fill='%238774e1' fill-opacity='0.07' cx='112' cy='128' rx='2' ry='5'/><ellipse fill='%238774e1' fill-opacity='0.07' cx='112' cy='138' rx='2' ry='5'/><ellipse fill='%238774e1' fill-opacity='0.07' cx='107' cy='133' rx='5' ry='2'/><ellipse fill='%238774e1' fill-opacity='0.07' cx='117' cy='133' rx='5' ry='2'/><circle fill='%238774e1' fill-opacity='0.07' cx='112' cy='133' r='2'/><path fill='%238774e1' fill-opacity='0.07' d='M168 162l2-6 2 6h6.5l-5.2 3.8 2 6.2-5.3-3.8-5.3 3.8 2-6.2-5.2-3.8z'/><circle fill='%238774e1' fill-opacity='0.07' cx='50' cy='178' r='3.5'/><path fill='none' stroke='%238774e1' stroke-opacity='0.07' stroke-width='1.8' stroke-linecap='round' d='M82 180q9-9 18 0t18 0'/></svg>");
 }
 
 /* ── Tinted theme (Telegram dark blue/tinted) ── */
@@ -64,6 +70,9 @@
   --pre-bg: rgba(255,255,255,0.06);
   --hover-overlay: rgba(255,255,255,0.05);
   --link-color: #5eb5f7;
+  --chat-bg: #0d1520;
+  --chat-bg-gradient: linear-gradient(180deg, #111d2b, #0a1018);
+  --chat-bg-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><path fill='%235eb5f7' fill-opacity='0.06' d='M22 15c0-5 5-10 10-10s10 5 10 10c0-5 5-10 10-10s10 5 10 10c0 10-20 20-20 20S22 25 22 15z' transform='translate(5,8) scale(0.45)'/><circle fill='%235eb5f7' fill-opacity='0.06' cx='95' cy='22' r='4.5'/><ellipse fill='%235eb5f7' fill-opacity='0.06' cx='158' cy='18' rx='3' ry='7'/><ellipse fill='%235eb5f7' fill-opacity='0.06' cx='158' cy='30' rx='3' ry='7'/><ellipse fill='%235eb5f7' fill-opacity='0.06' cx='151' cy='24' rx='7' ry='3'/><ellipse fill='%235eb5f7' fill-opacity='0.06' cx='165' cy='24' rx='7' ry='3'/><circle fill='%235eb5f7' fill-opacity='0.06' cx='158' cy='24' r='2.5'/><path fill='%235eb5f7' fill-opacity='0.06' d='M32 68l2.5-7.5 2.5 7.5h7.5l-6 4.5 2.3 7.2-6.3-4.5-6.3 4.5 2.3-7.2-6-4.5z' transform='scale(0.8)'/><circle fill='%235eb5f7' fill-opacity='0.06' cx='140' cy='72' r='3'/><circle fill='%235eb5f7' fill-opacity='0.06' cx='149' cy='66' r='2'/><circle fill='%235eb5f7' fill-opacity='0.06' cx='145' cy='79' r='2.2'/><path fill='%235eb5f7' fill-opacity='0.06' d='M22 15c0-5 5-10 10-10s10 5 10 10c0-5 5-10 10-10s10 5 10 10c0 10-20 20-20 20S22 25 22 15z' transform='translate(160,88) scale(0.4) rotate(20,32,20)'/><path fill='%235eb5f7' fill-opacity='0.06' d='M68 118l7 7-7 7-7-7z'/><circle fill='%235eb5f7' fill-opacity='0.06' cx='22' cy='145' r='4'/><ellipse fill='%235eb5f7' fill-opacity='0.06' cx='112' cy='128' rx='2' ry='5'/><ellipse fill='%235eb5f7' fill-opacity='0.06' cx='112' cy='138' rx='2' ry='5'/><ellipse fill='%235eb5f7' fill-opacity='0.06' cx='107' cy='133' rx='5' ry='2'/><ellipse fill='%235eb5f7' fill-opacity='0.06' cx='117' cy='133' rx='5' ry='2'/><circle fill='%235eb5f7' fill-opacity='0.06' cx='112' cy='133' r='2'/><path fill='%235eb5f7' fill-opacity='0.06' d='M168 162l2-6 2 6h6.5l-5.2 3.8 2 6.2-5.3-3.8-5.3 3.8 2-6.2-5.2-3.8z'/><circle fill='%235eb5f7' fill-opacity='0.06' cx='50' cy='178' r='3.5'/><path fill='none' stroke='%235eb5f7' stroke-opacity='0.06' stroke-width='1.8' stroke-linecap='round' d='M82 180q9-9 18 0t18 0'/></svg>");
 }
 
 /* ── Arctic theme (Classic blue, default) ── */
@@ -87,6 +96,9 @@
   --pre-bg: rgba(255,255,255,0.06);
   --hover-overlay: rgba(255,255,255,0.06);
   --link-color: #64b5f6;
+  --chat-bg: #151525;
+  --chat-bg-gradient: linear-gradient(180deg, #181830, #121220);
+  --chat-bg-pattern: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><path fill='%239070e0' fill-opacity='0.07' d='M22 15c0-5 5-10 10-10s10 5 10 10c0-5 5-10 10-10s10 5 10 10c0 10-20 20-20 20S22 25 22 15z' transform='translate(5,8) scale(0.45)'/><circle fill='%239070e0' fill-opacity='0.07' cx='95' cy='22' r='4.5'/><ellipse fill='%239070e0' fill-opacity='0.07' cx='158' cy='18' rx='3' ry='7'/><ellipse fill='%239070e0' fill-opacity='0.07' cx='158' cy='30' rx='3' ry='7'/><ellipse fill='%239070e0' fill-opacity='0.07' cx='151' cy='24' rx='7' ry='3'/><ellipse fill='%239070e0' fill-opacity='0.07' cx='165' cy='24' rx='7' ry='3'/><circle fill='%239070e0' fill-opacity='0.07' cx='158' cy='24' r='2.5'/><path fill='%239070e0' fill-opacity='0.07' d='M32 68l2.5-7.5 2.5 7.5h7.5l-6 4.5 2.3 7.2-6.3-4.5-6.3 4.5 2.3-7.2-6-4.5z' transform='scale(0.8)'/><circle fill='%239070e0' fill-opacity='0.07' cx='140' cy='72' r='3'/><circle fill='%239070e0' fill-opacity='0.07' cx='149' cy='66' r='2'/><circle fill='%239070e0' fill-opacity='0.07' cx='145' cy='79' r='2.2'/><path fill='%239070e0' fill-opacity='0.07' d='M22 15c0-5 5-10 10-10s10 5 10 10c0-5 5-10 10-10s10 5 10 10c0 10-20 20-20 20S22 25 22 15z' transform='translate(160,88) scale(0.4) rotate(20,32,20)'/><path fill='%239070e0' fill-opacity='0.07' d='M68 118l7 7-7 7-7-7z'/><circle fill='%239070e0' fill-opacity='0.07' cx='22' cy='145' r='4'/><ellipse fill='%239070e0' fill-opacity='0.07' cx='112' cy='128' rx='2' ry='5'/><ellipse fill='%239070e0' fill-opacity='0.07' cx='112' cy='138' rx='2' ry='5'/><ellipse fill='%239070e0' fill-opacity='0.07' cx='107' cy='133' rx='5' ry='2'/><ellipse fill='%239070e0' fill-opacity='0.07' cx='117' cy='133' rx='5' ry='2'/><circle fill='%239070e0' fill-opacity='0.07' cx='112' cy='133' r='2'/><path fill='%239070e0' fill-opacity='0.07' d='M168 162l2-6 2 6h6.5l-5.2 3.8 2 6.2-5.3-3.8-5.3 3.8 2-6.2-5.2-3.8z'/><circle fill='%239070e0' fill-opacity='0.07' cx='50' cy='178' r='3.5'/><path fill='none' stroke='%239070e0' stroke-opacity='0.07' stroke-width='1.8' stroke-linecap='round' d='M82 180q9-9 18 0t18 0'/></svg>");
 }
 
 /* ── Day theme: outgoing bubble text stays dark (green bubble) ── */
@@ -349,6 +361,10 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  background: var(--chat-bg-pattern), var(--chat-bg-gradient);
+  background-color: var(--chat-bg);
+  background-repeat: repeat, no-repeat;
+  background-size: 200px 200px, 100% 100%;
 }
 
 .messages::-webkit-scrollbar {
