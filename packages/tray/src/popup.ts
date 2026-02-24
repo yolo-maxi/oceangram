@@ -379,6 +379,11 @@
     const previousUnreads = unreadCounts[entry.dialogId] || 0;
     selectedDialogId = entry.dialogId;
 
+    // Ensure selected tab stays in allTabs so renderLayout won't override
+    if (!allTabs.some((t) => t.dialogId === entry.dialogId)) {
+      allTabs.push(entry);
+    }
+
     // Clear pending state when switching tabs
     clearReplyTarget();
     clearAttachment();
