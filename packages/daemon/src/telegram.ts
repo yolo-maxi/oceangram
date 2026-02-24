@@ -549,7 +549,8 @@ export class TelegramService {
               const msgs = await this.client.getMessages(entity as any, { ids: outboxIdsToFetch });
               for (const m of msgs || []) {
                 const msg = m as any;
-                if (msg?.id != null && msg?.date != null) outboxDates.set(msg.id, msg.date);
+                // Only use date if this message is actually ours (outgoing); avoid marking topics we never posted in
+                if (msg?.id != null && msg?.date != null && msg?.out === true) outboxDates.set(msg.id, msg.date);
               }
             } catch {
               // ignore fetch errors (rate limit, etc.)
@@ -566,7 +567,8 @@ export class TelegramService {
             if (topicOutgoing && topMsg) {
               lastOutgoingTime = topMsg.date || 0;
             } else if (topic.readOutboxMaxId > 0) {
-              const fromTopMap = topMsgMap?.get(topic.readOutboxMaxId)?.date;
+              // Only use topMsgMap when readOutboxMaxId is THIS topic's top message; otherwise we'd use another topic's top message date
+              const fromTopMap = topic.readOutboxMaxId === topic.topMessage ? topMsgMap?.get(topic.readOutboxMaxId)?.date : undefined;
               const fromFetch = outboxDates.get(topic.readOutboxMaxId);
               if (fromTopMap) lastOutgoingTime = fromTopMap;
               else if (fromFetch) lastOutgoingTime = fromFetch;
