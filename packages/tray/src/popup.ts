@@ -180,14 +180,35 @@
       dialogs = await api.getDialogs(100);
     } catch { /* ignore */ }
 
-    whitelistEntries = wl.map((e) => {
-      // For DMs, userId IS the dialogId. For groups, try to find a matching dialog.
-      const matchedDialog = dialogs.find((d) => String(d.id) === String(e.userId));
-      return {
-        dialogId: matchedDialog ? String(matchedDialog.id) : e.userId,
-        displayName: e.displayName || e.username || e.userId,
+    whitelistEntries = wl.flatMap((e) => {
+      const uid = String(e.userId);
+      // Exact match first (DMs, or full chatId:topicId)
+      const exactMatch = dialogs.find((d) => String(d.id) === uid);
+      if (exactMatch) {
+        return [{
+          dialogId: String(exactMatch.id),
+          displayName: e.displayName || e.username || uid,
+          source: 'whitelist' as const,
+        }];
+      }
+      // For forum groups: userId might be the base chatId — find all topics
+      const topicMatches = dialogs.filter((d) => {
+        const id = String(d.id);
+        return id.startsWith(uid + ':');
+      });
+      if (topicMatches.length > 0) {
+        return topicMatches.map((d) => ({
+          dialogId: String(d.id),
+          displayName: (d as any).name || (d as any).topicName || String(d.id),
+          source: 'whitelist' as const,
+        }));
+      }
+      // Fallback: use userId as-is
+      return [{
+        dialogId: uid,
+        displayName: e.displayName || e.username || uid,
         source: 'whitelist' as const,
-      };
+      }];
     });
 
     // Get active chats
