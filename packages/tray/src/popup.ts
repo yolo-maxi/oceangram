@@ -542,7 +542,9 @@
       const newestId = newest.id || 0;
 
       if (lastSeenMsgId > 0 && newestId > lastSeenMsgId) {
-        // New messages found — find ones we haven't seen
+        // New messages arrived — hide typing indicator
+        hideTyping();
+        // Find ones we haven't seen
         const newMsgs = messages.filter((m: MessageLike) => (m.id || 0) > lastSeenMsgId);
         for (const msg of newMsgs) {
           // Check if already in DOM
