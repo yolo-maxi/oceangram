@@ -573,6 +573,14 @@ html, body {
   font-size: 13px;
 }
 
+.loading-older {
+  text-align: center;
+  padding: 8px;
+  color: var(--text-dim);
+  font-size: 12px;
+  opacity: 0.7;
+}
+
 /* ── Reply bar ── */
 .reply-bar {
   display: flex;

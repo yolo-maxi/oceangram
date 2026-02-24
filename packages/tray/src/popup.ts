@@ -530,6 +530,9 @@
 
     await loadMessages(dialogId);
 
+    // Reset infinite scroll state for new dialog
+    resetInfiniteScroll();
+
     // Reset poll tracker for new tab
     const cached = messageCache[dialogId];
     if (cached && cached.length > 0) {
@@ -574,6 +577,77 @@
       loadingEl.style.display = 'none';
       messagesEl.innerHTML = `<div class="loading">Failed to load messages</div>`;
     }
+  }
+
+  // ── Infinite scroll (load older messages) ──
+  let isLoadingOlder = false;
+  let noMoreMessages = false; // true when server returns 0 older messages
+
+  function setupInfiniteScroll(): void {
+    messagesEl.addEventListener('scroll', async () => {
+      // Trigger when scrolled near the top (within 60px)
+      if (messagesEl.scrollTop > 60) return;
+      if (isLoadingOlder || noMoreMessages || !selectedDialogId) return;
+
+      const cached = messageCache[selectedDialogId];
+      if (!cached || cached.length === 0) return;
+
+      // Find oldest message ID for offset
+      const sorted = [...cached].sort((a, b) => (a.id || 0) - (b.id || 0));
+      const oldestId = sorted[0]?.id;
+      if (!oldestId) return;
+
+      isLoadingOlder = true;
+
+      // Show a small loading indicator at top
+      const loader = document.createElement('div');
+      loader.className = 'loading-older';
+      loader.textContent = 'Loading…';
+      messagesEl.prepend(loader);
+
+      try {
+        const older = await api.getMessages(selectedDialogId, 30, oldestId);
+        loader.remove();
+
+        if (!Array.isArray(older) || older.length === 0) {
+          noMoreMessages = true;
+          isLoadingOlder = false;
+          return;
+        }
+
+        // Filter out duplicates
+        const existingIds = new Set(cached.map(m => m.id));
+        const newMsgs = older.filter(m => !existingIds.has(m.id));
+
+        if (newMsgs.length === 0) {
+          noMoreMessages = true;
+          isLoadingOlder = false;
+          return;
+        }
+
+        // Preserve scroll position: measure height before, add messages, restore
+        const prevHeight = messagesEl.scrollHeight;
+        const prevScroll = messagesEl.scrollTop;
+
+        messageCache[selectedDialogId] = [...newMsgs, ...cached];
+        renderMessages(messageCache[selectedDialogId]);
+
+        // Restore scroll position so user stays where they were
+        const newHeight = messagesEl.scrollHeight;
+        messagesEl.scrollTop = prevScroll + (newHeight - prevHeight);
+      } catch (err) {
+        console.error('[infiniteScroll] Error loading older messages:', err);
+        loader.remove();
+      }
+
+      isLoadingOlder = false;
+    });
+  }
+
+  // Reset infinite scroll state when switching dialogs
+  function resetInfiniteScroll(): void {
+    isLoadingOlder = false;
+    noMoreMessages = false;
   }
 
   // ── Polling fallback for real-time messages ──
@@ -655,6 +729,9 @@
 
   // Start polling immediately
   startPolling();
+
+  // Setup infinite scroll for loading older messages
+  setupInfiniteScroll();
 
   // ── Reply bar ──
 

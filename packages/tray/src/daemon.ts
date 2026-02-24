@@ -111,9 +111,11 @@ class DaemonClient extends EventEmitter {
     }
   }
 
-  async getMessages(dialogId: string, limit: number = 30): Promise<TelegramMessage[]> {
+  async getMessages(dialogId: string, limit: number = 30, offsetId?: number): Promise<TelegramMessage[]> {
     try {
-      return await this._request('GET', `/dialogs/${dialogId}/messages?limit=${limit}`) as TelegramMessage[];
+      let url = `/dialogs/${dialogId}/messages?limit=${limit}`;
+      if (offsetId) url += `&offsetId=${offsetId}`;
+      return await this._request('GET', url) as TelegramMessage[];
     } catch {
       return [];
     }

@@ -29,7 +29,7 @@ interface GitHubMergeResult {
 
 interface OceangramAPI {
   // Chat messages
-  getMessages(dialogId: string, limit?: number): Promise<TelegramMessage[]>;
+  getMessages(dialogId: string, limit?: number, offsetId?: number): Promise<TelegramMessage[]>;
   sendMessage(dialogId: string, text: string, replyTo?: number): Promise<unknown>;
   sendFile(dialogId: string, data: string, fileName: string, mimeType?: string, caption?: string): Promise<unknown>;
   markRead(dialogId: string): Promise<boolean>;

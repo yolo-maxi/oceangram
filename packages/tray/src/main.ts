@@ -577,8 +577,8 @@ function openSettings(): void {
 
 function setupIPC(): void {
   // Messages
-  ipcMain.handle('get-messages', async (_: IpcMainInvokeEvent, dialogId: string, limit?: number) => {
-    return await daemon!.getMessages(dialogId, limit || 30);
+  ipcMain.handle('get-messages', async (_: IpcMainInvokeEvent, dialogId: string, limit?: number, offsetId?: number) => {
+    return await daemon!.getMessages(dialogId, limit || 30, offsetId);
   });
 
   ipcMain.handle('send-message', async (_: IpcMainInvokeEvent, dialogId: string, text: string, replyTo?: number) => {
