@@ -382,8 +382,14 @@
 
   // ── Select tab ──
 
+  let selectTabLock = false;
   async function selectTab(entry: TabEntry): Promise<void> {
-    console.log('[selectTab]', entry.dialogId, entry.displayName);
+    console.log('[selectTab]', entry.dialogId, entry.displayName, 'lock:', selectTabLock, new Error().stack?.split('\n')[2]?.trim());
+    if (selectTabLock) {
+      console.log('[selectTab] BLOCKED — already selecting');
+      return;
+    }
+    selectTabLock = true;
     const previousUnreads = unreadCounts[entry.dialogId] || 0;
     selectedDialogId = entry.dialogId;
 
@@ -434,6 +440,7 @@
 
     // Focus composer
     setTimeout(() => composerInput.focus(), 100);
+    selectTabLock = false;
   }
 
   // ── Message cache ──
@@ -1047,7 +1054,7 @@
       messagesEl.scrollTop = messagesEl.scrollHeight;
     }
     if (typingTimeout) clearTimeout(typingTimeout);
-    typingTimeout = setTimeout(hideTyping, 5000);
+    typingTimeout = setTimeout(hideTyping, 12000);
   }
 
   function hideTyping(): void {
