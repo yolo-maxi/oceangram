@@ -94,23 +94,31 @@
   // ── Tab merging ──
 
   function mergeTabs(): void {
-    // Whitelist entries first, then active chats not already in whitelist
+    // Active chats (with messages) on the LEFT, pinned (whitelist-only) on the RIGHT
     const seen = new Set<string>();
-    const merged: TabEntry[] = [];
+    const activeMerged: TabEntry[] = [];
+    const pinnedOnly: TabEntry[] = [];
 
-    for (const entry of whitelistEntries) {
-      seen.add(entry.dialogId);
-      merged.push(entry);
-    }
-
+    // Collect active chats first
     for (const entry of activeChats) {
-      if (!seen.has(entry.dialogId)) {
-        seen.add(entry.dialogId);
-        merged.push(entry);
-      }
+      seen.add(entry.dialogId);
+      activeMerged.push(entry);
     }
 
-    allTabs = merged;
+    // Whitelist entries that are also active go to active section
+    // Whitelist-only entries go to pinned section (greyed out)
+    for (const entry of whitelistEntries) {
+      if (seen.has(entry.dialogId)) continue;
+      seen.add(entry.dialogId);
+      pinnedOnly.push({ ...entry, source: 'whitelist' });
+    }
+
+    allTabs = [...activeMerged, ...pinnedOnly];
+
+    // Update CSS variable for stacking density
+    const count = allTabs.length;
+    const overlap = count > 10 ? -14 : -8;
+    document.documentElement.style.setProperty('--tab-overlap', `${overlap}px`);
   }
 
   // ── OpenClaw Agent Status (feature-flagged) ──
@@ -269,55 +277,82 @@
   // ── Tabs ──
 
   function renderTabs(): void {
-    tabsEl.innerHTML = allTabs.map((entry) => {
+    // Determine if active chats exist (for pinned styling)
+    const activeDialogIds = new Set(activeChats.map((c) => c.dialogId));
+
+    tabsEl.innerHTML = '';
+    allTabs.forEach((entry, idx) => {
       const isActive = entry.dialogId === selectedDialogId;
       const hasUnread = (unreadCounts[entry.dialogId] || 0) > 0;
-      return `
-        <div class="tab${isActive ? ' active' : ''}${hasUnread ? ' has-unread' : ''}" data-dialog-id="${escapeHtml(entry.dialogId)}" title="${escapeHtml(entry.displayName)}">
-          <span class="tab-avatar" id="tab-avatar-${escapeHtml(entry.dialogId)}">${escapeHtml((entry.displayName || '?').charAt(0).toUpperCase())}</span>
-          ${isActive ? `<span class="tab-name">${escapeHtml(entry.displayName)}</span>` : ''}
-          <span class="tab-badge"></span>
-        </div>
-      `;
-    }).join('');
+      const isPinned = entry.source === 'whitelist' && !activeDialogIds.has(entry.dialogId);
 
-    tabsEl.querySelectorAll('.tab').forEach((el) => {
-      el.addEventListener('click', () => {
-        const dialogId = (el as HTMLElement).dataset.dialogId;
-        if (dialogId && dialogId !== selectedDialogId) {
-          const entry = allTabs.find((t) => t.dialogId === dialogId);
-          if (entry) selectTab(entry);
+      const tab = document.createElement('div');
+      tab.className = `tab${isActive ? ' active' : ''}${hasUnread ? ' has-unread' : ''}${isPinned ? ' pinned' : ''}`;
+      tab.dataset.dialogId = entry.dialogId;
+      tab.dataset.tabIndex = String(idx);
+      tab.title = entry.displayName;
+
+      // Reverse stacking: leftmost = highest z-index
+      tab.style.zIndex = isActive ? '50' : String(allTabs.length - idx);
+
+      const avatar = document.createElement('span');
+      avatar.className = 'tab-avatar';
+      avatar.textContent = (entry.displayName || '?').charAt(0).toUpperCase();
+      tab.appendChild(avatar);
+
+      if (isActive) {
+        const name = document.createElement('span');
+        name.className = 'tab-name';
+        name.textContent = entry.displayName;
+        tab.appendChild(name);
+      }
+
+      const badge = document.createElement('span');
+      badge.className = 'tab-badge';
+      tab.appendChild(badge);
+
+      tab.addEventListener('click', () => {
+        if (entry.dialogId !== selectedDialogId) {
+          selectTab(entry);
         }
       });
-    });
 
-    // Load avatars for all tabs
-    for (const entry of allTabs) {
-      const avatarEl = document.getElementById(`tab-avatar-${entry.dialogId}`);
-      if (!avatarEl) continue;
+      tabsEl.appendChild(tab);
+
+      // Load avatar async
       const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000));
       Promise.race([api.getProfilePhoto(baseDialogId(entry.dialogId)), timeout]).then((dataUrl: string | null) => {
         if (dataUrl) {
-          const el = document.getElementById(`tab-avatar-${entry.dialogId}`);
-          if (el) el.innerHTML = `<img src="${dataUrl}" alt="">`;
+          avatar.innerHTML = `<img src="${dataUrl}" alt="">`;
+          avatar.textContent = '';
         }
       }).catch(() => { /* keep initial */ });
-    }
+    });
   }
 
   function updateTabActive(): void {
+    const activeDialogIds = new Set(activeChats.map((c) => c.dialogId));
+
     tabsEl.querySelectorAll('.tab').forEach((el) => {
-      const did = (el as HTMLElement).dataset.dialogId;
+      const htmlEl = el as HTMLElement;
+      const did = htmlEl.dataset.dialogId;
+      const idx = parseInt(htmlEl.dataset.tabIndex || '0', 10);
       const isActive = did === selectedDialogId;
       el.classList.toggle('active', isActive);
       const hasUnread = did ? (unreadCounts[did] || 0) > 0 : false;
       el.classList.toggle('has-unread', hasUnread && !isActive);
 
+      const entry = allTabs.find((t) => t.dialogId === did);
+      const isPinned = entry?.source === 'whitelist' && did ? !activeDialogIds.has(did) : false;
+      el.classList.toggle('pinned', isPinned);
+
+      // Reverse stacking: leftmost = highest z-index
+      htmlEl.style.zIndex = isActive ? '50' : String(allTabs.length - idx);
+
       // Show/hide name based on active state
       let nameEl = el.querySelector('.tab-name') as HTMLElement | null;
       if (isActive) {
         if (!nameEl) {
-          const entry = allTabs.find((t) => t.dialogId === did);
           nameEl = document.createElement('span');
           nameEl.className = 'tab-name';
           nameEl.textContent = entry?.displayName || '';
