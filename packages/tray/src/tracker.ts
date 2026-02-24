@@ -222,7 +222,9 @@ class MessageTracker extends EventEmitter {
     if (!Array.isArray(dialogs)) return;
     const now = Date.now();
     const cutoff = now - MessageTracker.ACTIVE_WINDOW_MS;
+    const FUTURE_TOLERANCE_MS = 60_000; // ignore timestamps > now + 1 min (wrong clock / bug)
     let changed = false;
+    const recentFromDaemon = new Set<string>();
 
     for (const d of dialogs) {
       const dialogId = String(d.id);
@@ -240,11 +242,23 @@ class MessageTracker extends EventEmitter {
       // Convert to ms (daemon uses seconds)
       const msgTimeMs = outgoingTimeRaw < 1e12 ? outgoingTimeRaw * 1000 : outgoingTimeRaw;
       if (msgTimeMs < cutoff) continue;
+      if (msgTimeMs > now + FUTURE_TOLERANCE_MS) continue; // ignore future timestamps
 
+      recentFromDaemon.add(dialogId);
       // Only set if we don't already have a more recent send time
       const existing = this.lastSentTimes.get(dialogId);
       if (!existing || existing < msgTimeMs) {
         this.lastSentTimes.set(dialogId, msgTimeMs);
+        changed = true;
+      }
+    }
+
+    // Daemon is source of truth: clear lastSentTimes for dialogs that appear in this batch
+    // but are not in the "recent" set (so we stop showing them as active)
+    for (const d of dialogs) {
+      const dialogId = String(d.id);
+      if (this.lastSentTimes.has(dialogId) && !recentFromDaemon.has(dialogId)) {
+        this.lastSentTimes.delete(dialogId);
         changed = true;
       }
     }
