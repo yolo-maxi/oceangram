@@ -419,12 +419,18 @@ html, body {
 /* ── Composer ── */
 .composer {
   display: flex;
-  align-items: flex-end;
-  gap: 6px;
-  padding: 8px 10px 10px;
+  flex-direction: column;
+  padding: 0;
   background: var(--bg-dark);
   border-top: 1px solid var(--border);
   flex-shrink: 0;
+}
+
+.composer-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 8px 10px 10px;
 }
 
 .composer-input {
@@ -692,13 +698,12 @@ html, body {
   z-index: 100;
 }
 
-/* File preview overlay */
+/* Attachment preview (above text input) */
 .attachment-strip {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--border);
+  padding: 8px 10px 0;
 }
 
 .attachment-thumb {

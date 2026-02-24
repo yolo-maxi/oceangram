@@ -44,17 +44,19 @@
         <span class="attachment-name" id="attachmentName"></span>
         <button class="attachment-remove" id="attachmentRemove" title="Remove attachment">✕</button>
       </div>
-      <textarea
-        class="composer-input"
-        id="composerInput"
-        placeholder="Message..."
-        rows="1"
-      ></textarea>
-      <button class="composer-send" id="sendBtn" title="Send">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-          <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" fill="currentColor"/>
-        </svg>
-      </button>
+      <div class="composer-row">
+        <textarea
+          class="composer-input"
+          id="composerInput"
+          placeholder="Message..."
+          rows="1"
+        ></textarea>
+        <button class="composer-send" id="sendBtn" title="Send">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" fill="currentColor"/>
+          </svg>
+        </button>
+      </div>
     </div>
 
     <!-- Empty state: no whitelisted contacts -->
