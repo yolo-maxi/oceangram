@@ -195,7 +195,7 @@ class OpenClawClient extends EventEmitter {
   }
 
   /** Send a request and await the response. */
-  private request(method: string, params: Record<string, unknown>, timeoutMs = 30000): Promise<unknown> {
+  private request(method: string, params?: Record<string, unknown>, timeoutMs = 30000): Promise<unknown> {
     return new Promise((resolve, reject) => {
       if (!this._connected || !this.ws || this.ws.readyState !== WebSocketLib.OPEN) {
         reject(new Error('Not connected'));
@@ -221,38 +221,30 @@ class OpenClawClient extends EventEmitter {
 
   // ── Public API ──
 
-  /** Request a summary of messages. */
-  async requestSummary(messages: string[]): Promise<string> {
+  /** Get gateway status: model, sessions, tokens, cost. */
+  async getStatus(): Promise<{ model: string; activeSessions: number; totalTokens: number; estimatedCost: number }> {
     if (!this._connected) throw new Error('OpenClaw not connected');
-    const prompt = `Summarize these chat messages in one brief line (max 100 chars). Just the summary, no preamble:\n\n${messages.join('\n')}`;
-    const result = await this.request('sessions.send', {
-      message: prompt,
-      label: 'oceangram-summary',
-    }) as { message?: string } | string;
-    if (typeof result === 'string') return result;
-    if (result && typeof result === 'object' && 'message' in result) return result.message || '';
-    return String(result || '');
-  }
+    const status = await this.request('status') as Record<string, unknown>;
+    const sessions = await this.request('sessions.list', { activeMinutes: 30 }) as { sessions?: Array<Record<string, unknown>> };
 
-  /** Request smart reply suggestions. */
-  async requestReplySuggestions(lastMessages: string[]): Promise<string[]> {
-    if (!this._connected) throw new Error('OpenClaw not connected');
-    const prompt = `Given these recent chat messages, suggest 2-3 short reply options (max 40 chars each). Return ONLY a JSON array of strings, nothing else:\n\n${lastMessages.join('\n')}`;
-    const result = await this.request('sessions.send', {
-      message: prompt,
-      label: 'oceangram-replies',
-    }) as { message?: string } | string;
-    const text = typeof result === 'string' ? result : (result && typeof result === 'object' && 'message' in result ? result.message || '' : String(result || ''));
-    // Parse JSON array from response
-    try {
-      const match = text.match(/\[[\s\S]*?\]/);
-      if (match) {
-        const arr = JSON.parse(match[0]) as unknown[];
-        return arr.filter((s): s is string => typeof s === 'string').slice(0, 3);
-      }
-    } catch { /* fallback below */ }
-    // Fallback: split by newlines
-    return text.split('\n').map(s => s.replace(/^[-•*\d.)\s]+/, '').trim()).filter(s => s.length > 0 && s.length <= 60).slice(0, 3);
+    const sessionList = sessions?.sessions || [];
+    let totalTokens = 0;
+    let totalCost = 0;
+    for (const s of sessionList) {
+      totalTokens += (s.totalTokens as number) || 0;
+      // Rough cost estimate: $0.01 per 1K tokens (varies by model)
+      totalCost += ((s.totalTokens as number) || 0) * 0.00001;
+    }
+
+    return {
+      model: (status.model as string) || 'unknown',
+      activeSessions: sessionList.filter(s => {
+        const updated = s.updatedAt as number;
+        return updated && (Date.now() - updated) < 5 * 60 * 1000;
+      }).length,
+      totalTokens,
+      estimatedCost: totalCost,
+    };
   }
 }
 

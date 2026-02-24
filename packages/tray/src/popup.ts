@@ -54,20 +54,13 @@
   const replyBarText = document.getElementById('replyBarText')!;
   const replyBarCancel = document.getElementById('replyBarCancel')!;
 
-  // AI enrichment DOM refs (OpenClaw)
-  const aiSummary = document.getElementById('aiSummary')!;
-  const aiSummaryText = document.getElementById('aiSummaryText')!;
-  const aiSummaryDismiss = document.getElementById('aiSummaryDismiss')!;
-  const aiSuggestions = document.getElementById('aiSuggestions')!;
+  // OpenClaw agent status DOM refs
+  const agentStatus = document.getElementById('agentStatus')!;
+  const agentStatusContent = document.getElementById('agentStatusContent')!;
 
-  // AI enrichment state
+  // OpenClaw state
   let openclawAvailable = false;
-  let summaryDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-  let replyDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-  const SUMMARY_DEBOUNCE_MS = 800;
-  const REPLY_DEBOUNCE_MS = 1200;
-  // Track dismissed summaries per dialog to avoid re-showing
-  const dismissedSummaries = new Set<string>();
+  let agentStatusTimer: ReturnType<typeof setTimeout> | null = null;
 
   function loadAvatar(entry: TabEntry): void {
     const initial = (entry.displayName || '?').charAt(0).toUpperCase();
@@ -115,132 +108,54 @@
     allTabs = merged;
   }
 
-  // ── AI Enrichments (OpenClaw, feature-flagged) ──
+  // ── OpenClaw Agent Status (feature-flagged) ──
 
-  /** Check if OpenClaw is available. */
   async function checkOpenClaw(): Promise<void> {
     try {
       openclawAvailable = await api.openclawEnabled();
     } catch {
       openclawAvailable = false;
     }
+    agentStatus.style.display = openclawAvailable ? '' : 'none';
+    if (openclawAvailable) {
+      refreshAgentStatus();
+      startAgentStatusPolling();
+    }
   }
 
-  /** Request a summary for the given dialog if it has 5+ unread messages. */
-  function requestSummaryDebounced(dialogId: string, unreadCount: number): void {
+  function formatTokens(n: number): string {
+    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+    if (n >= 1000) return (n / 1000).toFixed(0) + 'K';
+    return String(n);
+  }
+
+  async function refreshAgentStatus(): Promise<void> {
     if (!openclawAvailable) return;
-    if (unreadCount < 5) return;
-    if (dismissedSummaries.has(dialogId)) return;
+    try {
+      const status = await api.openclawGetStatus();
+      if (!status) return;
 
-    if (summaryDebounceTimer) clearTimeout(summaryDebounceTimer);
-    summaryDebounceTimer = setTimeout(async () => {
-      summaryDebounceTimer = null;
-      if (selectedDialogId !== dialogId) return; // user switched away
-      if (!openclawAvailable) return;
+      const model = (status.model || 'unknown').replace(/^anthropic\//, '').replace(/^openai\//, '');
+      const sessions = status.activeSessions || 0;
+      const totalTokens = status.totalTokens || 0;
+      const cost = status.estimatedCost ? `$${status.estimatedCost.toFixed(2)}` : '';
 
-      const cached = messageCache[dialogId];
-      if (!cached || cached.length === 0) return;
+      let html = `<span class="agent-model">\u{1F916} ${escapeHtml(model)}</span>`;
+      html += `<span class="agent-sessions">${sessions} session${sessions !== 1 ? 's' : ''}</span>`;
+      if (totalTokens > 0) html += `<span class="agent-tokens">${formatTokens(totalTokens)} tok</span>`;
+      if (cost) html += `<span class="agent-cost">${cost}</span>`;
 
-      // Take the last N messages (up to unread count)
-      const msgs = cached.slice(-Math.min(unreadCount, 20));
-      const lines = msgs.map(m => {
-        const name = m.senderName || m.firstName || 'Someone';
-        const text = m.text || m.message || '';
-        return `${name}: ${text}`;
-      }).filter(l => l.length > 3);
-
-      if (lines.length < 3) return;
-
-      try {
-        const summary = await api.openclawRequestSummary(lines);
-        // Verify we're still on the same dialog
-        if (selectedDialogId !== dialogId || !summary) return;
-        showAiSummary(dialogId, summary);
-      } catch {
-        // Silently fail — AI enrichment is best-effort
-      }
-    }, SUMMARY_DEBOUNCE_MS);
+      agentStatusContent.innerHTML = html;
+    } catch {
+      agentStatusContent.innerHTML = '<span class="agent-model">\u{1F916} disconnected</span>';
+    }
   }
 
-  /** Show the AI summary bar. */
-  function showAiSummary(dialogId: string, summary: string): void {
-    aiSummaryText.textContent = summary;
-    aiSummary.style.display = '';
-    // Set up dismiss handler with current dialogId
-    aiSummaryDismiss.onclick = () => {
-      aiSummary.style.display = 'none';
-      dismissedSummaries.add(dialogId);
-    };
-  }
-
-  /** Hide the AI summary bar. */
-  function hideAiSummary(): void {
-    aiSummary.style.display = 'none';
-  }
-
-  /** Request reply suggestions for new incoming messages. */
-  function requestReplySuggestionsDebounced(dialogId: string): void {
+  function startAgentStatusPolling(): void {
+    if (agentStatusTimer) clearInterval(agentStatusTimer);
     if (!openclawAvailable) return;
-
-    if (replyDebounceTimer) clearTimeout(replyDebounceTimer);
-    replyDebounceTimer = setTimeout(async () => {
-      replyDebounceTimer = null;
-      if (selectedDialogId !== dialogId) return;
-      if (!openclawAvailable) return;
-
-      const cached = messageCache[dialogId];
-      if (!cached || cached.length === 0) return;
-
-      // Take last 5 messages for context
-      const msgs = cached.slice(-5);
-      const lines = msgs.map(m => {
-        const isMe = m.isOutgoing === true || String(m.fromId || m.senderId || '') === myId;
-        const name = isMe ? 'Me' : (m.senderName || m.firstName || 'Them');
-        const text = m.text || m.message || '';
-        return `${name}: ${text}`;
-      }).filter(l => l.length > 3);
-
-      if (lines.length === 0) return;
-
-      try {
-        const suggestions = await api.openclawRequestReplies(lines);
-        if (selectedDialogId !== dialogId || !suggestions || suggestions.length === 0) return;
-        showAiSuggestions(suggestions);
-      } catch {
-        // Silently fail
-      }
-    }, REPLY_DEBOUNCE_MS);
+    agentStatusTimer = setInterval(refreshAgentStatus, 15000) as unknown as ReturnType<typeof setTimeout>;
   }
-
-  /** Show reply suggestion chips. */
-  function showAiSuggestions(suggestions: string[]): void {
-    aiSuggestions.innerHTML = suggestions.map(s =>
-      `<button class="suggestion-chip">${escapeHtml(s)}</button>`
-    ).join('');
-    aiSuggestions.style.display = '';
-
-    // Bind click handlers
-    aiSuggestions.querySelectorAll('.suggestion-chip').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const text = btn.textContent || '';
-        composerInput.value = text;
-        composerInput.focus();
-        hideAiSuggestions();
-      });
-    });
-  }
-
-  /** Hide reply suggestion chips. */
-  function hideAiSuggestions(): void {
-    aiSuggestions.style.display = 'none';
-    aiSuggestions.innerHTML = '';
-  }
-
-  // Dismiss summary on click
-  aiSummaryDismiss.addEventListener('click', () => {
-    aiSummary.style.display = 'none';
-    if (selectedDialogId) dismissedSummaries.add(selectedDialogId);
-  });
 
   // ── Init ──
 
@@ -360,8 +275,6 @@
     // Clear pending state when switching tabs
     clearReplyTarget();
     clearAttachment();
-    hideAiSummary();
-    hideAiSuggestions();
 
     // Update contact bar (single mode)
     contactName.textContent = entry.displayName;
@@ -384,7 +297,6 @@
 
     // Request AI summary if there were 5+ unreads (before marking read)
     if (previousUnreads >= 5) {
-      requestSummaryDebounced(entry.dialogId, previousUnreads);
     }
 
     // Mark as read
@@ -714,7 +626,6 @@
     composerInput.value = '';
     composerInput.style.height = 'auto';
     sendBtn.disabled = true;
-    hideAiSuggestions();
 
     const currentReplyTo = replyTarget?.messageId;
     clearReplyTarget();
@@ -770,8 +681,7 @@
     composerInput.style.height = Math.min(composerInput.scrollHeight, 100) + 'px';
     // Hide AI suggestions when user starts typing their own message
     if (composerInput.value.length > 0) {
-      hideAiSuggestions();
-    }
+      }
   });
 
   // ── File helper ──
@@ -910,7 +820,6 @@
       // Request AI reply suggestions for incoming messages
       const isOutgoing = msg.isOutgoing === true || String(msg.fromId || msg.senderId || '') === myId;
       if (!isOutgoing) {
-        requestReplySuggestionsDebounced(msgDialogId);
       }
     } else if (isTabbed) {
       // Other visible tab — update unread

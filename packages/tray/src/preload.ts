@@ -103,11 +103,9 @@ contextBridge.exposeInMainWorld('oceangram', {
   mergeGitHubPR: (owner: string, repo: string, prNumber: number): Promise<unknown> =>
     ipcRenderer.invoke('merge-github-pr', owner, repo, prNumber),
 
-  // OpenClaw AI enrichments (feature-flagged)
+  // OpenClaw agent status (feature-flagged)
   openclawEnabled: (): Promise<boolean> =>
     ipcRenderer.invoke('openclaw-enabled'),
-  openclawRequestSummary: (messages: string[]): Promise<string | null> =>
-    ipcRenderer.invoke('openclaw-request-summary', messages),
-  openclawRequestReplies: (lastMessages: string[]): Promise<string[] | null> =>
-    ipcRenderer.invoke('openclaw-request-replies', lastMessages),
+  openclawGetStatus: (): Promise<{ model: string; activeSessions: number; totalTokens: number; estimatedCost: number } | null> =>
+    ipcRenderer.invoke('openclaw-get-status'),
 });

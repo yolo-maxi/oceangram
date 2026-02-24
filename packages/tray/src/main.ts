@@ -585,27 +585,17 @@ function setupIPC(): void {
     return tracker!.getActiveChats();
   });
 
-  // OpenClaw AI enrichments (feature-flagged)
+  // OpenClaw agent status (feature-flagged)
   ipcMain.handle('openclaw-enabled', () => {
     return openclaw ? openclaw.isEnabled && openclaw.connected : false;
   });
 
-  ipcMain.handle('openclaw-request-summary', async (_: IpcMainInvokeEvent, messages: string[]) => {
+  ipcMain.handle('openclaw-get-status', async () => {
     if (!openclaw || !openclaw.isEnabled || !openclaw.connected) return null;
     try {
-      return await openclaw.requestSummary(messages);
+      return await openclaw.getStatus();
     } catch (err) {
-      console.error('[openclaw] Summary request failed:', err);
-      return null;
-    }
-  });
-
-  ipcMain.handle('openclaw-request-replies', async (_: IpcMainInvokeEvent, lastMessages: string[]) => {
-    if (!openclaw || !openclaw.isEnabled || !openclaw.connected) return null;
-    try {
-      return await openclaw.requestReplySuggestions(lastMessages);
-    } catch (err) {
-      console.error('[openclaw] Reply suggestions failed:', err);
+      console.error('[openclaw] Status request failed:', err);
       return null;
     }
   });

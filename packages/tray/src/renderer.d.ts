@@ -84,8 +84,7 @@ interface OceangramAPI {
 
   // OpenClaw AI enrichments (feature-flagged)
   openclawEnabled(): Promise<boolean>;
-  openclawRequestSummary(messages: string[]): Promise<string | null>;
-  openclawRequestReplies(lastMessages: string[]): Promise<string[] | null>;
+  openclawGetStatus(): Promise<{ model: string; activeSessions: number; totalTokens: number; estimatedCost: number } | null>;
 }
 
 declare global {
