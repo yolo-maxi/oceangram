@@ -179,20 +179,22 @@ class DaemonClient extends EventEmitter {
   // ── WebSocket ──
 
   connectWS(): void {
+    console.log('[daemon] connectWS() called, attempting connection to', WS_URL);
     if (this.ws) {
       try { this.ws.close(); } catch { /* ignore */ }
     }
 
     try {
       this.ws = new WebSocketLib(WS_URL);
-    } catch {
-      console.log('[daemon] WebSocket not available, polling only');
+      console.log('[daemon] WebSocket object created');
+    } catch (e) {
+      console.error('[daemon] WebSocket creation FAILED:', e);
       this._scheduleReconnect();
       return;
     }
 
     this.ws.on('open', () => {
-      console.log('[daemon] WS connected');
+      console.log('[daemon] WS connected to', WS_URL);
       this.reconnectAttempts = 0;
       this.connected = true;
       this.emit('connection-changed', true);
@@ -251,6 +253,7 @@ class DaemonClient extends EventEmitter {
   // ── Lifecycle ──
 
   start(): void {
+    console.log('[daemon] start() called');
     this.startHealthCheck();
     this.connectWS();
   }
