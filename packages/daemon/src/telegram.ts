@@ -538,11 +538,12 @@ export class TelegramService {
         try {
           const topics = await this.getForumTopics(chatId);
           const topMsgMap = this.forumTopicMessages.get(chatId);
-          // For topics where we're not the top message, fetch our outbox message in this topic only (replyTo)
-          // so we get lastOutgoingTime without attributing another topic's message. Limit to avoid rate limit.
-          const topicsToFetch = topics.filter(
-            (t) => t.readOutboxMaxId > 0 && t.readOutboxMaxId !== t.topMessage
-          ).slice(0, 20);
+          // For topics where we're not the top message, fetch our outbox message in this topic only (replyTo).
+          // Prioritize topics with unreads (replies) so "chats from Telegram client where I got replies" get lastOutgoingTime.
+          const topicsToFetch = topics
+            .filter((t) => t.readOutboxMaxId > 0 && t.readOutboxMaxId !== t.topMessage)
+            .sort((a, b) => (b.unreadCount || 0) - (a.unreadCount || 0))
+            .slice(0, 50);
           const outboxDateByTopic = new Map<number, number>();
           if (topicsToFetch.length > 0 && this.client) {
             for (const topic of topicsToFetch) {

@@ -87,7 +87,8 @@ class MessageTracker extends EventEmitter {
     if (!daemon.connected) return;
 
     try {
-      const dialogs = await daemon.getDialogs();
+      // Request enough dialogs so "recently used from Telegram client" (and their forum topics) are included
+      const dialogs = await daemon.getDialogs(250);
       if (!Array.isArray(dialogs)) return;
 
       let changed = false;
