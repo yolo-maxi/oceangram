@@ -125,6 +125,7 @@ export class TelegramService {
   private connected = false;
   private eventListeners: Set<EventListener> = new Set();
   private forumTopicsCache: Map<string, Api.ForumTopic[]> = new Map();
+  private forumTopicsCacheTs: Map<string, number> = new Map();
   private messagesCache: Map<string, { ts: number; data: MessageInfo[] }> = new Map();
   private dialogsCache: { ts: number; data: DialogInfo[] } | null = null;
   private profilePhotoCache: Map<string, { ts: number; data: { buffer: Buffer; mimeType: string } | null }> = new Map();
@@ -595,7 +596,10 @@ export class TelegramService {
   private async getForumTopics(chatId: string): Promise<Api.ForumTopic[]> {
     if (!this.client) throw new Error('Not connected');
     const cached = this.forumTopicsCache.get(chatId);
-    if (cached) return cached;
+    const cachedTs = this.forumTopicsCacheTs.get(chatId) || 0;
+    if (cached && (Date.now() - cachedTs) < 30_000) {
+      return cached;
+    }
 
     const entity = await this.client.getEntity(chatId);
     const result = await this.client.invoke(
@@ -621,6 +625,7 @@ export class TelegramService {
     this.forumTopicMessages.set(chatId, msgMap);
 
     this.forumTopicsCache.set(chatId, topics);
+    this.forumTopicsCacheTs.set(chatId, Date.now());
     return topics;
   }
 
