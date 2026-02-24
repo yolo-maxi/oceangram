@@ -354,14 +354,34 @@ html, body {
 /* ── Messages ── */
 .messages {
   flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--chat-bg);
+}
+
+/* Background layer — fixed sibling, never touched by content updates */
+.messages-bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Scroll container — content lives here, transparent so bg shows through gaps */
+.messages-scroll {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   padding: 10px 14px;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  background-color: var(--chat-bg);
   position: relative;
+  z-index: 1;
+  background: transparent;
 }
 
 /* Day theme: real Telegram light background image */
@@ -373,28 +393,19 @@ html, body {
 }
 
 /* Day theme: pattern overlay with soft-light blend */
-[data-theme="day"] .messages::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  opacity: 0.4;
+[data-theme="day"] .messages-bg {
   background-image: url('./assets/pattern.svg');
   background-repeat: repeat;
   background-position: center;
   background-size: 430px auto;
+  opacity: 0.4;
   mix-blend-mode: soft-light;
-  pointer-events: none;
-  z-index: 0;
 }
 
 /* Dark themes: gradient-masked pattern overlay */
-[data-theme="night"] .messages::before,
-[data-theme="tinted"] .messages::before,
-[data-theme="arctic"] .messages::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  opacity: 0.25;
+[data-theme="night"] .messages-bg,
+[data-theme="tinted"] .messages-bg,
+[data-theme="arctic"] .messages-bg {
   background: linear-gradient(145deg, #4f5bd5 0%, #962fbf 35%, #dd6cb9 65%, #fec496 100%);
   mask-image: url('./assets/pattern.svg');
   -webkit-mask-image: url('./assets/pattern.svg');
@@ -404,27 +415,26 @@ html, body {
   -webkit-mask-repeat: repeat;
   mask-size: 430px auto;
   -webkit-mask-size: 430px auto;
-  pointer-events: none;
-  z-index: 0;
+  opacity: 0.25;
 }
 
 /* Ensure message bubbles sit above the pattern overlay */
 .message { position: relative; z-index: 1; }
 
-.messages::-webkit-scrollbar {
+.messages-scroll::-webkit-scrollbar {
   width: 4px;
 }
 
-.messages::-webkit-scrollbar-track {
+.messages-scroll::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.messages::-webkit-scrollbar-thumb {
+.messages-scroll::-webkit-scrollbar-thumb {
   background: var(--scrollbar);
   border-radius: 2px;
 }
 
-.messages::-webkit-scrollbar-thumb:hover {
+.messages-scroll::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-hover);
 }
 
@@ -962,32 +972,6 @@ html, body {
 .attachment-remove:hover {
   color: var(--text);
   background: rgba(255,255,255,0.08);
-}
-
-/* Tab pin icon */
-.tab-pin {
-  font-size: 11px;
-  margin-left: 4px;
-  cursor: pointer;
-  opacity: 0.35;
-  filter: grayscale(100%);
-  transition: opacity 0.2s, transform 0.2s, filter 0.2s;
-  pointer-events: auto;
-  flex-shrink: 0;
-}
-
-.tab-pin:hover {
-  opacity: 0.7;
-}
-
-.tab-pin.is-pinned {
-  opacity: 0.5;
-  transform: rotate(45deg);
-  filter: grayscale(100%);
-}
-
-.tab-pin.is-pinned:hover {
-  opacity: 0.8;
 }
 
 /* Typing indicator */

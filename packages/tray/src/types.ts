@@ -50,6 +50,11 @@ export interface WhitelistEntry {
   displayName: string;
 }
 
+export interface BlacklistEntry {
+  dialogId: string;
+  displayName: string;
+}
+
 export interface AppSettings {
   alwaysOnTop: boolean;
   bubblePosition: 'left' | 'right';
@@ -62,6 +67,7 @@ export interface AppSettings {
 
 export interface AppConfig {
   whitelist: WhitelistEntry[];
+  blacklist: BlacklistEntry[];
   settings: AppSettings;
 }
 

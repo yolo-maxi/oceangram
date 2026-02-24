@@ -261,14 +261,14 @@ export class TelegramService {
     console.log('[telegram] Setting up event handlers...');
 
     this.client.addEventHandler((event: NewMessageEvent) => {
-      console.log('[telegram] NewMessage event received, chatId:', event.message?.chatId?.toString());
       const msg = event.message;
       if (!msg) return;
-      const chatId = msg.chatId?.toString() || (msg as any).peerId?.toString() || '';
+      const chatId = this.getMessageChatId(msg);
       const replyTo = msg.replyTo as any;
-      const topicId = replyTo?.forumTopic
-        ? (replyTo.replyToTopId || replyTo.replyToMsgId)
-        : undefined;
+      // Forum topic: reply_to has forumTopic/forum_topic, or replyToTopId for channel messages in topics
+      const isForumMessage = replyTo?.forumTopic === true || replyTo?.forum_topic === true ||
+        (replyTo?.replyToTopId && chatId.startsWith('-100'));
+      const topicId = isForumMessage ? (replyTo?.replyToTopId || replyTo?.replyToMsgId) : undefined;
       const dialogId = topicId ? `${chatId}:${topicId}` : chatId;
 
       const messageInfo = this.rawMessageToInfo(msg);
@@ -285,15 +285,20 @@ export class TelegramService {
     this.client.addEventHandler((event: EditedMessageEvent) => {
       const msg = event.message;
       if (!msg) return;
-      const chatId = msg.chatId?.toString() || (msg as any).peerId?.toString() || '';
+      const chatId = this.getMessageChatId(msg);
+      const replyTo = msg.replyTo as any;
+      const isForumMessage = replyTo?.forumTopic === true || replyTo?.forum_topic === true ||
+        (replyTo?.replyToTopId && chatId.startsWith('-100'));
+      const topicId = isForumMessage ? (replyTo?.replyToTopId || replyTo?.replyToMsgId) : undefined;
+      const dialogId = topicId ? `${chatId}:${topicId}` : chatId;
 
       const messageInfo = this.rawMessageToInfo(msg);
       // Update in SQLite cache (L2)
-      try { this.cache.upsertMessages(chatId, [messageInfo]); } catch (e) { console.error('[cache] edit upsert error:', e); }
+      try { this.cache.upsertMessages(dialogId, [messageInfo]); } catch (e) { console.error('[cache] edit upsert error:', e); }
 
       this.emit({
         type: 'editedMessage',
-        dialogId: chatId,
+        dialogId,
         message: messageInfo,
       });
     }, new EditedMessage({}));
@@ -2871,6 +2876,18 @@ export class TelegramService {
     const parts = id.split(':');
     if (parts.length === 2) return { chatId: parts[0], topicId: parseInt(parts[1], 10) };
     return { chatId: id };
+  }
+
+  /** Get normalized chat ID from a Message (matches getDialogs format: -100xxx for channels). */
+  private getMessageChatId(msg: Api.Message): string {
+    const peer = msg.peerId;
+    if (peer instanceof Api.PeerUser) return peer.userId.toString();
+    if (peer instanceof Api.PeerChat) return `-${peer.chatId.toString()}`;
+    if (peer instanceof Api.PeerChannel) return `-100${peer.channelId.toString()}`;
+    const p = peer as any;
+    if (p?.channelId != null) return `-100${p.channelId.toString()}`;
+    if (p?.chatId != null) return `-${p.chatId.toString()}`;
+    return msg.chatId?.toString() || (msg as any).peerId?.toString() || '';
   }
 
   private getEntityName(entity: unknown): string {

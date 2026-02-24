@@ -1,6 +1,21 @@
 // main.ts — Electron main process for Oceangram Tray
-import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, Notification, screen, IpcMainEvent, IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, Notification, screen, shell, IpcMainEvent, IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron';
 import path from 'path';
+
+// Hot reload in development (pnpm dev)
+if (!app.isPackaged) {
+  try {
+    // Watch dist/ (compiled TS) and src/ (HTML, CSS)
+    const srcDir = path.join(__dirname, '..', 'src');
+    require('electron-reload')([__dirname, srcDir], {
+      electron: path.join(__dirname, '..', 'node_modules', '.bin', 'electron'),
+      hardResetMethod: 'exit',
+      forceHardReset: true,
+    });
+  } catch {
+    // electron-reload not available
+  }
+}
 import http from 'http';
 import https from 'https';
 import fs from 'fs';
@@ -188,6 +203,11 @@ function showLoginWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
     },
+  });
+
+  loginWindow.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: 'deny' };
   });
 
   loginWindow.loadFile(path.join(__dirname, '..', 'src', 'login.html'));
@@ -422,6 +442,12 @@ function openPopup(): void {
     },
   });
 
+  // Open links in system browser instead of embedded Electron window
+  popupWindow.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: 'deny' };
+  });
+
   popupWindow.loadFile(path.join(__dirname, '..', 'src', 'popup.html'));
 
   popupWindow.webContents.on('did-finish-load', () => {
@@ -566,6 +592,11 @@ function openSettings(): void {
     },
   });
 
+  settingsWindow.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: 'deny' };
+  });
+
   settingsWindow.loadFile(path.join(__dirname, '..', 'src', 'settings.html'));
 
   settingsWindow.on('closed', () => {
@@ -620,6 +651,27 @@ function setupIPC(): void {
 
   ipcMain.handle('remove-user', (_: IpcMainInvokeEvent, userId: string) => {
     return whitelist!.removeUser(userId);
+  });
+
+  // Blacklist (muted chats — hidden from tray)
+  ipcMain.handle('get-blacklist', () => {
+    return whitelist!.getBlacklist();
+  });
+
+  ipcMain.handle('unmute-chat', async (_: IpcMainInvokeEvent, dialogId: string) => {
+    whitelist!.removeFromBlacklist(dialogId);
+    try {
+      await daemon!.unmuteChat(dialogId);
+    } catch {
+      /* daemon unmute may fail if not actually muted */
+    }
+    if (popupWindow && !popupWindow.isDestroyed()) {
+      popupWindow.webContents.send('blacklist-changed');
+    }
+    if (settingsWindow && !settingsWindow.isDestroyed()) {
+      settingsWindow.webContents.send('blacklist-changed');
+    }
+    return true;
   });
 
   // Settings
@@ -697,7 +749,6 @@ function setupIPC(): void {
           } else {
             whitelist!.addUser({ userId: dialogId, displayName });
           }
-          // Notify popup to refresh
           if (popupWindow && !popupWindow.isDestroyed()) {
             popupWindow.webContents.send('whitelist-changed');
           }
@@ -706,14 +757,15 @@ function setupIPC(): void {
       { type: 'separator' as const },
       {
         label: '🔇 Mute Chat',
-        click: () => {
-          daemon!.muteChat(dialogId);
-        },
-      },
-      {
-        label: '🔊 Unmute Chat',
-        click: () => {
-          daemon!.unmuteChat(dialogId);
+        click: async () => {
+          await daemon!.muteChat(dialogId);
+          whitelist!.addToBlacklist(dialogId, displayName);
+          if (popupWindow && !popupWindow.isDestroyed()) {
+            popupWindow.webContents.send('blacklist-changed');
+          }
+          if (settingsWindow && !settingsWindow.isDestroyed()) {
+            settingsWindow.webContents.send('blacklist-changed');
+          }
         },
       },
     ]);

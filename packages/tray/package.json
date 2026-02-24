@@ -1,12 +1,12 @@
 {
   "name": "oceangram-tray",
   "version": "0.1.0",
-  "description": "Minimal Mac menu bar Telegram client — floating avatar bubbles for whitelisted contacts",
+  "description": "Minimal Mac menu bar Telegram client — tray icon opens chat popup",
   "main": "dist/main.js",
   "scripts": {
     "compile": "tsc",
     "start": "tsc && electron dist/main.js",
-    "dev": "tsc && electron dist/main.js",
+    "dev": "tsc && concurrently \"tsc -w\" \"electron .\"",
     "build:daemon": "node build-daemon.mjs",
     "build": "pnpm run build:daemon && pnpm run compile && electron-builder --mac",
     "build:mac": "pnpm run build:daemon && pnpm run compile && electron-builder --mac",
@@ -59,8 +59,10 @@
   "devDependencies": {
     "@types/node": "^25.3.0",
     "@types/ws": "^8.18.1",
+    "concurrently": "^9.2.1",
     "electron": "^40.6.0",
     "electron-builder": "^26.8.1",
+    "electron-reload": "2.0.0-alpha.1",
     "esbuild": "^0.27.3",
     "typescript": "^5.9.3"
   },

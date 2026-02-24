@@ -7,7 +7,7 @@
   <title>Oceangram</title>
 </head>
 <body>
-  <div class="app">
+  <div class="app" data-theme="arctic">
     <div class="connection-banner" id="connectionBanner">
       Disconnected
     </div>
@@ -26,9 +26,12 @@
       <div class="agent-status-content" id="agentStatusContent"></div>
     </div>
 
-    <!-- Messages -->
+    <!-- Messages: bg layer is a fixed sibling, scroll content never touches it -->
     <div class="messages" id="messages">
-      <div class="loading" id="loadingState">Loading...</div>
+      <div class="messages-bg" aria-hidden="true"></div>
+      <div class="messages-scroll" id="messagesScroll">
+        <div class="loading" id="loadingState">Loading...</div>
+      </div>
     </div>
 
     <!-- Reply preview bar -->

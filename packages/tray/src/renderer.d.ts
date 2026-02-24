@@ -4,6 +4,7 @@ import {
   TelegramUser,
   TelegramDialog,
   WhitelistEntry,
+  BlacklistEntry,
   AppSettings,
   PopupInitData,
   BubbleInitData,
@@ -41,6 +42,8 @@ interface OceangramAPI {
   getWhitelist(): Promise<WhitelistEntry[]>;
   addUser(user: { userId: string; username?: string; displayName?: string }): Promise<boolean>;
   removeUser(userId: string): Promise<boolean>;
+  getBlacklist(): Promise<BlacklistEntry[]>;
+  unmuteChat(dialogId: string): Promise<boolean>;
   getSettings(): Promise<AppSettings>;
   updateSettings(settings: Partial<AppSettings>): Promise<boolean>;
   getDialogs(limit?: number): Promise<TelegramDialog[]>;
@@ -79,6 +82,9 @@ interface OceangramAPI {
 
   // Whitelist changed notification
   onWhitelistChanged(cb: () => void): void;
+
+  // Blacklist changed (mute/unmute)
+  onBlacklistChanged(cb: () => void): void;
 
   // Window control
   startDrag(): void;

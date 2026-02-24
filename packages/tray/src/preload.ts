@@ -5,6 +5,7 @@ import {
   TelegramUser,
   TelegramDialog,
   WhitelistEntry,
+  BlacklistEntry,
   AppSettings,
   PopupInitData,
   BubbleInitData,
@@ -35,6 +36,10 @@ contextBridge.exposeInMainWorld('oceangram', {
     ipcRenderer.invoke('add-user', user),
   removeUser: (userId: string): Promise<boolean> =>
     ipcRenderer.invoke('remove-user', userId),
+  getBlacklist: (): Promise<BlacklistEntry[]> =>
+    ipcRenderer.invoke('get-blacklist'),
+  unmuteChat: (dialogId: string): Promise<boolean> =>
+    ipcRenderer.invoke('unmute-chat', dialogId),
   getSettings: (): Promise<AppSettings> =>
     ipcRenderer.invoke('get-settings'),
   updateSettings: (settings: Partial<AppSettings>): Promise<boolean> =>
@@ -107,6 +112,11 @@ contextBridge.exposeInMainWorld('oceangram', {
   // Whitelist changed (from main process after context menu action)
   onWhitelistChanged: (cb: () => void): void => {
     ipcRenderer.on('whitelist-changed', () => cb());
+  },
+
+  // Blacklist changed (mute/unmute)
+  onBlacklistChanged: (cb: () => void): void => {
+    ipcRenderer.on('blacklist-changed', () => cb());
   },
 
   // Window control

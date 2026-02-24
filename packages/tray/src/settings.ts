@@ -18,6 +18,7 @@
   const statusText = document.getElementById('statusText')!;
   const statusDetail = document.getElementById('statusDetail')!;
   const whitelistList = document.getElementById('whitelistList')!;
+  const blacklistList = document.getElementById('blacklistList')!;
   const dialogSelect = document.getElementById('dialogSelect') as HTMLSelectElement;
   const addBtn = document.getElementById('addBtn') as HTMLButtonElement;
   const closeBtn = document.getElementById('closeBtn')!;
@@ -39,6 +40,7 @@
   async function init(): Promise<void> {
     await loadStatus();
     await loadWhitelist();
+    await loadBlacklist();
     await loadDialogs();
     await loadSettings();
   }
@@ -89,16 +91,56 @@
     });
   }
 
+  async function loadBlacklist(): Promise<void> {
+    const list = await api.getBlacklist();
+    if (!list || list.length === 0) {
+      blacklistList.innerHTML = '<div class="blacklist-empty">No muted chats</div>';
+      return;
+    }
+
+    blacklistList.innerHTML = list.map((b) => `
+      <div class="blacklist-item" data-dialog-id="${escapeHtml(b.dialogId)}">
+        <div class="blacklist-avatar" style="background: ${getColor(b.dialogId)}">
+          ${(b.displayName || '?')[0].toUpperCase()}
+        </div>
+        <div class="blacklist-info">
+          <div class="blacklist-name">${escapeHtml(b.displayName || b.dialogId)}</div>
+        </div>
+        <button class="blacklist-unmute" data-dialog-id="${escapeHtml(b.dialogId)}">Unmute</button>
+      </div>
+    `).join('');
+
+    blacklistList.querySelectorAll('.blacklist-unmute').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const dialogId = (btn as HTMLElement).dataset.dialogId;
+        if (!dialogId) return;
+        try {
+          await api.unmuteChat(dialogId);
+          await loadBlacklist();
+        } catch (e) {
+          console.error('Unmute error:', e);
+        }
+      });
+    });
+  }
+
   async function loadDialogs(): Promise<void> {
-    const dialogs = await api.getDialogs();
+    // Fetch more dialogs so we can filter to "where I last posted" and still have 100
+    const dialogs = await api.getDialogs(500);
     const whitelistData = await api.getWhitelist();
     const whitelistedIds = new Set((whitelistData || []).map((u) => String(u.userId)));
 
     dialogSelect.innerHTML = '<option value="">— Select a chat to pin —</option>';
     if (!Array.isArray(dialogs)) return;
 
-    // Filter out already-whitelisted users
-    const available = dialogs.filter((d) => {
+    // Only dialogs where I was the last to send (lastMessageOutgoing), then by recency, cap 100
+    const whereIPosted = dialogs
+      .filter((d) => (d as { lastMessageOutgoing?: boolean }).lastMessageOutgoing === true)
+      .sort((a, b) => (b.lastMessageTime ?? 0) - (a.lastMessageTime ?? 0))
+      .slice(0, 100);
+
+    // Filter out already-whitelisted
+    const available = whereIPosted.filter((d) => {
       const uid = String(d.userId || d.id);
       return uid && !whitelistedIds.has(uid);
     });
@@ -158,6 +200,10 @@
 
   closeBtn.addEventListener('click', () => {
     api.closePopup();
+  });
+
+  api.onBlacklistChanged(() => {
+    loadBlacklist();
   });
 
   document.addEventListener('keydown', (e: KeyboardEvent) => {

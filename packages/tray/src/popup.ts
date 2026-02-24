@@ -16,7 +16,8 @@
   let activeChats: TabEntry[] = [];
   // Whether the currently selected dialog is a group/forum (show sender names)
   let currentDialogIsGroup = false;
-  // Merged, deduplicated tab list
+  let blacklistEntries: Array<{ dialogId: string; displayName: string }> = [];
+  // Merged, deduplicated tab list (excluding muted/blacklisted)
   let allTabs: TabEntry[] = [];
 
   // Cached dialogs from daemon (refreshed every 10s)
@@ -48,6 +49,7 @@
   const contactName = document.getElementById('contactName')!;
   const tabsEl = document.getElementById('tabs')!;
   const messagesEl = document.getElementById('messages')!;
+  const messagesScrollEl = document.getElementById('messagesScroll')!;
   const loadingEl = document.getElementById('loadingState')!;
   const composerInput = document.getElementById('composerInput') as HTMLTextAreaElement;
   const sendBtn = document.getElementById('sendBtn') as HTMLButtonElement;
@@ -94,21 +96,28 @@
 
   // ── Tab merging ──
 
+  function isBlacklisted(dialogId: string): boolean {
+    return blacklistEntries.some((b) => {
+      const bid = String(b.dialogId);
+      return bid === dialogId || dialogId.startsWith(bid + ':');
+    });
+  }
+
   function mergeTabs(): void {
     const seen = new Set<string>();
     const result: TabEntry[] = [];
 
-    // Active chats first (left side)
+    // Active chats first (left side) — exclude muted
     for (const chat of activeChats) {
-      if (!seen.has(chat.dialogId)) {
+      if (!isBlacklisted(chat.dialogId) && !seen.has(chat.dialogId)) {
         seen.add(chat.dialogId);
         result.push({ ...chat, source: 'active' });
       }
     }
 
-    // Pinned chats that aren't already active (right side, dimmed)
+    // Pinned chats that aren't already active (right side, dimmed) — exclude muted
     for (const pin of whitelistEntries) {
-      if (!seen.has(pin.dialogId)) {
+      if (!isBlacklisted(pin.dialogId) && !seen.has(pin.dialogId)) {
         seen.add(pin.dialogId);
         result.push({ ...pin, source: 'whitelist' });
       }
@@ -237,8 +246,11 @@
       unreadCounts = await api.getUnreadCounts();
     } catch { /* ignore */ }
 
-    // Get whitelist — resolve user IDs to actual dialog IDs
+    // Get whitelist and blacklist
     const wl = await api.getWhitelist();
+    try {
+      blacklistEntries = await api.getBlacklist();
+    } catch { /* keep empty */ }
     try {
       cachedDialogs = await api.getDialogs(100);
     } catch { /* ignore */ }
@@ -399,28 +411,6 @@
       tab.appendChild(avatar);
 
       if (isActive) {
-        // Pin/unpin icon
-        const pinIcon = document.createElement('span');
-        pinIcon.className = `tab-pin${isPinned ? ' is-pinned' : ''}`;
-        pinIcon.textContent = '📌';
-        pinIcon.title = isPinned ? 'Unpin chat' : 'Pin chat';
-        pinIcon.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          if (isPinned) {
-            await api.removeUser(baseDialogId(entry.dialogId));
-          } else {
-            await api.addUser({ userId: entry.dialogId, displayName: entry.displayName });
-          }
-          // Refresh whitelist
-          try {
-            const wl = await api.getWhitelist();
-            whitelistEntries = buildWhitelistEntries(wl, cachedDialogs);
-            mergeTabs();
-            renderTabs();
-          } catch { /* ignore */ }
-        });
-        tab.appendChild(pinIcon);
-
         const name = document.createElement('span');
         name.className = 'tab-name';
         name.textContent = entry.displayName;
@@ -535,8 +525,8 @@
     if (!messageCache[dialogId] || messageCache[dialogId].length === 0) {
       loadingEl.style.display = '';
       loadingEl.textContent = 'Loading messages...';
-      messagesEl.innerHTML = '';
-      messagesEl.appendChild(loadingEl);
+      messagesScrollEl.innerHTML = '';
+      messagesScrollEl.appendChild(loadingEl);
     }
 
     await loadMessages(dialogId);
@@ -577,7 +567,7 @@
       loadingEl.style.display = 'none';
 
       if (!Array.isArray(messages) || messages.length === 0) {
-        messagesEl.innerHTML = `<div class="loading">No messages yet</div>`;
+        messagesScrollEl.innerHTML = `<div class="loading">No messages yet</div>`;
         return;
       }
 
@@ -586,7 +576,7 @@
     } catch (err) {
       console.error('[loadMessages] ERROR for', dialogId, err);
       loadingEl.style.display = 'none';
-      messagesEl.innerHTML = `<div class="loading">Failed to load messages</div>`;
+      messagesScrollEl.innerHTML = `<div class="loading">Failed to load messages</div>`;
     }
   }
 
@@ -706,14 +696,14 @@
         const newMsgs = messages.filter((m: MessageLike) => (m.id || 0) > lastSeenMsgId);
         for (const msg of newMsgs) {
           // Check if already in DOM by ID
-          const existing = messagesEl.querySelector(`[data-msg-id="${msg.id}"]`);
+          const existing = messagesScrollEl.querySelector(`[data-msg-id="${msg.id}"]`);
           if (existing) continue;
 
           // Check for optimistic duplicate (id=0, same text, outgoing)
           const msgText = msg.text || msg.message || '';
           const isOutgoing = msg.isOutgoing === true || String(msg.fromId || msg.senderId || '') === String(myId);
           if (isOutgoing && msgText) {
-            const optimistic = messagesEl.querySelector('[data-msg-id="0"]');
+            const optimistic = messagesScrollEl.querySelector('[data-msg-id="0"]');
             if (optimistic && optimistic.querySelector('.text')?.textContent?.trim() === msgText.trim()) {
               // Replace optimistic with real message (updates the ID)
               optimistic.setAttribute('data-msg-id', String(msg.id || 0));
@@ -751,8 +741,8 @@
     replyBarText.textContent = `Replying to: ${preview}`;
     replyBar.style.display = '';
     // Highlight the target message
-    messagesEl.querySelectorAll('.message.reply-target').forEach((el) => el.classList.remove('reply-target'));
-    const targetEl = messagesEl.querySelector(`[data-msg-id="${messageId}"]`);
+    messagesScrollEl.querySelectorAll('.message.reply-target').forEach((el) => el.classList.remove('reply-target'));
+    const targetEl = messagesScrollEl.querySelector(`[data-msg-id="${messageId}"]`);
     if (targetEl) targetEl.classList.add('reply-target');
     composerInput.focus();
   }
@@ -761,7 +751,7 @@
     replyTarget = null;
     replyBar.style.display = 'none';
     replyBarText.textContent = '';
-    messagesEl.querySelectorAll('.message.reply-target').forEach((el) => el.classList.remove('reply-target'));
+    messagesScrollEl.querySelectorAll('.message.reply-target').forEach((el) => el.classList.remove('reply-target'));
   }
 
   replyBarCancel.addEventListener('click', clearReplyTarget);
@@ -769,7 +759,7 @@
   // ── Message rendering ──
 
   function renderMessages(messages: MessageLike[], preserveTyping = true): void {
-    const wasTyping = preserveTyping && messagesEl.contains(typingBubble);
+    const wasTyping = preserveTyping && messagesScrollEl.contains(typingBubble);
     const sorted = [...messages].sort((a, b) => {
       const tA = a.date || a.timestamp || 0;
       const tB = b.date || b.timestamp || 0;
@@ -825,8 +815,8 @@
       `;
     }
 
-    messagesEl.innerHTML = html;
-    if (wasTyping) messagesEl.appendChild(typingBubble);
+    messagesScrollEl.innerHTML = html;
+    if (wasTyping) messagesScrollEl.appendChild(typingBubble);
     bindMessageClicks();
     scrollToBottom();
   }
@@ -839,7 +829,7 @@
     const msgId = msg.id || 0;
 
     // Remove loading/empty states
-    const loading = messagesEl.querySelector('.loading');
+    const loading = messagesScrollEl.querySelector('.loading');
     if (loading) loading.remove();
 
     const div = document.createElement('div');
@@ -879,12 +869,12 @@
         setReplyTarget(msgId, preview);
       }
     });
-    messagesEl.appendChild(div);
+    messagesScrollEl.appendChild(div);
     scrollToBottom();
   }
 
   function bindMessageClicks(): void {
-    messagesEl.querySelectorAll('.message[data-msg-id]').forEach((el) => {
+    messagesScrollEl.querySelectorAll('.message[data-msg-id]').forEach((el) => {
       el.addEventListener('click', () => {
         const msgId = parseInt((el as HTMLElement).dataset.msgId || '0', 10);
         if (!msgId) return;
@@ -893,12 +883,12 @@
         setReplyTarget(msgId, preview);
       });
     });
-    messagesEl.querySelectorAll('.reply-context[data-reply-to]').forEach((el) => {
+    messagesScrollEl.querySelectorAll('.reply-context[data-reply-to]').forEach((el) => {
       el.addEventListener('click', (e) => {
         e.stopPropagation();
         const replyTo = (el as HTMLElement).dataset.replyTo;
         if (!replyTo) return;
-        const target = messagesEl.querySelector(`.message[data-msg-id="${replyTo}"]`);
+        const target = messagesScrollEl.querySelector(`.message[data-msg-id="${replyTo}"]`);
         if (target) {
           target.scrollIntoView({ behavior: 'smooth', block: 'center' });
           target.classList.add('reply-highlight');
@@ -910,7 +900,7 @@
 
   function scrollToBottom(): void {
     requestAnimationFrame(() => {
-      messagesEl.scrollTop = messagesEl.scrollHeight;
+      messagesScrollEl.scrollTop = messagesScrollEl.scrollHeight;
     });
   }
 
@@ -1259,9 +1249,9 @@
   typingBubble.innerHTML = '<div class="typing-dots"><span></span><span></span><span></span></div>';
 
   function showTyping(): void {
-    if (!messagesEl.contains(typingBubble)) {
-      messagesEl.appendChild(typingBubble);
-      messagesEl.scrollTop = messagesEl.scrollHeight;
+    if (!messagesScrollEl.contains(typingBubble)) {
+      messagesScrollEl.appendChild(typingBubble);
+      messagesScrollEl.scrollTop = messagesScrollEl.scrollHeight;
     }
     if (typingTimeout) clearTimeout(typingTimeout);
     typingTimeout = setTimeout(hideTyping, 12000);
@@ -1316,6 +1306,24 @@
       whitelistEntries = buildWhitelistEntries(wl, cachedDialogs);
       mergeTabs();
       renderLayout();
+    } catch { /* ignore */ }
+  });
+
+  // Blacklist changed (mute from right-click) — refresh tabs, clear selection if muted
+  api.onBlacklistChanged(async () => {
+    try {
+      blacklistEntries = await api.getBlacklist();
+      mergeTabs();
+      if (selectedDialogId && !allTabs.some((t) => t.dialogId === selectedDialogId)) {
+        const next = allTabs[0];
+        if (next) selectTab(next.dialogId, next.displayName, false);
+        else {
+          selectedDialogId = null;
+          renderLayout();
+        }
+      } else {
+        renderLayout();
+      }
     } catch { /* ignore */ }
   });
 

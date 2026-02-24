@@ -2,13 +2,14 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { AppConfig, AppSettings, WhitelistEntry } from './types';
+import { AppConfig, AppSettings, WhitelistEntry, BlacklistEntry } from './types';
 
 const CONFIG_DIR: string = path.join(os.homedir(), '.oceangram-tray');
 const CONFIG_PATH: string = path.join(CONFIG_DIR, 'config.json');
 
 const DEFAULT_CONFIG: AppConfig = {
   whitelist: [],
+  blacklist: [],
   settings: {
     alwaysOnTop: true,
     bubblePosition: 'right',
@@ -36,6 +37,7 @@ class WhitelistManager {
         const parsed = JSON.parse(raw) as Partial<AppConfig>;
         this.config = {
           whitelist: Array.isArray(parsed.whitelist) ? parsed.whitelist : [],
+          blacklist: Array.isArray(parsed.blacklist) ? parsed.blacklist : [],
           settings: { ...DEFAULT_CONFIG.settings, ...parsed.settings },
         };
       } else {
@@ -104,6 +106,39 @@ class WhitelistManager {
   getUserInfo(userId: string | number): WhitelistEntry | null {
     const id = String(userId);
     return this.config.whitelist.find((u) => String(u.userId) === id) || null;
+  }
+
+  // ── Blacklist (muted chats — hidden from tray) ──
+
+  isBlacklisted(dialogId: string): boolean {
+    const id = String(dialogId);
+    return this.config.blacklist.some((b) => {
+      const bid = String(b.dialogId);
+      return bid === id || id.startsWith(bid + ':');
+    });
+  }
+
+  getBlacklist(): BlacklistEntry[] {
+    return this.config.blacklist;
+  }
+
+  addToBlacklist(dialogId: string, displayName: string): boolean {
+    const id = String(dialogId);
+    if (this.config.blacklist.some((b) => String(b.dialogId) === id)) return false;
+    this.config.blacklist.push({ dialogId: id, displayName });
+    this.save();
+    return true;
+  }
+
+  removeFromBlacklist(dialogId: string): boolean {
+    const id = String(dialogId);
+    const before = this.config.blacklist.length;
+    this.config.blacklist = this.config.blacklist.filter((b) => String(b.dialogId) !== id);
+    if (this.config.blacklist.length !== before) {
+      this.save();
+      return true;
+    }
+    return false;
   }
 }
 
