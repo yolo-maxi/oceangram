@@ -463,7 +463,7 @@
 
   function startPolling(): void {
     if (pollTimer) return;
-    pollTimer = setInterval(pollForNewMessages, 1500);
+    pollTimer = setInterval(pollForNewMessages, 500);
   }
 
   function stopPolling(): void {
