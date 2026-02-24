@@ -176,6 +176,12 @@
     const me = await api.getMe();
     if (me && me.id) myId = String(me.id);
 
+    // Debug WS status
+    try {
+      const wsStatus = await api.getDaemonWsStatus();
+      console.log('[popup] Daemon WS status:', wsStatus);
+    } catch (e) { console.error('[popup] WS status check failed:', e); }
+
     // Load unread counts
     try {
       unreadCounts = await api.getUnreadCounts();

@@ -76,6 +76,9 @@ contextBridge.exposeInMainWorld('oceangram', {
   onTyping: (cb: (data: { dialogId: string; userId: string; action: string }) => void): void => {
     ipcRenderer.on('typing', (_: IpcRendererEvent, data: { dialogId: string; userId: string; action: string }) => cb(data));
   },
+  // Debug: check if WS is connected
+  getDaemonWsStatus: (): Promise<{ connected: boolean; wsUrl: string }> =>
+    ipcRenderer.invoke('get-daemon-ws-status'),
 
   // Bubble-specific (kept for backward compat)
   getBubbleData: (): Promise<Record<string, { displayName: string; count: number }>> =>

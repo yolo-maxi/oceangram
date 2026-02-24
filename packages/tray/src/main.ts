@@ -581,6 +581,10 @@ function setupIPC(): void {
     return health !== null;
   });
 
+  ipcMain.handle('get-daemon-ws-status', () => {
+    return { connected: daemon?.connected ?? false, wsUrl: 'ws://localhost:7777/events' };
+  });
+
   // User info
   ipcMain.handle('get-me', async () => {
     return await daemon!.getMe();
