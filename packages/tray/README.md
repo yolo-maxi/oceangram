@@ -40,7 +40,7 @@ Or from the repo root:
 pnpm build:daemon && cd packages/tray && pnpm start
 ```
 
-## Development (hot reload)
+## Development (hot reload)image.png
 
 ```bash
 pnpm run build:daemon   # Once
@@ -73,7 +73,7 @@ Settings are stored in `~/.oceangram-tray/config.json`:
     "pollIntervalMs": 3000
   }
 }
-```
+```so 
 
 `whitelist[].userId` can be a user ID or dialog ID (e.g. `chatId:topicId` for forum topics). `theme` options: `system`, `day`, `night`, `tinted`, `arctic`.
 

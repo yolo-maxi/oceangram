@@ -139,9 +139,9 @@ class DaemonClient extends EventEmitter {
     }
   }
 
-  async markRead(messageId: number): Promise<unknown> {
+  async markRead(dialogId: string, messageId: number): Promise<unknown> {
     try {
-      return await this._request('POST', `/messages/${messageId}/read`);
+      return await this._request('POST', `/messages/${messageId}/read`, { dialogId });
     } catch {
       return null;
     }

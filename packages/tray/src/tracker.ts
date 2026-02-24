@@ -116,7 +116,7 @@ class MessageTracker extends EventEmitter {
         }
       }
 
-      // Sync active chats from daemon dialog data (captures sends from regular Telegram)
+      // Sync active chats from daemon dialog data (captures sends from regular Telegram / other clients)
       this.syncActiveChatsFromDaemon(dialogs);
 
       if (changed) {
@@ -164,7 +164,7 @@ class MessageTracker extends EventEmitter {
       this.lastSeenIds.set(dialogId, latest.id);
       this._saveLastSeen();
       // Mark read on daemon
-      daemon.markRead(latest.id).catch(() => {});
+      daemon.markRead(dialogId, latest.id).catch(() => {});
     }
 
     this.unreads.delete(dialogId);
