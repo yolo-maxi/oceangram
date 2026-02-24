@@ -1,5 +1,7 @@
 /* popup.css — Minimal Oceangram popup */
-:root {
+/* ── Dark theme (default) ── */
+:root,
+[data-theme="dark"] {
   --bg: #1a1a2e;
   --bg-dark: #151528;
   --bg-bubble-in: #252540;
@@ -14,6 +16,32 @@
   --scrollbar-hover: #4a4a65;
   --red: #e53935;
   --green: #43a047;
+  --code-bg: rgba(255,255,255,0.1);
+  --pre-bg: rgba(0,0,0,0.3);
+  --hover-overlay: rgba(255,255,255,0.04);
+  --link-color: #64b5f6;
+}
+
+/* ── Light theme (Telegram-inspired) ── */
+[data-theme="light"] {
+  --bg: #ffffff;
+  --bg-dark: #f0f2f5;
+  --bg-bubble-in: #e8ecf0;
+  --bg-bubble-out: #3390ec;
+  --accent: #3390ec;
+  --accent-hover: #4ea4f6;
+  --text: #1a1a1a;
+  --text-dim: #707579;
+  --text-ts: #8e9396;
+  --border: #dce1e6;
+  --scrollbar: #c4c9cc;
+  --scrollbar-hover: #a8adb1;
+  --red: #e53935;
+  --green: #43a047;
+  --code-bg: rgba(0,0,0,0.06);
+  --pre-bg: rgba(0,0,0,0.05);
+  --hover-overlay: rgba(0,0,0,0.04);
+  --link-color: #3390ec;
 }
 
 * {
@@ -323,7 +351,7 @@ html, body {
 }
 
 .message .text a {
-  color: #64b5f6;
+  color: var(--link-color, #64b5f6);
   text-decoration: none;
 }
 
@@ -332,7 +360,7 @@ html, body {
 }
 
 .message .text code {
-  background: rgba(255,255,255,0.1);
+  background: var(--code-bg, rgba(255,255,255,0.1));
   padding: 1px 4px;
   border-radius: 4px;
   font-family: 'SF Mono', 'Fira Code', monospace;
@@ -340,7 +368,7 @@ html, body {
 }
 
 .message .text pre {
-  background: rgba(0,0,0,0.3);
+  background: var(--pre-bg, rgba(0,0,0,0.3));
   padding: 6px;
   border-radius: 6px;
   overflow-x: auto;
@@ -359,7 +387,7 @@ html, body {
   margin-bottom: 4px;
   border-left: 2px solid var(--accent);
   border-radius: 2px;
-  background: rgba(255,255,255,0.04);
+  background: var(--hover-overlay);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -367,7 +395,7 @@ html, body {
 }
 
 .reply-context:hover {
-  background: rgba(255,255,255,0.08);
+  opacity: 0.8;
 }
 
 .message.reply-highlight {
@@ -404,7 +432,7 @@ html, body {
 }
 
 .date-separator span {
-  background: rgba(37,37,64,0.8);
+  background: var(--bg-dark);
   padding: 2px 8px;
   border-radius: 6px;
 }
@@ -488,7 +516,7 @@ html, body {
 
 .composer-input {
   flex: 1;
-  background: rgba(37,37,64,0.6);
+  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 18px;
   padding: 7px 14px;

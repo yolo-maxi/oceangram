@@ -351,7 +351,7 @@
       tab.addEventListener('click', () => {
         console.log('[tab-click]', entry.dialogId, entry.displayName, 'selected:', selectedDialogId);
         if (entry.dialogId !== selectedDialogId) {
-          selectTab(entry);
+          selectTab(entry, true);
         }
       });
 
@@ -405,14 +405,15 @@
 
   // ── Select tab ──
 
-  let selectTabLock = false;
-  async function selectTab(entry: TabEntry): Promise<void> {
-    console.log('[selectTab]', entry.dialogId, entry.displayName, 'lock:', selectTabLock, new Error().stack?.split('\n')[2]?.trim());
-    if (selectTabLock) {
-      console.log('[selectTab] BLOCKED — already selecting');
+  let userSelectedDialogId: string | null = null; // tracks explicit user selection
+  async function selectTab(entry: TabEntry, userInitiated = false): Promise<void> {
+    // If user has explicitly selected a tab, block any automatic re-selection
+    if (!userInitiated && userSelectedDialogId && userSelectedDialogId !== entry.dialogId) {
+      console.log('[selectTab] BLOCKED auto-select, user chose:', userSelectedDialogId, 'attempted:', entry.dialogId);
       return;
     }
-    selectTabLock = true;
+    if (userInitiated) userSelectedDialogId = entry.dialogId;
+    console.log('[selectTab]', entry.dialogId, entry.displayName, 'userInitiated:', userInitiated);
     const previousUnreads = unreadCounts[entry.dialogId] || 0;
     selectedDialogId = entry.dialogId;
 
@@ -463,7 +464,6 @@
 
     // Focus composer
     setTimeout(() => composerInput.focus(), 100);
-    selectTabLock = false;
   }
 
   // ── Message cache ──
@@ -1122,7 +1122,7 @@
   // Select dialog from main process (e.g., notification click)
   api.onSelectDialog((dialogId) => {
     const entry = allTabs.find((t) => t.dialogId === dialogId);
-    if (entry) selectTab(entry);
+    if (entry) selectTab(entry, true);
   });
 
   // ── Keyboard shortcuts ──
