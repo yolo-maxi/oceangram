@@ -7,7 +7,28 @@ import { CustomFile } from 'telegram/client/uploads';
 import { computeCheck } from 'telegram/Password';
 import bigInt from 'big-integer';
 import { getApiId, getApiHash, loadConfig, saveConfig } from './config';
-import { Cache } from './cache';
+import type { Cache as CacheType } from './cache';
+
+// Dynamic import — better-sqlite3 may not be available (e.g. bundled without native addon)
+let CacheClass: (new () => CacheType) | null = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  CacheClass = require('./cache').Cache;
+} catch {
+  console.log('[telegram] SQLite cache not available — running without disk cache');
+}
+
+/** No-op cache fallback when better-sqlite3 is unavailable. */
+const noopCache: CacheType = {
+  getDialogs: () => [],
+  upsertDialogs: () => {},
+  getMessages: () => [],
+  upsertMessages: () => {},
+  deleteMessage: () => {},
+  getProfilePhoto: () => null,
+  setProfilePhoto: () => {},
+  close: () => {},
+} as unknown as CacheType;
 
 // --- Privacy key mapping ---
 type PrivacyKeyName = 'lastSeen' | 'phoneNumber' | 'profilePhoto' | 'forwards' | 'calls' | 'groups';
@@ -107,10 +128,19 @@ export class TelegramService {
   private messagesCache: Map<string, { ts: number; data: MessageInfo[] }> = new Map();
   private dialogsCache: { ts: number; data: DialogInfo[] } | null = null;
   private profilePhotoCache: Map<string, { ts: number; data: { buffer: Buffer; mimeType: string } | null }> = new Map();
-  private cache: Cache;
+  private cache: CacheType;
 
   constructor() {
-    this.cache = new Cache();
+    if (CacheClass) {
+      try {
+        this.cache = new CacheClass();
+      } catch (e) {
+        console.error('[telegram] Failed to init SQLite cache:', e);
+        this.cache = noopCache;
+      }
+    } else {
+      this.cache = noopCache;
+    }
   }
 
   isConnected(): boolean { return this.connected; }

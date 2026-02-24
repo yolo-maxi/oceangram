@@ -12,7 +12,7 @@ await build({
   target: 'node18',
   outfile: 'resources/daemon-bundle.js',
   format: 'cjs',
-  external: [],
+  external: ['better-sqlite3'],
   sourcemap: false,
   minify: true,
 });
