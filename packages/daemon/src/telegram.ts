@@ -535,12 +535,11 @@ export class TelegramService {
         : 'group' as const;
 
       if (isForum) {
-        // Two-pass: only expand forums with recent activity
+        // Pass 1: Only expand forums with recent activity (unreads or we sent last).
+        // Inactive forums are skipped entirely — no getForumTopics API call.
+        // See packages/daemon/README.md § Forum dialogs.
         const forumHasActivity = (d.unreadCount || 0) > 0 || d.message?.out === true;
-        if (!forumHasActivity) {
-          // Dead forum — skip entirely, don't waste an API call on topics
-          continue;
-        }
+        if (!forumHasActivity) continue;
 
         try {
           const topics = await this.getForumTopics(chatId);
@@ -576,7 +575,7 @@ export class TelegramService {
           }
 
           for (const topic of topics) {
-            // Filter: only include topics with unreads or recent outgoing activity
+            // Pass 2: Only include topics with unreads or where we've sent (readOutboxMaxId > 0).
             const hasUnreads = (topic.unreadCount || 0) > 0;
             const hasOutgoing = topic.readOutboxMaxId > 0;
             if (!hasUnreads && !hasOutgoing) continue;

@@ -38,7 +38,17 @@ Environment variables: `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `PORT`, `AUTH_TOK
 |--------|------|-------------|
 | GET | `/health` | Service status |
 | GET | `/me` | Current user info |
-| GET | `/dialogs?limit=100` | Chat list (with forum topics) |
+| GET | `/dialogs?limit=100` | Chat list (with forum topics, see below) |
+
+### Forum dialogs (two-pass expansion)
+
+For efficiency, forum groups are expanded into topics in two passes:
+
+1. **Pass 1 — Skip inactive forums:** Only expand forums where `unreadCount > 0` OR the last message is outgoing. Forums with no unreads and no recent send from you are skipped entirely (no `getForumTopics` API call).
+
+2. **Pass 2 — Filter dead topics:** Within active forums, only include topics where `unreadCount > 0` OR `readOutboxMaxId > 0` (you've sent there before). Topics with no unreads and no outbox are excluded.
+
+This prevents large inactive forum groups from consuming the dialog quota with hundreds of dead topics. Downside: whitelisted but inactive forum topics may not appear in the list until they have unreads or you send there.
 | GET | `/dialogs/:id/messages?limit=20&offsetId=X` | Messages |
 | POST | `/dialogs/:id/messages` | Send message `{text, replyTo?}` |
 | GET | `/dialogs/:id/info` | Chat info |
