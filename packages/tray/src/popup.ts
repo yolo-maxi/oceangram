@@ -764,30 +764,43 @@
         hideTyping();
         // Find ones we haven't seen
         const newMsgs = messages.filter((m: MessageLike) => (m.id || 0) > lastSeenMsgId);
+        const replacedOptimistic: MessageLike[] = [];
         for (const msg of newMsgs) {
           // Check if already in DOM by ID
           const existing = messagesScrollEl.querySelector(`[data-msg-id="${msg.id}"]`);
           if (existing) continue;
 
           // Check for optimistic duplicate (id=0, same text, outgoing)
-          const msgText = msg.text || msg.message || '';
+          const msgText = (msg.text || msg.message || '').trim();
           const isOutgoing = msg.isOutgoing === true || String(msg.fromId || msg.senderId || '') === String(myId);
           if (isOutgoing && msgText) {
             const optimistic = messagesScrollEl.querySelector('[data-msg-id="0"]');
-            if (optimistic && optimistic.querySelector('.text')?.textContent?.trim() === msgText.trim()) {
-              // Replace optimistic with real message (updates the ID)
+            if (optimistic && optimistic.querySelector('.text')?.textContent?.trim() === msgText) {
               optimistic.setAttribute('data-msg-id', String(msg.id || 0));
+              replacedOptimistic.push(msg);
               continue;
             }
           }
 
           appendMessage(msg);
         }
-        // Update cache
-        const cached = messageCache[selectedDialogId] || [];
+        // Update cache: replace optimistic with real for replaced, add new others
+        let cached = messageCache[selectedDialogId] || [];
+        for (const msg of replacedOptimistic) {
+          const idx = cached.findIndex((m) => (m.id || 0) === 0 && (m.text || m.message || '').trim() === (msg.text || msg.message || '').trim() && m.isOutgoing);
+          if (idx >= 0) {
+            cached = [...cached];
+            cached[idx] = msg;
+          } else {
+            cached = [...cached, msg];
+          }
+        }
         const cachedIds = new Set(cached.map((m: MessageLike) => m.id));
         for (const msg of newMsgs) {
-          if (!cachedIds.has(msg.id)) cached.push(msg);
+          if (!replacedOptimistic.includes(msg) && !cachedIds.has(msg.id)) {
+            cached = [...cached, msg];
+            cachedIds.add(msg.id || 0);
+          }
         }
         messageCache[selectedDialogId] = cached;
 
@@ -1246,12 +1259,16 @@
     if (hasFile && pendingFile) {
       const file = pendingFile;
       clearAttachment();
-      appendMessage({
+      const optimisticFile = {
+        id: 0,
         fromId: myId || undefined,
         text: text ? `📎 ${text}` : '📎 Photo',
         date: Math.floor(Date.now() / 1000),
         isOutgoing: true,
-      });
+      };
+      appendMessage(optimisticFile);
+      const cache = messageCache[selectedDialogId] || [];
+      messageCache[selectedDialogId] = [...cache, optimisticFile];
       try {
         const base64 = await fileToBase64(file);
         await api.sendFile(selectedDialogId, base64, file.name, file.type, text || undefined);
@@ -1259,12 +1276,16 @@
         console.error('File send failed:', err);
       }
     } else {
-      appendMessage({
+      const optimisticMsg = {
+        id: 0,
         fromId: myId || undefined,
         text,
         date: Math.floor(Date.now() / 1000),
         isOutgoing: true,
-      });
+      };
+      appendMessage(optimisticMsg);
+      const cache = messageCache[selectedDialogId] || [];
+      messageCache[selectedDialogId] = [...cache, optimisticMsg];
       try {
         await api.sendMessage(selectedDialogId, text, currentReplyTo);
       } catch (err) {
@@ -1566,17 +1587,35 @@
     const matchedTab = findMatchingTab(msgDialogId);
     const tabDialogId = matchedTab?.dialogId;
 
-    // Update cache using the tab's dialog ID
-    if (tabDialogId && messageCache[tabDialogId]) {
-      messageCache[tabDialogId] = [...messageCache[tabDialogId], msg];
-    }
-
     if (tabDialogId && tabDialogId === selectedDialogId) {
-      // Current chat — append message
-      appendMessage(msg);
+      // Current chat — replace optimistic or append
+      const msgText = (msg.text || msg.message || '').trim();
+      const isOutgoing = msg.isOutgoing === true || String(msg.fromId || msg.senderId || '') === String(myId);
+      if (isOutgoing && msgText) {
+        const optimistic = messagesScrollEl.querySelector('[data-msg-id="0"]');
+        if (optimistic && optimistic.querySelector('.text')?.textContent?.trim() === msgText) {
+          optimistic.setAttribute('data-msg-id', String(msg.id || 0));
+          const cache = messageCache[tabDialogId] || [];
+          const idx = cache.findIndex((m) => (m.id || 0) === 0 && (m.text || m.message || '').trim() === msgText && m.isOutgoing);
+          if (idx >= 0) {
+            const next = [...cache];
+            next[idx] = msg;
+            messageCache[tabDialogId] = next;
+          } else {
+            messageCache[tabDialogId] = [...cache, msg];
+          }
+        } else {
+          appendMessage(msg);
+          messageCache[tabDialogId] = [...(messageCache[tabDialogId] || []), msg];
+        }
+      } else {
+        appendMessage(msg);
+        messageCache[tabDialogId] = [...(messageCache[tabDialogId] || []), msg];
+      }
       api.markRead(selectedDialogId);
     } else if (tabDialogId) {
-      // Other visible tab — update unread
+      // Other visible tab — add to cache, update unread
+      messageCache[tabDialogId] = [...(messageCache[tabDialogId] || []), msg];
       unreadCounts[tabDialogId] = (unreadCounts[tabDialogId] || 0) + 1;
       updateTabActive();
     }
