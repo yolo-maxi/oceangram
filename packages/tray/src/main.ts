@@ -640,6 +640,10 @@ function setupIPC(): void {
     return await daemon!.getProfilePhotoBase64(userId);
   });
 
+  ipcMain.handle('get-media', async (_: IpcMainInvokeEvent, dialogId: string, messageId: number) => {
+    return await daemon!.getMedia(dialogId, messageId);
+  });
+
   // Whitelist
   ipcMain.handle('get-whitelist', () => {
     return whitelist!.getWhitelist();

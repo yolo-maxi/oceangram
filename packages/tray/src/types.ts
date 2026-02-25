@@ -154,6 +154,7 @@ export type IpcInvokeChannel =
   | 'mark-read'
   | 'get-dialog-info'
   | 'get-profile-photo'
+  | 'get-media'
   | 'get-whitelist'
   | 'add-user'
   | 'remove-user'

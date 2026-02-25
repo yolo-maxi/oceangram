@@ -27,6 +27,8 @@ contextBridge.exposeInMainWorld('oceangram', {
     ipcRenderer.invoke('get-dialog-info', dialogId),
   getProfilePhoto: (userId: string): Promise<string | null> =>
     ipcRenderer.invoke('get-profile-photo', userId),
+  getMedia: (dialogId: string, messageId: number): Promise<string | null> =>
+    ipcRenderer.invoke('get-media', dialogId, messageId),
   closePopup: (): void => ipcRenderer.send('close-popup'),
 
   // Whitelist / Settings

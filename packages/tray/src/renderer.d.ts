@@ -36,6 +36,7 @@ interface OceangramAPI {
   markRead(dialogId: string): Promise<boolean>;
   getDialogInfo(dialogId: string): Promise<TelegramDialog | null>;
   getProfilePhoto(userId: string): Promise<string | null>;
+  getMedia(dialogId: string, messageId: number): Promise<string | null>;
   closePopup(): void;
 
   // Whitelist / Settings

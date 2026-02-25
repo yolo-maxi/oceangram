@@ -42,6 +42,10 @@
     isOutgoing?: boolean;
     dialogId?: string;
     chatId?: string;
+    mediaType?: 'photo' | 'video' | 'voice' | 'file' | 'sticker' | 'gif';
+    mediaWidth?: number;
+    mediaHeight?: number;
+    replyToId?: number;
   }
 
   // DOM refs
@@ -92,6 +96,51 @@
     const div = document.createElement('div');
     div.textContent = str;
     return div.innerHTML;
+  }
+
+  async function loadMessageImage(
+    container: HTMLElement,
+    dialogId: string,
+    messageId: number,
+    width?: number,
+    height?: number,
+  ): Promise<void> {
+    const placeholder = container.querySelector('.msg-media-placeholder');
+    try {
+      const dataUrl = await api.getMedia(dialogId, messageId);
+      if (!dataUrl) return;
+      const img = document.createElement('img');
+      img.src = dataUrl;
+      img.alt = '';
+      img.loading = 'lazy';
+      if (width != null && height != null && width > 0 && height > 0) {
+        const maxW = 220;
+        const maxH = 180;
+        const r = Math.min(maxW / width, maxH / height, 1);
+        img.style.width = `${Math.round(width * r)}px`;
+        img.style.height = `${Math.round(height * r)}px`;
+      } else {
+        img.style.maxWidth = '220px';
+        img.style.maxHeight = '180px';
+      }
+      if (placeholder) placeholder.remove();
+      container.appendChild(img);
+      (container as HTMLElement).dataset.loadedUrl = dataUrl;
+    } catch {
+      if (placeholder) (placeholder as HTMLElement).textContent = 'Failed to load';
+    }
+  }
+
+  function openImageFullscreen(src: string): void {
+    if (!src || !src.startsWith('data:')) return;
+    const overlay = document.createElement('div');
+    overlay.className = 'image-fullscreen-overlay';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-label', 'Image fullscreen');
+    overlay.innerHTML = `<img src="${escapeHtml(src)}" alt="Full size">`;
+    overlay.addEventListener('click', () => overlay.remove());
+    document.body.appendChild(overlay);
   }
 
   // ── Tab merging ──
@@ -798,17 +847,54 @@
       }
       prevSenderId = fromId;
 
+      const mediaType = (msg as MessageLike).mediaType ?? (msg as any).media?.type;
+      const isImageMedia = mediaType === 'photo' || mediaType === 'gif' || mediaType === 'sticker';
+      const w = (msg as MessageLike).mediaWidth ?? (msg as any).mediaWidth;
+      const h = (msg as MessageLike).mediaHeight ?? (msg as any).mediaHeight;
+      const hasCaption = (text || '').trim().length > 0;
+
+      let mediaHtml = '';
+      if (isImageMedia && msgId && selectedDialogId) {
+        mediaHtml = `<div class="msg-media img" data-msg-id="${msgId}" data-dialog-id="${escapeHtml(selectedDialogId)}" title="Click to expand">
+          <div class="msg-media-placeholder">📷</div>
+        </div>`;
+      }
+
       html += `
         <div class="message ${isOutgoing ? 'outgoing' : 'incoming'}" data-msg-id="${msgId}">
           ${replyHtml}
           ${senderHtml}
-          <div class="text">${text}</div>
+          ${mediaHtml}
+          ${hasCaption || !isImageMedia ? `<div class="text">${text}</div>` : ''}
           <div class="time">${time}</div>
         </div>
       `;
     }
 
     messagesScrollEl.innerHTML = html;
+
+    // Load images and bind fullscreen for media messages
+    messagesScrollEl.querySelectorAll('.msg-media.img').forEach((el) => {
+      const mediaEl = el as HTMLElement;
+      const msgId = parseInt(mediaEl.dataset.msgId || '0', 10);
+      const dialogId = mediaEl.dataset.dialogId;
+      if (!msgId || !dialogId) return;
+      const msg = sorted.find((m) => m.id === msgId);
+      const w = msg ? ((msg as MessageLike).mediaWidth ?? (msg as any).mediaWidth) : undefined;
+      const h = msg ? ((msg as MessageLike).mediaHeight ?? (msg as any).mediaHeight) : undefined;
+      loadMessageImage(mediaEl, dialogId, msgId, w, h);
+      mediaEl.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const src = mediaEl.dataset.loadedUrl ?? (mediaEl.querySelector('img') as HTMLImageElement)?.src;
+        if (src) {
+          openImageFullscreen(src);
+        } else {
+          const dataUrl = await api.getMedia(dialogId, msgId);
+          if (dataUrl) openImageFullscreen(dataUrl);
+        }
+      });
+    });
+
     if (wasTyping) messagesScrollEl.appendChild(typingBubble);
     bindMessageClicks();
     scrollToBottom();
@@ -850,13 +936,47 @@
       }
     }
 
+    const mediaType = msg.mediaType ?? (msg as any).media?.type;
+    const isImageMedia = mediaType === 'photo' || mediaType === 'gif' || mediaType === 'sticker';
+    const w = msg.mediaWidth ?? (msg as any).mediaWidth;
+    const h = msg.mediaHeight ?? (msg as any).mediaHeight;
+    const hasCaption = (text || '').trim().length > 0;
+
+    let mediaHtml = '';
+    if (isImageMedia && msgId && selectedDialogId) {
+      mediaHtml = `<div class="msg-media img" data-msg-id="${msgId}" data-dialog-id="${escapeHtml(selectedDialogId)}" title="Click to expand">
+        <div class="msg-media-placeholder">📷</div>
+      </div>`;
+    }
+
     div.innerHTML = `
       ${replyHtml}
       ${senderHtml}
-      <div class="text">${text}</div>
+      ${mediaHtml}
+      ${hasCaption || !isImageMedia ? `<div class="text">${text}</div>` : ''}
       <div class="time">${time}</div>
     `;
-    div.addEventListener('click', () => {
+
+    if (isImageMedia && msgId && selectedDialogId) {
+      const mediaEl = div.querySelector('.msg-media.img') as HTMLElement;
+      if (mediaEl) {
+        loadMessageImage(mediaEl, selectedDialogId, msgId, w, h);
+        mediaEl.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const src = mediaEl.dataset.loadedUrl ?? (mediaEl.querySelector('img') as HTMLImageElement)?.src;
+          if (src) {
+            openImageFullscreen(src);
+          } else {
+            if (!selectedDialogId) return;
+            const dataUrl = await api.getMedia(selectedDialogId, msgId);
+            if (dataUrl) openImageFullscreen(dataUrl);
+          }
+        });
+      }
+    }
+
+    div.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('.msg-media')) return;
       if (msgId) {
         const preview = (msg.text || msg.message || '').substring(0, 50);
         setReplyTarget(msgId, preview);

@@ -81,6 +81,36 @@ class DaemonClient extends EventEmitter {
     });
   }
 
+  private _requestBinary(urlPath: string): Promise<{ buffer: Buffer; contentType: string }> {
+    return new Promise((resolve, reject) => {
+      const url = new URL(urlPath, BASE_URL);
+      const options: http.RequestOptions = {
+        hostname: url.hostname,
+        port: url.port,
+        path: url.pathname + url.search,
+        method: 'GET',
+        timeout: 15000,
+      };
+
+      const req = http.request(options, (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => {
+          const buffer = Buffer.concat(chunks);
+          const contentType = (res.headers['content-type'] || 'application/octet-stream').split(';')[0].trim();
+          resolve({ buffer, contentType });
+        });
+      });
+
+      req.on('error', (err) => reject(err));
+      req.on('timeout', () => {
+        req.destroy();
+        reject(new Error('Request timeout'));
+      });
+      req.end();
+    });
+  }
+
   async getHealth(): Promise<HealthResponse | null> {
     try {
       const res = await this._request('GET', '/health') as HealthResponse;
@@ -197,6 +227,18 @@ class DaemonClient extends EventEmitter {
     try {
       const data = fs.readFileSync(filePath);
       return `data:image/jpeg;base64,${data.toString('base64')}`;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Fetch message media (photo, gif, sticker) as data URL. Returns null on error. */
+  async getMedia(dialogId: string, messageId: number): Promise<string | null> {
+    try {
+      const { buffer, contentType } = await this._requestBinary(`/media/${messageId}?dialogId=${encodeURIComponent(dialogId)}`);
+      if (buffer.length === 0) return null;
+      const mime = /^image\/(jpeg|png|gif|webp)$/.test(contentType) ? contentType : 'image/jpeg';
+      return `data:${mime};base64,${buffer.toString('base64')}`;
     } catch {
       return null;
     }
