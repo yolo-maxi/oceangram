@@ -538,26 +538,34 @@ export class TelegramService {
         try {
           const topics = await this.getForumTopics(chatId);
           const topMsgMap = this.forumTopicMessages.get(chatId);
-          // For topics where we're not the top message, fetch our outbox message in this topic only (replyTo).
-          // Prioritize topics with unreads (replies) so "chats from Telegram client where I got replies" get lastOutgoingTime.
+          // For topics where we're not the top message, fetch our outbox messages in one batch.
+          // Map each message to its topic via replyTo.replyToTopId === topic.topMessage (only use when msg.out).
           const topicsToFetch = topics
             .filter((t) => t.readOutboxMaxId > 0 && t.readOutboxMaxId !== t.topMessage)
             .sort((a, b) => (b.unreadCount || 0) - (a.unreadCount || 0))
-            .slice(0, 50);
+            .slice(0, 80);
+          const outboxIdsToFetch = [...new Set(topicsToFetch.map((t) => t.readOutboxMaxId))];
+          const topicByReadOutboxId = new Map<number, number>();
+          for (const t of topicsToFetch) {
+            topicByReadOutboxId.set(t.readOutboxMaxId, t.id);
+          }
           const outboxDateByTopic = new Map<number, number>();
-          if (topicsToFetch.length > 0 && this.client) {
-            for (const topic of topicsToFetch) {
-              try {
-                const msgs = await this.client.getMessages(entity as any, {
-                  ids: [topic.readOutboxMaxId],
-                  replyTo: topic.id,
-                });
-                const msg = (msgs && msgs[0]) as any;
-                if (msg?.id != null && msg?.date != null && msg?.out === true) {
-                  outboxDateByTopic.set(topic.id, msg.date);
-                }
-              } catch { /* ignore */ }
-            }
+          if (outboxIdsToFetch.length > 0 && this.client) {
+            try {
+              const msgs = await this.client.getMessages(entity as any, { ids: outboxIdsToFetch });
+              for (const m of msgs || []) {
+                const msg = m as any;
+                if (msg?.id == null || msg?.date == null || msg?.out !== true) continue;
+                const topicId = topicByReadOutboxId.get(msg.id);
+                if (topicId == null) continue;
+                const topic = topics.find((t) => t.id === topicId);
+                if (!topic) continue;
+                const replyTo = msg.replyTo as any;
+                const msgTopicTopId = replyTo?.replyToTopId ?? replyTo?.replyToMsgId;
+                if (msgTopicTopId === undefined || msgTopicTopId !== topic.topMessage) continue;
+                outboxDateByTopic.set(topicId, msg.date);
+              }
+            } catch { /* ignore */ }
           }
 
           for (const topic of topics) {
