@@ -27,7 +27,14 @@ import { NewMessageEvent, AppSettings, WhitelistEntry, TelegramDialog } from './
 type DaemonModule = typeof import('./daemon');
 type WhitelistModule = typeof import('./whitelist');
 type TrackerModule = typeof import('./tracker');
-type OpenClawModule = typeof import('./openclaw');
+type OpenClawModule = {
+  start(): void;
+  stop(): void;
+  readonly isEnabled: boolean;
+  readonly connected: boolean;
+  getStatus(): Promise<{ model: string; activeSessions: number; totalTokens: number; estimatedCost: number }>;
+  getSessionForDialog(dialogId: string): Promise<{ sessionKey: string; model: string; totalTokens: number; contextWindow: number; contextUsedPct: number; updatedAt: number; displayName: string } | null>;
+};
 
 let daemon: DaemonModule | null = null;
 let whitelist: WhitelistModule | null = null;
@@ -241,7 +248,8 @@ function initializeApp(): void {
   daemon = require('./daemon') as DaemonModule;
   whitelist = require('./whitelist') as WhitelistModule;
   tracker = require('./tracker') as TrackerModule;
-  openclaw = require('./openclaw') as OpenClawModule;
+  const mod = require('./openclaw');
+  openclaw = (mod.default || mod) as OpenClawModule;
 
   // Setup
   setupIPC();
@@ -738,6 +746,16 @@ function setupIPC(): void {
       return await openclaw.getStatus();
     } catch (err) {
       console.error('[openclaw] Status request failed:', err);
+      return null;
+    }
+  });
+
+  ipcMain.handle('openclaw-get-session', async (_event: Electron.IpcMainInvokeEvent, dialogId: string) => {
+    if (!openclaw || !openclaw.isEnabled || !openclaw.connected) return null;
+    try {
+      return await openclaw.getSessionForDialog(dialogId);
+    } catch (err) {
+      console.error('[openclaw] Session request failed:', err);
       return null;
     }
   });

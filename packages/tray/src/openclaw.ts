@@ -281,7 +281,6 @@ class OpenClawClient extends EventEmitter {
     let totalCost = 0;
     for (const s of sessionList) {
       totalTokens += (s.totalTokens as number) || 0;
-      // Rough cost estimate: $0.01 per 1K tokens (varies by model)
       totalCost += ((s.totalTokens as number) || 0) * 0.00001;
     }
 
@@ -295,7 +294,77 @@ class OpenClawClient extends EventEmitter {
       estimatedCost: totalCost,
     };
   }
+
+  /**
+   * Convert a Telegram dialog ID to possible OpenClaw session key patterns.
+   * Dialog "-1003850294102:8547" → "agent:main:telegram:group:-1003850294102:topic:8547"
+   * Dialog "123456" (DM) → "agent:main:telegram:dm:123456"
+   */
+  private dialogIdToSessionPatterns(dialogId: string): string[] {
+    const patterns: string[] = [];
+    if (dialogId.includes(':')) {
+      // Forum topic: "-1003850294102:8547"
+      const [chatId, topicId] = dialogId.split(':');
+      patterns.push(`agent:main:telegram:group:${chatId}:topic:${topicId}`);
+    } else if (dialogId.startsWith('-')) {
+      // Group/channel
+      patterns.push(`agent:main:telegram:group:${dialogId}`);
+      patterns.push(`agent:main:telegram:group:${dialogId}:topic:1`); // General topic
+    } else {
+      // DM
+      patterns.push(`agent:main:telegram:dm:${dialogId}`);
+      patterns.push(`agent:main:telegram:user:${dialogId}`);
+    }
+    return patterns;
+  }
+
+  /** Get session info for a specific Telegram dialog. */
+  async getSessionForDialog(dialogId: string): Promise<SessionInfo | null> {
+    if (!this._connected) return null;
+
+    try {
+      const allSessions = await this.request('sessions.list', { activeMinutes: 1440 }) as {
+        sessions?: Array<Record<string, unknown>>;
+      };
+      const sessionList = allSessions?.sessions || [];
+      const patterns = this.dialogIdToSessionPatterns(dialogId);
+
+      // Find matching session by key pattern
+      const match = sessionList.find(s => {
+        const key = s.key as string;
+        return patterns.some(p => key === p);
+      });
+
+      if (!match) return null;
+
+      const totalTokens = (match.totalTokens as number) || 0;
+      const contextTokens = (match.contextTokens as number) || 0;
+      const updatedAt = (match.updatedAt as number) || 0;
+
+      return {
+        sessionKey: match.key as string,
+        model: ((match.model as string) || 'unknown').replace(/^anthropic\//, '').replace(/^openai\//, ''),
+        totalTokens,
+        contextWindow: contextTokens,
+        contextUsedPct: contextTokens > 0 ? Math.round((totalTokens / contextTokens) * 100) : 0,
+        updatedAt,
+        displayName: (match.displayName as string) || '',
+      };
+    } catch {
+      return null;
+    }
+  }
+}
+
+export interface SessionInfo {
+  sessionKey: string;
+  model: string;
+  totalTokens: number;
+  contextWindow: number;
+  contextUsedPct: number;
+  updatedAt: number;
+  displayName: string;
 }
 
 const openclawClient = new OpenClawClient();
-export = openclawClient;
+export default openclawClient;

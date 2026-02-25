@@ -203,23 +203,38 @@
 
   async function refreshAgentStatus(): Promise<void> {
     if (!openclawAvailable) return;
+    if (!selectedDialogId) {
+      agentStatus.style.display = 'none';
+      return;
+    }
+
     try {
-      const status = await api.openclawGetStatus();
-      if (!status) return;
+      const session = await api.openclawGetSession(selectedDialogId);
+      if (!session) {
+        // No session for this dialog — hide the bar
+        agentStatus.style.display = 'none';
+        return;
+      }
 
-      const model = (status.model || 'unknown').replace(/^anthropic\//, '').replace(/^openai\//, '');
-      const sessions = status.activeSessions || 0;
-      const totalTokens = status.totalTokens || 0;
-      const cost = status.estimatedCost ? `$${status.estimatedCost.toFixed(2)}` : '';
+      agentStatus.style.display = '';
+      const pct = session.contextUsedPct;
+      const contextClass = pct >= 90 ? 'context-critical' : pct >= 70 ? 'context-warn' : 'context-ok';
 
-      let html = `<span class="agent-model">\u{1F916} ${escapeHtml(model)}</span>`;
-      html += `<span class="agent-sessions">${sessions} session${sessions !== 1 ? 's' : ''}</span>`;
-      if (totalTokens > 0) html += `<span class="agent-tokens">${formatTokens(totalTokens)} tok</span>`;
-      if (cost) html += `<span class="agent-cost">${cost}</span>`;
+      let html = `<span class="agent-model">${escapeHtml(session.model)}</span>`;
+      html += `<span class="agent-context ${contextClass}">${formatTokens(session.totalTokens)}/${formatTokens(session.contextWindow)} (${pct}%)</span>`;
+
+      // Time since last activity
+      if (session.updatedAt) {
+        const agoMs = Date.now() - session.updatedAt;
+        const agoMin = Math.floor(agoMs / 60000);
+        if (agoMin < 1) html += `<span class="agent-activity">just now</span>`;
+        else if (agoMin < 60) html += `<span class="agent-activity">${agoMin}m ago</span>`;
+        else html += `<span class="agent-activity">${Math.floor(agoMin / 60)}h ago</span>`;
+      }
 
       agentStatusContent.innerHTML = html;
     } catch {
-      agentStatusContent.innerHTML = '<span class="agent-model">\u{1F916} disconnected</span>';
+      agentStatus.style.display = 'none';
     }
   }
 

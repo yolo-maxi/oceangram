@@ -813,16 +813,18 @@ html, body {
   color: var(--accent);
 }
 
-.agent-sessions,
-.agent-tokens,
-.agent-cost {
-  opacity: 0.8;
+.agent-context {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
-.agent-cost {
+.agent-context.context-ok { color: var(--green, #68d391); }
+.agent-context.context-warn { color: var(--accent, #fbbf24); }
+.agent-context.context-critical { color: var(--red, #f87171); font-weight: 700; }
+
+.agent-activity {
   margin-left: auto;
-  color: var(--accent);
-  font-weight: 500;
+  opacity: 0.6;
 }
 
 /* ── Animations ── */
