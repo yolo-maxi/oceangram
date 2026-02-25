@@ -216,6 +216,63 @@
     return div.innerHTML;
   }
 
+  // ── OpenClaw settings ──
+  const openclawEnabledToggle = document.getElementById('openclawEnabled') as HTMLInputElement;
+  const openclawTokenInput = document.getElementById('openclawToken') as HTMLInputElement;
+  const openclawUrlInput = document.getElementById('openclawUrl') as HTMLInputElement;
+  const openclawTokenRow = document.getElementById('openclawTokenRow')!;
+  const openclawUrlRow = document.getElementById('openclawUrlRow')!;
+  const openclawStatus = document.getElementById('openclawStatus')!;
+
+  function toggleOpenclawFields(): void {
+    const show = openclawEnabledToggle.checked;
+    openclawTokenRow.style.display = show ? '' : 'none';
+    openclawUrlRow.style.display = show ? '' : 'none';
+    openclawStatus.style.display = show ? '' : 'none';
+  }
+
+  async function loadOpenclawSettings(): Promise<void> {
+    const settings = await api.getSettings();
+    openclawEnabledToggle.checked = settings.openclawEnabled === true;
+    openclawTokenInput.value = settings.openclawToken || '';
+    openclawUrlInput.value = settings.openclawUrl || 'ws://localhost:18789';
+    toggleOpenclawFields();
+
+    // Show connection status
+    if (settings.openclawEnabled) {
+      const connected = await api.openclawEnabled();
+      openclawStatus.style.display = '';
+      openclawStatus.innerHTML = connected
+        ? '<span style="color:var(--green)">● Connected</span>'
+        : '<span style="color:var(--red)">● Disconnected</span>';
+    }
+  }
+
+  openclawEnabledToggle.addEventListener('change', async () => {
+    toggleOpenclawFields();
+    await api.updateSettings({
+      openclawEnabled: openclawEnabledToggle.checked,
+      openclawToken: openclawTokenInput.value.trim(),
+      openclawUrl: openclawUrlInput.value.trim() || 'ws://localhost:18789',
+    });
+  });
+
+  let openclawSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  function debouncedSaveOpenclaw(): void {
+    if (openclawSaveTimer) clearTimeout(openclawSaveTimer);
+    openclawSaveTimer = setTimeout(async () => {
+      await api.updateSettings({
+        openclawEnabled: openclawEnabledToggle.checked,
+        openclawToken: openclawTokenInput.value.trim(),
+        openclawUrl: openclawUrlInput.value.trim() || 'ws://localhost:18789',
+      });
+    }, 800);
+  }
+
+  openclawTokenInput.addEventListener('input', debouncedSaveOpenclaw);
+  openclawUrlInput.addEventListener('input', debouncedSaveOpenclaw);
+
+
   // ── Init ──
   init();
 })();

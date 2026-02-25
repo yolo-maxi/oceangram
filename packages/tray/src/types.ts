@@ -72,6 +72,9 @@ export interface AppSettings {
   pollIntervalMs: number;
   showNotifications: boolean;
   theme: 'system' | 'day' | 'night' | 'tinted' | 'arctic';
+  openclawEnabled?: boolean;
+  openclawToken?: string;
+  openclawUrl?: string;
 }
 
 export interface AppConfig {

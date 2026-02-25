@@ -30,6 +30,7 @@ type TrackerModule = typeof import('./tracker');
 type OpenClawModule = {
   start(): void;
   stop(): void;
+  reload(): void;
   readonly isEnabled: boolean;
   readonly connected: boolean;
   getStatus(): Promise<{ model: string; activeSessions: number; totalTokens: number; estimatedCost: number }>;
@@ -697,6 +698,10 @@ function setupIPC(): void {
 
   ipcMain.handle('update-settings', (_: IpcMainInvokeEvent, settings: Partial<AppSettings>) => {
     whitelist!.updateSettings(settings);
+    // Reload OpenClaw if its settings changed
+    if (openclaw && (settings.openclawEnabled !== undefined || settings.openclawToken !== undefined || settings.openclawUrl !== undefined)) {
+      openclaw.reload();
+    }
     return true;
   });
 

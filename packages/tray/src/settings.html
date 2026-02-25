@@ -76,6 +76,44 @@
         </div>
       </div>
 
+      <!-- OpenClaw Integration -->
+      <div class="section">
+        <div class="section-title">OpenClaw</div>
+        <div class="section-desc">Connect to an OpenClaw gateway for AI agent status in chat headers.</div>
+
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Enable OpenClaw</div>
+            <div class="setting-desc">Show agent session info in chats</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="openclawEnabled">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-row" id="openclawTokenRow" style="display:none">
+          <div style="flex:1">
+            <div class="setting-label">Gateway Token</div>
+            <input type="password" class="setting-input" id="openclawToken" placeholder="Paste gateway auth token">
+          </div>
+        </div>
+
+        <div class="setting-row" id="openclawUrlRow" style="display:none">
+          <div style="flex:1">
+            <div class="setting-label">Gateway URL</div>
+            <input type="text" class="setting-input" id="openclawUrl" placeholder="ws://localhost:18789">
+          </div>
+        </div>
+
+        <div class="status-card" id="openclawStatus" style="display:none">
+          <div class="status-dot" id="openclawDot"></div>
+          <div>
+            <div class="status-text" id="openclawStatusText">Checking...</div>
+          </div>
+        </div>
+      </div>
+
       <!-- General Settings -->
       <div class="section">
         <div class="section-title">General</div>
@@ -106,6 +144,39 @@
         </div>
       </div>
     </div>
+
+      <!-- OpenClaw Integration -->
+      <div class="section">
+        <div class="section-title">OpenClaw</div>
+        <div class="section-desc">Connect to an OpenClaw gateway to see AI agent status per chat.</div>
+
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Enable</div>
+            <div class="setting-desc">Show agent status bar in chats</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="openclawEnabled">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-row" id="openclawTokenRow" style="display:none">
+          <div style="flex:1">
+            <div class="setting-label">Gateway Token</div>
+            <input type="password" class="setting-input" id="openclawToken" placeholder="paste token here" autocomplete="off">
+          </div>
+        </div>
+
+        <div class="setting-row" id="openclawUrlRow" style="display:none">
+          <div style="flex:1">
+            <div class="setting-label">Gateway URL</div>
+            <input type="text" class="setting-input" id="openclawUrl" placeholder="ws://localhost:18789" autocomplete="off">
+          </div>
+        </div>
+
+        <div class="openclaw-status" id="openclawStatus" style="display:none"></div>
+      </div>
 
     <div class="footer">
       Oceangram Tray v0.1.0 — connects to oceangram-daemon

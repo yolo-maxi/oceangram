@@ -393,6 +393,27 @@ html, body {
   border-color: var(--accent);
 }
 
+.setting-input {
+  width: 100%;
+  padding: 8px 10px;
+  margin-top: 6px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+.setting-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+.setting-input::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+
 /* ── Footer ── */
 .footer {
   padding: 16px 20px;

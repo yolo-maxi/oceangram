@@ -64,14 +64,32 @@ function autoDetectOpenClaw(): { token: string; url: string } | null {
 }
 
 function readConfig(): OpenClawConfig {
-  // First: check Oceangram's own config for explicit overrides
+  // First: check Oceangram tray settings (from Settings UI)
+  try {
+    const trayConfigPath = path.join(os.homedir(), '.oceangram-tray', 'config.json');
+    const raw = fs.readFileSync(trayConfigPath, 'utf-8');
+    const cfg = JSON.parse(raw);
+    const settings = cfg.settings;
+    if (settings?.openclawEnabled && settings?.openclawToken) {
+      console.log('[openclaw] Using settings from tray config');
+      return {
+        features: { openclaw: true },
+        openclaw: {
+          token: settings.openclawToken,
+          url: settings.openclawUrl || 'ws://localhost:18789',
+        },
+      };
+    }
+  } catch { /* no tray config or not parseable */ }
+
+  // Second: check Oceangram's own config for explicit overrides
   try {
     const raw = fs.readFileSync(OCEANGRAM_CONFIG_PATH, 'utf-8');
     const cfg = JSON.parse(raw) as OpenClawConfig;
     if (cfg.openclaw?.token) return cfg;
   } catch { /* no oceangram config, that's fine */ }
 
-  // Second: auto-detect from OpenClaw installation
+  // Third: auto-detect from OpenClaw installation
   const detected = autoDetectOpenClaw();
   if (detected) {
     return {
@@ -103,6 +121,24 @@ class OpenClawClient extends EventEmitter {
 
   /** Read config and determine if OpenClaw is enabled. */
   private loadConfig(): void {
+    // First: check Oceangram app settings (from Settings UI)
+    try {
+      const appConfigPath = path.join(os.homedir(), '.oceangram-tray', 'config.json');
+      if (fs.existsSync(appConfigPath)) {
+        const raw = fs.readFileSync(appConfigPath, 'utf-8');
+        const appCfg = JSON.parse(raw);
+        const s = appCfg.settings;
+        if (s?.openclawEnabled && s?.openclawToken) {
+          console.log('[openclaw] Using settings from Oceangram app config');
+          this.enabled = true;
+          this.token = s.openclawToken;
+          this.url = s.openclawUrl || 'ws://localhost:18789';
+          return;
+        }
+      }
+    } catch { /* ignore */ }
+
+    // Fallback: auto-detect from OpenClaw installation files
     const cfg = readConfig();
     this.enabled = cfg.features?.openclaw === true;
     this.token = cfg.openclaw?.token || '';
@@ -123,6 +159,13 @@ class OpenClawClient extends EventEmitter {
     }
     this._started = true;
     this.connect();
+  }
+
+  /** Reload config and reconnect if settings changed. */
+  reload(): void {
+    console.log('[openclaw] Reloading config...');
+    this.stop();
+    this.start();
   }
 
   /** Stop the client and clean up. */
