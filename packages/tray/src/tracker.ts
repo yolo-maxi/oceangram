@@ -53,6 +53,7 @@ class MessageTracker extends EventEmitter {
   start(): void {
     // Listen for WS events
     daemon.on('newMessage', (event: DaemonEvent) => this._handleNewMessage(event));
+    daemon.on('readHistory', (event: DaemonEvent) => this._handleReadHistory(event));
     daemon.on('ws-connected', () => {
       this.wsActive = true;
       console.log('[tracker] WS active, reducing poll frequency');
@@ -129,8 +130,25 @@ class MessageTracker extends EventEmitter {
     }
   }
 
+  private _handleReadHistory(event: DaemonEvent): void {
+    // direction 'incoming' = we (or another client) marked dialog as read
+    if ((event as any).direction !== 'incoming') return;
+    const dialogId = String((event as any).dialogId || '');
+    if (!dialogId) return;
+
+    const toDelete: string[] = [];
+    if (this.unreads.has(dialogId)) toDelete.push(dialogId);
+    for (const id of this.unreads.keys()) {
+      if (id.startsWith(dialogId + ':')) toDelete.push(id); // forum topics
+    }
+    for (const id of toDelete) this.unreads.delete(id);
+    if (toDelete.length > 0) {
+      this.emit('messages-read', { dialogId });
+      this.emit('unread-count-changed');
+    }
+  }
+
   private _handleNewMessage(event: DaemonEvent): void {
-    console.log('[tracker] _handleNewMessage called, event type:', (event as any).type, 'dialogId:', (event as any).dialogId);
     const msg = (event.message || event) as TelegramMessage;
     const fromId = String(msg.fromId || msg.senderId || '');
     const dialogId = String(msg.dialogId || msg.chatId || '');

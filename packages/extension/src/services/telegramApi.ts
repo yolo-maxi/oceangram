@@ -215,7 +215,18 @@ export class TelegramApiClient {
         break;
       }
       case 'readHistory': {
-        this.emit(dialogId, { type: 'readOutbox', maxId: event.maxId || 0 });
+        // Only outgoing = read receipts (recipient read your messages)
+        if (event.direction !== 'outgoing') break;
+        const chatId = event.dialogId || '';
+        if (!chatId) break;
+        // Emit to all dialogs matching this chatId (base channel + forum topics)
+        const maxId = event.maxId || 0;
+        for (const [dId] of this.chatListeners) {
+          const parsed = TelegramApiClient.parseDialogId(dId);
+          if (parsed.chatId === chatId) {
+            this.emit(dId, { type: 'readOutbox', maxId });
+          }
+        }
         break;
       }
     }

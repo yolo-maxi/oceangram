@@ -363,42 +363,42 @@ export class TelegramService {
         });
       }
 
-      // Read receipt events
+      // Read receipt events — use normalized dialogId format (matches getMessageChatId)
       if (update instanceof Api.UpdateReadHistoryInbox) {
         const peer = update.peer;
-        let dialogId = '';
-        if (peer instanceof Api.PeerUser) dialogId = peer.userId.toString();
-        else if (peer instanceof Api.PeerChat) dialogId = peer.chatId.toString();
-        else if (peer instanceof Api.PeerChannel) dialogId = peer.channelId.toString();
-        this.emit({
-          type: 'readHistory',
-          dialogId,
-          maxId: update.maxId,
-          direction: 'incoming',
-        });
+        const dialogId = this.peerToDialogId(peer);
+        if (dialogId) {
+          this.emit({
+            type: 'readHistory',
+            dialogId,
+            maxId: update.maxId,
+            direction: 'incoming',
+          });
+        }
       } else if (update instanceof Api.UpdateReadHistoryOutbox) {
         const peer = update.peer;
-        let dialogId = '';
-        if (peer instanceof Api.PeerUser) dialogId = peer.userId.toString();
-        else if (peer instanceof Api.PeerChat) dialogId = peer.chatId.toString();
-        else if (peer instanceof Api.PeerChannel) dialogId = peer.channelId.toString();
+        const dialogId = this.peerToDialogId(peer);
+        if (dialogId) {
+          this.emit({
+            type: 'readHistory',
+            dialogId,
+            maxId: update.maxId,
+            direction: 'outgoing',
+          });
+        }
+      } else if (update instanceof Api.UpdateReadChannelInbox) {
+        const dialogId = `-100${update.channelId.toString()}`;
         this.emit({
           type: 'readHistory',
           dialogId,
-          maxId: update.maxId,
-          direction: 'outgoing',
-        });
-      } else if (update instanceof Api.UpdateReadChannelInbox) {
-        this.emit({
-          type: 'readHistory',
-          dialogId: update.channelId.toString(),
           maxId: update.maxId,
           direction: 'incoming',
         });
       } else if (update instanceof Api.UpdateReadChannelOutbox) {
+        const dialogId = `-100${update.channelId.toString()}`;
         this.emit({
           type: 'readHistory',
-          dialogId: update.channelId.toString(),
+          dialogId,
           maxId: update.maxId,
           direction: 'outgoing',
         });
@@ -2906,6 +2906,18 @@ export class TelegramService {
     const parts = id.split(':');
     if (parts.length === 2) return { chatId: parts[0], topicId: parseInt(parts[1], 10) };
     return { chatId: id };
+  }
+
+  /** Normalize a peer to dialog ID format (matches getMessageChatId / getDialogs: -100xxx for channels). */
+  private peerToDialogId(peer: Api.TypePeer): string {
+    if (peer instanceof Api.PeerUser) return peer.userId.toString();
+    if (peer instanceof Api.PeerChat) return `-${peer.chatId.toString()}`;
+    if (peer instanceof Api.PeerChannel) return `-100${peer.channelId.toString()}`;
+    const p = peer as any;
+    if (p?.channelId != null) return `-100${p.channelId.toString()}`;
+    if (p?.chatId != null) return `-${p.chatId.toString()}`;
+    if (p?.userId != null) return p.userId.toString();
+    return '';
   }
 
   /** Get normalized chat ID from a Message (matches getDialogs format: -100xxx for channels). */
