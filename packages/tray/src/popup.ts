@@ -1004,7 +1004,7 @@
 
     // Show sender avatar + name in groups/forums for incoming messages (collapse consecutive from same sender)
     let senderHtml = '';
-    const prevBubble = messageList.querySelector('.message:last-child');
+    const prevBubble = messagesScrollEl.querySelector('.message:last-child');
     const prevFromId = prevBubble?.getAttribute('data-from-id') || '';
     if (currentDialogIsGroup && !isOutgoing && String(fromId) !== prevFromId) {
       const name = (msg as any).senderName || '';
