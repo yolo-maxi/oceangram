@@ -19,6 +19,8 @@
   let blacklistEntries: Array<{ dialogId: string; displayName: string }> = [];
   // Merged, deduplicated tab list (excluding muted/blacklisted)
   let allTabs: TabEntry[] = [];
+  // Ad-hoc tabs opened via "Direct chat" from sender context menu
+  let adHocTabs: TabEntry[] = [];
 
   // Cached dialogs from daemon (refreshed every 10s)
   let cachedDialogs: Array<{ id: string | number; name?: string; topicName?: string; title?: string; firstName?: string; username?: string; unreadCount?: number; lastMessageOutgoing?: boolean; lastMessageTime?: number }> = [];
@@ -26,7 +28,7 @@
   interface TabEntry {
     dialogId: string;
     displayName: string;
-    source: 'whitelist' | 'active';
+    source: 'whitelist' | 'active' | 'direct';
   }
 
   interface MessageLike {
@@ -58,6 +60,7 @@
   const composerInput = document.getElementById('composerInput') as HTMLTextAreaElement;
   const sendBtn = document.getElementById('sendBtn') as HTMLButtonElement;
   const composerEl = document.getElementById('composer')!;
+  const mentionDropdown = document.getElementById('mentionDropdown')!;
   const emptyState = document.getElementById('emptyState')!;
   const connectionBanner = document.getElementById('connectionBanner')!;
 
@@ -169,6 +172,14 @@
       if (!isBlacklisted(pin.dialogId) && !seen.has(pin.dialogId)) {
         seen.add(pin.dialogId);
         result.push({ ...pin, source: 'whitelist' });
+      }
+    }
+
+    // Ad-hoc direct chats (opened from sender context menu)
+    for (const t of adHocTabs) {
+      if (!isBlacklisted(t.dialogId) && !seen.has(t.dialogId)) {
+        seen.add(t.dialogId);
+        result.push({ ...t, source: 'direct' });
       }
     }
 
@@ -558,6 +569,8 @@
     // Clear pending state when switching tabs
     clearReplyTarget();
     clearAttachment();
+    clearMentionCacheOnDialogChange();
+    hideMentionDropdown();
 
     // Update header INSTANTLY (before loading messages)
     contactName.textContent = displayName;
@@ -849,15 +862,19 @@
         replyHtml = `<div class="reply-context" data-reply-to="${replyToId}">${escapeHtml(replyText)}</div>`;
       }
 
-      // Show sender name in groups for incoming messages (collapse consecutive from same sender)
+      // Show sender avatar + name in groups for incoming messages (collapse consecutive from same sender)
       let senderHtml = '';
       if (currentDialogIsGroup && !isOutgoing && fromId !== prevSenderId) {
         const name = (msg as any).senderName || '';
-        if (name) {
+        if (name && fromId) {
           const hash = name.split('').reduce((a: number, c: string) => a + c.charCodeAt(0), 0);
           const colors = ['#e17076', '#7bc862', '#e5ca77', '#65aadd', '#a695e7', '#ee7aae', '#6ec9cb', '#faa774'];
           const color = colors[hash % colors.length];
-          senderHtml = `<div class="sender-name" style="color:${color}">${escapeHtml(name)}</div>`;
+          const initial = name.charAt(0).toUpperCase() || '?';
+          senderHtml = `<div class="sender-block" data-user-id="${escapeHtml(String(fromId))}" data-display-name="${escapeHtml(name)}" title="Right-click for options">
+            <div class="sender-avatar">${escapeHtml(initial)}</div>
+            <div class="sender-name" style="color:${color}">${escapeHtml(name)}</div>
+          </div>`;
         }
       }
       prevSenderId = fromId;
@@ -910,6 +927,31 @@
       });
     });
 
+    // Bind sender context menu + load avatars
+    messagesScrollEl.querySelectorAll('.sender-block').forEach((el) => {
+      const block = el as HTMLElement;
+      const userId = block.dataset.userId;
+      const displayName = block.dataset.displayName || '';
+      block.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (userId) api.showSenderContextMenu(userId, displayName);
+      });
+      const avatarEl = block.querySelector('.sender-avatar');
+      if (avatarEl && userId) {
+        const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000));
+        Promise.race([api.getProfilePhoto(userId), timeout]).then((dataUrl: string | null) => {
+          if (dataUrl && avatarEl.parentNode) {
+            const img = document.createElement('img');
+            img.src = dataUrl;
+            img.alt = '';
+            avatarEl.textContent = '';
+            avatarEl.appendChild(img);
+          }
+        }).catch(() => { /* ignore */ });
+      }
+    });
+
     if (wasTyping) messagesScrollEl.appendChild(typingBubble);
     bindMessageClicks();
     scrollToBottom();
@@ -938,16 +980,20 @@
       replyHtml = `<div class="reply-context" data-reply-to="${replyToId}">${escapeHtml(replyText)}</div>`;
     }
 
-    // Show sender name in groups/forums for incoming messages
+    // Show sender avatar + name in groups/forums for incoming messages
     let senderHtml = '';
     if (currentDialogIsGroup && !isOutgoing) {
       const name = (msg as any).senderName || '';
-      if (name) {
-        // Consistent color per sender based on name hash
+      const fromIdStr = String(fromId);
+      if (name && fromIdStr) {
         const hash = name.split('').reduce((a: number, c: string) => a + c.charCodeAt(0), 0);
         const colors = ['#e17076', '#7bc862', '#e5ca77', '#65aadd', '#a695e7', '#ee7aae', '#6ec9cb', '#faa774'];
         const color = colors[hash % colors.length];
-        senderHtml = `<div class="sender-name" style="color:${color}">${escapeHtml(name)}</div>`;
+        const initial = name.charAt(0).toUpperCase() || '?';
+        senderHtml = `<div class="sender-block" data-user-id="${escapeHtml(fromIdStr)}" data-display-name="${escapeHtml(name)}" title="Right-click for options">
+          <div class="sender-avatar">${escapeHtml(initial)}</div>
+          <div class="sender-name" style="color:${color}">${escapeHtml(name)}</div>
+        </div>`;
       }
     }
 
@@ -990,8 +1036,32 @@
       }
     }
 
+    const senderBlock = div.querySelector('.sender-block') as HTMLElement | null;
+    if (senderBlock) {
+      const uid = senderBlock.dataset.userId;
+      const dname = senderBlock.dataset.displayName || '';
+      senderBlock.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (uid) api.showSenderContextMenu(uid, dname);
+      });
+      const avatarEl = senderBlock.querySelector('.sender-avatar');
+      if (avatarEl && uid) {
+        const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000));
+        Promise.race([api.getProfilePhoto(uid), timeout]).then((dataUrl: string | null) => {
+          if (dataUrl && avatarEl.parentNode) {
+            const img = document.createElement('img');
+            img.src = dataUrl;
+            img.alt = '';
+            avatarEl.textContent = '';
+            avatarEl.appendChild(img);
+          }
+        }).catch(() => { /* ignore */ });
+      }
+    }
+
     div.addEventListener('click', (e) => {
-      if ((e.target as HTMLElement).closest('.msg-media')) return;
+      if ((e.target as HTMLElement).closest('.msg-media, .sender-block')) return;
       if (msgId) {
         const preview = (msg.text || msg.message || '').substring(0, 50);
         setReplyTarget(msgId, preview);
@@ -1003,7 +1073,8 @@
 
   function bindMessageClicks(): void {
     messagesScrollEl.querySelectorAll('.message[data-msg-id]').forEach((el) => {
-      el.addEventListener('click', () => {
+      el.addEventListener('click', (e: Event) => {
+        if ((e.target as HTMLElement).closest('.sender-block, .msg-media')) return;
         const msgId = parseInt((el as HTMLElement).dataset.msgId || '0', 10);
         if (!msgId) return;
         const textEl = el.querySelector('.text');
@@ -1212,7 +1283,141 @@
 
   sendBtn.addEventListener('click', sendMessage);
 
-  composerInput.addEventListener('keydown', (e: KeyboardEvent) => {
+  // ── @mention ──
+  type MemberInfo = { userId: string; firstName: string; lastName: string; username: string; role: string };
+  let mentionMembers: MemberInfo[] = [];
+  let mentionHighlightIndex = 0;
+
+  function getMentionContext(): { query: string; startOffset: number } | null {
+    const text = composerInput.value;
+    const cursor = composerInput.selectionStart;
+    const before = text.slice(0, cursor);
+    const atIdx = before.lastIndexOf('@');
+    if (atIdx === -1) return null;
+    const afterAt = before.slice(atIdx + 1);
+    if (/\s/.test(afterAt)) return null; // space after @ = not mention
+    return { query: afterAt, startOffset: atIdx };
+  }
+
+  function memberDisplayName(m: MemberInfo): string {
+    const full = [m.firstName, m.lastName].filter(Boolean).join(' ');
+    return full || m.username || m.userId;
+  }
+
+  function memberMentionText(m: MemberInfo): string {
+    if (m.username) return `@${m.username}`;
+    return memberDisplayName(m);
+  }
+
+  function filterMembers(members: MemberInfo[], q: string): MemberInfo[] {
+    const low = q.toLowerCase();
+    return members.filter((m) => {
+      const name = memberDisplayName(m).toLowerCase();
+      const uname = (m.username || '').toLowerCase();
+      return name.includes(low) || uname.includes(low);
+    });
+  }
+
+  function hideMentionDropdown(): void {
+    mentionDropdown.style.display = 'none';
+    mentionDropdown.innerHTML = '';
+  }
+
+  function renderMentionDropdown(filtered: MemberInfo[], highlightIdx: number): void {
+    if (filtered.length === 0) {
+      hideMentionDropdown();
+      return;
+    }
+    mentionDropdown.style.display = '';
+    mentionDropdown.innerHTML = filtered
+      .map(
+        (m, i) =>
+          `<div class="mention-item ${i === highlightIdx ? 'highlighted' : ''}" data-index="${i}" data-user-id="${escapeHtml(m.userId)}">
+            <div class="mention-item-avatar" data-user-id="${escapeHtml(m.userId)}">${escapeHtml((memberDisplayName(m) || '?').charAt(0).toUpperCase())}</div>
+            <div class="mention-item-name">${escapeHtml(memberDisplayName(m))}</div>
+            ${m.username ? `<span class="mention-item-username">@${escapeHtml(m.username)}</span>` : ''}
+          </div>`,
+      )
+      .join('');
+
+    mentionDropdown.querySelectorAll('.mention-item').forEach((el) => {
+      el.addEventListener('click', () => {
+        const idx = parseInt((el as HTMLElement).dataset.index || '0', 10);
+        selectMention(filtered[idx]);
+      });
+    });
+  }
+
+  function selectMention(member: MemberInfo): void {
+    const ctx = getMentionContext();
+    if (!ctx) return;
+    const text = composerInput.value;
+    const before = text.slice(0, ctx.startOffset);
+    const after = text.slice(composerInput.selectionStart);
+    const insert = memberMentionText(member) + ' ';
+    composerInput.value = before + insert + after;
+    const newPos = before.length + insert.length;
+    composerInput.setSelectionRange(newPos, newPos);
+    hideMentionDropdown();
+    composerInput.focus();
+    composerInput.dispatchEvent(new Event('input'));
+  }
+
+  async function updateMentionDropdown(): Promise<void> {
+    const ctx = getMentionContext();
+    if (!ctx || !selectedDialogId) {
+      hideMentionDropdown();
+      return;
+    }
+    if (mentionMembers.length === 0) {
+      const res = await api.getMembers(selectedDialogId, 200);
+      if (!res?.members?.length) {
+        hideMentionDropdown();
+        return;
+      }
+      mentionMembers = res.members;
+    }
+    const filtered = filterMembers(mentionMembers, ctx.query);
+    mentionHighlightIndex = Math.min(Math.max(0, mentionHighlightIndex), Math.max(0, filtered.length - 1));
+    renderMentionDropdown(filtered, mentionHighlightIndex);
+  }
+
+  function clearMentionCacheOnDialogChange(): void {
+    mentionMembers = [];
+  }
+
+  composerInput.addEventListener('keydown', async (e: KeyboardEvent) => {
+    const ctx = getMentionContext();
+    const isMentionOpen = mentionDropdown.style.display !== 'none' && mentionDropdown.children.length > 0;
+
+    if (isMentionOpen) {
+      const filtered = filterMembers(mentionMembers, ctx?.query ?? '');
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (filtered[mentionHighlightIndex]) {
+          selectMention(filtered[mentionHighlightIndex]);
+        }
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        hideMentionDropdown();
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        mentionHighlightIndex = Math.min(mentionHighlightIndex + 1, filtered.length - 1);
+        renderMentionDropdown(filtered, mentionHighlightIndex);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        mentionHighlightIndex = Math.max(mentionHighlightIndex - 1, 0);
+        renderMentionDropdown(filtered, mentionHighlightIndex);
+        return;
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
@@ -1222,6 +1427,14 @@
   composerInput.addEventListener('input', () => {
     composerInput.style.height = 'auto';
     composerInput.style.height = Math.min(composerInput.scrollHeight, 100) + 'px';
+    mentionHighlightIndex = 0;
+    updateMentionDropdown();
+  });
+
+  composerInput.addEventListener('blur', () => {
+    setTimeout(() => {
+      if (!mentionDropdown.contains(document.activeElement)) hideMentionDropdown();
+    }, 150);
   });
 
   // ── File helper ──
@@ -1454,6 +1667,17 @@
         renderLayout();
       }
     } catch { /* ignore */ }
+  });
+
+  // Open direct chat (from sender context menu "Direct chat")
+  api.onOpenDirectChat(({ dialogId, displayName }) => {
+    const existing = adHocTabs.find((t) => t.dialogId === dialogId);
+    if (!existing) {
+      adHocTabs.push({ dialogId, displayName, source: 'direct' });
+      mergeTabs();
+    }
+    selectTab(dialogId, displayName, true);
+    renderLayout();
   });
 
   // Select dialog from main process (e.g., notification click)

@@ -151,6 +151,16 @@ class DaemonClient extends EventEmitter {
     }
   }
 
+  async getMembers(dialogId: string, limit = 200, q?: string): Promise<{ members: Array<{ userId: string; firstName: string; lastName: string; username: string; role: string; joinDate: number }>; count: number } | null> {
+    try {
+      let url = `/dialogs/${encodeURIComponent(dialogId)}/members?limit=${limit}`;
+      if (q) url += `&q=${encodeURIComponent(q)}`;
+      return await this._request('GET', url) as { members: Array<{ userId: string; firstName: string; lastName: string; username: string; role: string; joinDate: number }>; count: number };
+    } catch {
+      return null;
+    }
+  }
+
   async sendMessage(dialogId: string, text: string, replyTo?: number): Promise<unknown> {
     try {
       const body: Record<string, unknown> = { text };

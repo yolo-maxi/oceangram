@@ -453,10 +453,38 @@ html, body {
   border-bottom-left-radius: 4px;
 }
 
+.sender-block {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+  cursor: default;
+}
+.sender-block:hover {
+  opacity: 0.9;
+}
+.sender-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+  flex-shrink: 0;
+}
+.sender-avatar img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
 .sender-name {
   font-size: 13px;
   font-weight: 600;
-  margin-bottom: 2px;
   cursor: default;
 }
 
@@ -691,6 +719,63 @@ html, body {
 .message.reply-target {
   outline: 1px solid var(--accent);
   outline-offset: -1px;
+}
+
+/* ── Mention dropdown ── */
+.mention-dropdown {
+  max-height: 160px;
+  overflow-y: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 0 14px 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  z-index: 100;
+}
+.mention-dropdown:empty {
+  display: none !important;
+}
+.mention-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+}
+.mention-item:hover,
+.mention-item.highlighted {
+  background: var(--hover-overlay);
+}
+.mention-item-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  flex-shrink: 0;
+}
+.mention-item-avatar img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.mention-item-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mention-item-username {
+  font-size: 11px;
+  color: var(--text-dim);
 }
 
 /* ── Composer ── */

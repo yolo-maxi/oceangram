@@ -29,6 +29,8 @@ contextBridge.exposeInMainWorld('oceangram', {
     ipcRenderer.invoke('get-profile-photo', userId),
   getMedia: (dialogId: string, messageId: number): Promise<string | null> =>
     ipcRenderer.invoke('get-media', dialogId, messageId),
+  getMembers: (dialogId: string, limit?: number, q?: string): Promise<{ members: Array<{ userId: string; firstName: string; lastName: string; username: string; role: string }>; count: number } | null> =>
+    ipcRenderer.invoke('get-members', dialogId, limit, q),
   closePopup: (): void => ipcRenderer.send('close-popup'),
 
   // Whitelist / Settings
@@ -110,6 +112,13 @@ contextBridge.exposeInMainWorld('oceangram', {
   // Tab context menu
   showTabContextMenu: (dialogId: string, displayName: string, isPinned: boolean): void =>
     ipcRenderer.send('show-tab-context-menu', dialogId, displayName, isPinned),
+
+  // Sender context menu (right-click on avatar in group chat)
+  showSenderContextMenu: (userId: string, displayName: string): void =>
+    ipcRenderer.send('show-sender-context-menu', userId, displayName),
+  onOpenDirectChat: (cb: (data: { dialogId: string; displayName: string }) => void): void => {
+    ipcRenderer.on('open-direct-chat', (_: IpcRendererEvent, data: { dialogId: string; displayName: string }) => cb(data));
+  },
 
   // Whitelist changed (from main process after context menu action)
   onWhitelistChanged: (cb: () => void): void => {

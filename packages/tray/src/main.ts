@@ -652,6 +652,10 @@ function setupIPC(): void {
     return await daemon!.getMedia(dialogId, messageId);
   });
 
+  ipcMain.handle('get-members', async (_: IpcMainInvokeEvent, dialogId: string, limit?: number, q?: string) => {
+    return await daemon!.getMembers(dialogId, limit ?? 200, q);
+  });
+
   // Whitelist
   ipcMain.handle('get-whitelist', () => {
     return whitelist!.getWhitelist();
@@ -758,6 +762,21 @@ function setupIPC(): void {
       console.error('[openclaw] Session request failed:', err);
       return null;
     }
+  });
+
+  // Sender context menu (right-click on user avatar in group chat)
+  ipcMain.on('show-sender-context-menu', (event: IpcMainEvent, userId: string, displayName: string) => {
+    const menu = Menu.buildFromTemplate([
+      {
+        label: 'Direct chat',
+        click: () => {
+          if (popupWindow && !popupWindow.isDestroyed()) {
+            popupWindow.webContents.send('open-direct-chat', { dialogId: userId, displayName });
+          }
+        },
+      },
+    ]);
+    menu.popup();
   });
 
   // Tab context menu (right-click on avatar)

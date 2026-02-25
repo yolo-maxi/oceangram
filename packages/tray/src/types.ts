@@ -25,6 +25,15 @@ export interface TelegramDialog {
   photo?: string;
 }
 
+export interface ChatMember {
+  userId: string;
+  firstName: string;
+  lastName: string;
+  username: string;
+  role: string;
+  joinDate: number;
+}
+
 export interface TelegramMessage {
   id: number;
   text?: string;
@@ -155,6 +164,7 @@ export type IpcInvokeChannel =
   | 'get-dialog-info'
   | 'get-profile-photo'
   | 'get-media'
+  | 'get-members'
   | 'get-whitelist'
   | 'add-user'
   | 'remove-user'

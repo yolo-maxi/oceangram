@@ -37,6 +37,7 @@ interface OceangramAPI {
   getDialogInfo(dialogId: string): Promise<TelegramDialog | null>;
   getProfilePhoto(userId: string): Promise<string | null>;
   getMedia(dialogId: string, messageId: number): Promise<string | null>;
+  getMembers(dialogId: string, limit?: number, q?: string): Promise<{ members: Array<{ userId: string; firstName: string; lastName: string; username: string; role: string }>; count: number } | null>;
   closePopup(): void;
 
   // Whitelist / Settings
@@ -80,6 +81,10 @@ interface OceangramAPI {
 
   // Tab context menu
   showTabContextMenu(dialogId: string, displayName: string, isPinned: boolean): void;
+
+  // Sender context menu (right-click on avatar in group chat)
+  showSenderContextMenu(userId: string, displayName: string): void;
+  onOpenDirectChat(cb: (data: { dialogId: string; displayName: string }) => void): void;
 
   // Whitelist changed notification
   onWhitelistChanged(cb: () => void): void;
