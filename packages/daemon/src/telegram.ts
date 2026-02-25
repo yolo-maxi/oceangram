@@ -1764,8 +1764,21 @@ export class TelegramService {
 
   async readHistory(dialogId: string, maxId?: number): Promise<void> {
     if (!this.client) throw new Error('Not connected');
-    const { chatId } = this.parseDialogId(dialogId);
+    const { chatId, topicId } = this.parseDialogId(dialogId);
     const inputEntity = await this.client.getInputEntity(chatId);
+    const readMaxId = maxId && maxId > 0 ? maxId : 0;
+
+    // Forum topic: use readDiscussion so read state is per-topic
+    if (topicId != null && topicId > 0) {
+      await this.client.invoke(
+        new Api.messages.ReadDiscussion({
+          peer: inputEntity,
+          msgId: topicId,
+          readMaxId,
+        })
+      );
+      return;
+    }
 
     if (inputEntity instanceof Api.InputPeerChannel) {
       await this.client.invoke(
@@ -1774,14 +1787,14 @@ export class TelegramService {
             channelId: inputEntity.channelId,
             accessHash: inputEntity.accessHash,
           }),
-          maxId: maxId || 0,
+          maxId: readMaxId,
         })
       );
     } else {
       await this.client.invoke(
         new Api.messages.ReadHistory({
           peer: inputEntity,
-          maxId: maxId || 0,
+          maxId: readMaxId,
         })
       );
     }

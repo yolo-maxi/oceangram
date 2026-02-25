@@ -631,8 +631,8 @@ function setupIPC(): void {
     return await daemon!.uploadFile(dialogId, data, fileName, mimeType, caption);
   });
 
-  ipcMain.handle('mark-read', async (_: IpcMainInvokeEvent, dialogId: string) => {
-    tracker!.markRead(dialogId);
+  ipcMain.handle('mark-read', async (_: IpcMainInvokeEvent, dialogId: string, messageId?: number) => {
+    tracker!.markRead(dialogId, messageId);
     return true;
   });
 

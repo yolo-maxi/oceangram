@@ -173,9 +173,10 @@ class MessageTracker extends EventEmitter {
     this.emit('unread-count-changed');
   }
 
-  markRead(dialogId: string): void {
+  markRead(dialogId: string, messageId?: number): void {
     const entry = this.unreads.get(dialogId);
     const latest = entry?.messages?.[entry.messages.length - 1];
+    const idToUse = messageId ?? latest?.id;
 
     if (entry) {
       if (latest) {
@@ -188,10 +189,10 @@ class MessageTracker extends EventEmitter {
     }
 
     // Always tell daemon so Telegram marks the dialog as read (clears unread badge / stops showing as active)
-    if (latest) {
-      daemon.markRead(dialogId, latest.id).catch(() => {});
+    if (idToUse != null && idToUse > 0) {
+      daemon.markRead(dialogId, idToUse).catch(() => {});
     } else {
-      // Tracker had no messages for this dialog (unreads came from poll only). Fetch latest message id or mark all.
+      // No message id available — fetch latest or mark all
       daemon.getMessages(dialogId, 1).then((msgs) => {
         if (msgs && msgs.length > 0) {
           const last = msgs[msgs.length - 1];

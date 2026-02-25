@@ -612,8 +612,9 @@
       lastSeenMsgId = 0;
     }
 
-    // Mark as read
-    api.markRead(dialogId);
+    // Mark as read (pass latest message id so Telegram gets correct read receipt)
+    const latestId = cached?.length ? Math.max(...cached.map((m: MessageLike) => m.id || 0)) : undefined;
+    api.markRead(dialogId, latestId);
     unreadCounts[dialogId] = 0;
     if (allTabs.length > 1) updateTabActive();
 
@@ -804,7 +805,7 @@
         }
         messageCache[selectedDialogId] = cached;
 
-        api.markRead(selectedDialogId);
+        api.markRead(selectedDialogId, newestId);
       }
 
       lastSeenMsgId = newestId;
@@ -1588,13 +1589,23 @@
     const tabDialogId = matchedTab?.dialogId;
 
     if (tabDialogId && tabDialogId === selectedDialogId) {
-      // Current chat — replace optimistic or append
+      // Current chat — skip if already in DOM (avoid duplicates from poll + WS)
+      const realId = msg.id || 0;
+      if (realId > 0) {
+        const existing = messagesScrollEl.querySelector(`[data-msg-id="${realId}"]`);
+        if (existing) {
+          api.markRead(selectedDialogId, realId);
+          return;
+        }
+      }
+
+      // Replace optimistic or append
       const msgText = (msg.text || msg.message || '').trim();
       const isOutgoing = msg.isOutgoing === true || String(msg.fromId || msg.senderId || '') === String(myId);
       if (isOutgoing && msgText) {
         const optimistic = messagesScrollEl.querySelector('[data-msg-id="0"]');
         if (optimistic && optimistic.querySelector('.text')?.textContent?.trim() === msgText) {
-          optimistic.setAttribute('data-msg-id', String(msg.id || 0));
+          optimistic.setAttribute('data-msg-id', String(realId || 0));
           const cache = messageCache[tabDialogId] || [];
           const idx = cache.findIndex((m) => (m.id || 0) === 0 && (m.text || m.message || '').trim() === msgText && m.isOutgoing);
           if (idx >= 0) {
@@ -1612,7 +1623,7 @@
         appendMessage(msg);
         messageCache[tabDialogId] = [...(messageCache[tabDialogId] || []), msg];
       }
-      api.markRead(selectedDialogId);
+      api.markRead(selectedDialogId, realId > 0 ? realId : undefined);
     } else if (tabDialogId) {
       // Other visible tab — add to cache, update unread
       messageCache[tabDialogId] = [...(messageCache[tabDialogId] || []), msg];

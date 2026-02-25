@@ -21,8 +21,8 @@ contextBridge.exposeInMainWorld('oceangram', {
     ipcRenderer.invoke('send-message', dialogId, text, replyTo),
   sendFile: (dialogId: string, data: string, fileName: string, mimeType?: string, caption?: string): Promise<unknown> =>
     ipcRenderer.invoke('send-file', dialogId, data, fileName, mimeType, caption),
-  markRead: (dialogId: string): Promise<boolean> =>
-    ipcRenderer.invoke('mark-read', dialogId),
+  markRead: (dialogId: string, messageId?: number): Promise<boolean> =>
+    ipcRenderer.invoke('mark-read', dialogId, messageId),
   getDialogInfo: (dialogId: string): Promise<TelegramDialog | null> =>
     ipcRenderer.invoke('get-dialog-info', dialogId),
   getProfilePhoto: (userId: string): Promise<string | null> =>
