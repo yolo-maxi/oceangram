@@ -196,7 +196,9 @@
   async function checkOpenClaw(): Promise<void> {
     try {
       openclawAvailable = await api.openclawEnabled();
-    } catch {
+      console.log('[popup] openclawEnabled =', openclawAvailable);
+    } catch (err) {
+      console.log('[popup] openclawEnabled check failed:', err);
       openclawAvailable = false;
     }
     agentStatus.style.display = openclawAvailable ? '' : 'none';
@@ -205,6 +207,11 @@
       startAgentStatusPolling();
     }
   }
+
+  // Re-check OpenClaw availability every 10s (WS may connect after popup opens)
+  setInterval(() => {
+    if (!openclawAvailable) checkOpenClaw();
+  }, 10000);
 
   function formatTokens(n: number): string {
     if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
