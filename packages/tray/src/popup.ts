@@ -914,7 +914,7 @@
       }
 
       html += `
-        <div class="message ${isOutgoing ? 'outgoing' : 'incoming'}" data-msg-id="${msgId}">
+        <div class="message ${isOutgoing ? 'outgoing' : 'incoming'}" data-msg-id="${msgId}" data-from-id="${escapeHtml(fromId)}">
           ${replyHtml}
           ${senderHtml}
           ${mediaHtml}
@@ -991,6 +991,7 @@
 
     const div = document.createElement('div');
     div.className = `message ${isOutgoing ? 'outgoing' : 'incoming'}`;
+    div.setAttribute('data-from-id', String(fromId));
     div.dataset.msgId = String(msgId);
     const replyToId = (msg as any).replyToId;
     let replyHtml = '';
@@ -1001,9 +1002,11 @@
       replyHtml = `<div class="reply-context" data-reply-to="${replyToId}">${escapeHtml(replyText)}</div>`;
     }
 
-    // Show sender avatar + name in groups/forums for incoming messages
+    // Show sender avatar + name in groups/forums for incoming messages (collapse consecutive from same sender)
     let senderHtml = '';
-    if (currentDialogIsGroup && !isOutgoing) {
+    const prevBubble = messageList.querySelector('.message:last-child');
+    const prevFromId = prevBubble?.getAttribute('data-from-id') || '';
+    if (currentDialogIsGroup && !isOutgoing && String(fromId) !== prevFromId) {
       const name = (msg as any).senderName || '';
       const fromIdStr = String(fromId);
       if (name && fromIdStr) {
