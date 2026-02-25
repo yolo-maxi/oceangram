@@ -6,9 +6,16 @@ import path from 'path';
 import os from 'os';
 import WebSocketLib from 'ws';
 
-const CONFIG_PATH = path.join(os.homedir(), '.oceangram', 'config.json');
-const DEFAULT_URL = 'ws://localhost:18789';
+const OCEANGRAM_CONFIG_PATH = path.join(os.homedir(), '.oceangram', 'config.json');
 const RECONNECT_DELAY = 5000;
+
+// OpenClaw config search paths (in priority order)
+const OPENCLAW_CONFIG_PATHS = [
+  path.join(os.homedir(), '.openclaw', 'openclaw.json'),
+  path.join(os.homedir(), '.openclaw', 'config.json'),
+  path.join(os.homedir(), '.config', 'openclaw', 'config.json'),
+  path.join(os.homedir(), '.config', 'openclaw', 'config.yaml'),
+];
 
 interface OpenClawConfig {
   features?: { openclaw?: boolean };
@@ -25,13 +32,55 @@ function genId(): string {
   return crypto.randomBytes(12).toString('hex');
 }
 
-function readConfig(): OpenClawConfig {
-  try {
-    const raw = fs.readFileSync(CONFIG_PATH, 'utf-8');
-    return JSON.parse(raw) as OpenClawConfig;
-  } catch {
-    return {};
+/** Try to auto-detect OpenClaw gateway token and port from its config files. */
+function autoDetectOpenClaw(): { token: string; url: string } | null {
+  for (const configPath of OPENCLAW_CONFIG_PATHS) {
+    try {
+      if (!fs.existsSync(configPath)) continue;
+      const raw = fs.readFileSync(configPath, 'utf-8');
+      const cfg = JSON.parse(raw);
+
+      // openclaw.json format: { gateway: { port, auth: { token } } }
+      const gw = cfg.gateway;
+      if (gw?.auth?.token) {
+        const port = gw.port || 18789;
+        const host = gw.bind === 'loopback' ? 'localhost' : 'localhost';
+        console.log(`[openclaw] Auto-detected config from ${configPath}`);
+        return { token: gw.auth.token, url: `ws://${host}:${port}` };
+      }
+
+      // Flat format: { token, port } or { apiToken, gatewayPort }
+      const token = cfg.token || cfg.apiToken;
+      if (token) {
+        const port = cfg.port || cfg.gatewayPort || 18789;
+        console.log(`[openclaw] Auto-detected config from ${configPath}`);
+        return { token, url: `ws://localhost:${port}` };
+      }
+    } catch {
+      // Skip unparseable files
+    }
   }
+  return null;
+}
+
+function readConfig(): OpenClawConfig {
+  // First: check Oceangram's own config for explicit overrides
+  try {
+    const raw = fs.readFileSync(OCEANGRAM_CONFIG_PATH, 'utf-8');
+    const cfg = JSON.parse(raw) as OpenClawConfig;
+    if (cfg.openclaw?.token) return cfg;
+  } catch { /* no oceangram config, that's fine */ }
+
+  // Second: auto-detect from OpenClaw installation
+  const detected = autoDetectOpenClaw();
+  if (detected) {
+    return {
+      features: { openclaw: true },
+      openclaw: detected,
+    };
+  }
+
+  return {};
 }
 
 class OpenClawClient extends EventEmitter {
@@ -40,7 +89,7 @@ class OpenClawClient extends EventEmitter {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private enabled = false;
   private token = '';
-  private url = DEFAULT_URL;
+  private url = 'ws://localhost:18789';
   private _connected = false;
   private _started = false;
 
@@ -57,7 +106,7 @@ class OpenClawClient extends EventEmitter {
     const cfg = readConfig();
     this.enabled = cfg.features?.openclaw === true;
     this.token = cfg.openclaw?.token || '';
-    this.url = cfg.openclaw?.url || DEFAULT_URL;
+    this.url = cfg.openclaw?.url || 'ws://localhost:18789';
   }
 
   /** Start the client. No-op if feature is disabled. */
