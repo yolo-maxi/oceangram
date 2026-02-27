@@ -85,6 +85,12 @@ export class CommsPicker {
             await this.sendPinnedDialogs();
             this.sendRecentChats();
             break;
+          case 'muteChat':
+            this.handleMuteChat(msg.chatId, msg.duration);
+            break;
+          case 'unmuteChat':
+            this.handleUnmuteChat(msg.chatId);
+            break;
           case 'searchLocal': {
             // Client-side search from cache — instant
             const cached = tg.searchDialogsFromCache(msg.query);
@@ -140,7 +146,10 @@ export class CommsPicker {
     }
     const all = await tg.getDialogs(200);
     const pinned = all.filter(d => pinnedIds.includes(d.id));
-    pinned.forEach(d => d.isPinned = true);
+    pinned.forEach(d => {
+      d.isPinned = true;
+      (d as any)._isMuted = this.isChatMuted(d.id);
+    });
     // TASK-108: Sort by most recent message time
     pinned.sort((a, b) => (b.lastMessageTime || 0) - (a.lastMessageTime || 0));
     // TASK-109: Group forum topics under their parent for collapsible tree
@@ -156,7 +165,10 @@ export class CommsPicker {
       return;
     }
     const pinned = dialogs.filter(d => pinnedIds.includes(d.id));
-    pinned.forEach(d => d.isPinned = true);
+    pinned.forEach(d => {
+      d.isPinned = true;
+      (d as any)._isMuted = this.isChatMuted(d.id);
+    });
     // TASK-108: Sort by most recent message time
     pinned.sort((a, b) => (b.lastMessageTime || 0) - (a.lastMessageTime || 0));
     // TASK-109: Group forum topics under their parent for collapsible tree
@@ -180,6 +192,12 @@ export class CommsPicker {
       .filter(r => !pinnedIds.has(r.id))
       .map(r => dialogs.find(d => d.id === r.id))
       .filter(Boolean) as DialogInfo[];
+    
+    // Add mute status to recent chats
+    recent.forEach(d => {
+      (d as any)._isMuted = this.isChatMuted(d.id);
+    });
+    
     // Sort by last message time
     recent.sort((a, b) => (b.lastMessageTime || 0) - (a.lastMessageTime || 0));
     // TASK-109: Group forum topics for collapsible tree
@@ -305,6 +323,36 @@ export class CommsPicker {
     return result;
   }
 
+  private handleMuteChat(chatId: string, duration: 'MUTE_1H' | 'MUTE_8H' | 'MUTE_FOREVER'): void {
+    const muteSettings = this.context.globalState.get<Record<string, number>>('oceangram.chatMuteSettings', {});
+    const muteUntil = duration === 'MUTE_FOREVER' ? Number.MAX_SAFE_INTEGER :
+                     duration === 'MUTE_8H' ? Date.now() + (8 * 60 * 60 * 1000) :
+                     Date.now() + (60 * 60 * 1000); // MUTE_1H
+    
+    muteSettings[chatId] = muteUntil;
+    this.context.globalState.update('oceangram.chatMuteSettings', muteSettings);
+    
+    // Refresh the chat list to show mute icon
+    this.sendPinnedDialogs();
+    this.sendRecentChats();
+  }
+
+  private handleUnmuteChat(chatId: string): void {
+    const muteSettings = this.context.globalState.get<Record<string, number>>('oceangram.chatMuteSettings', {});
+    delete muteSettings[chatId];
+    this.context.globalState.update('oceangram.chatMuteSettings', muteSettings);
+    
+    // Refresh the chat list to show mute icon removed
+    this.sendPinnedDialogs();
+    this.sendRecentChats();
+  }
+
+  private isChatMuted(chatId: string): boolean {
+    const muteSettings = this.context.globalState.get<Record<string, number>>('oceangram.chatMuteSettings', {});
+    const muteUntil = muteSettings[chatId];
+    return muteUntil && muteUntil > Date.now();
+  }
+
   private getHtml(): string {
     const cssUri = this.panel.webview.asWebviewUri(
       vscode.Uri.joinPath(this.context.extensionUri, 'media', 'commsPicker.css')
@@ -333,6 +381,15 @@ export class CommsPicker {
 </body>
 </html>`;
   }
+}
+
+/**
+ * Check if a chat is currently muted based on stored settings
+ */
+export function isChatMuted(context: vscode.ExtensionContext, chatId: string): boolean {
+  const muteSettings = context.globalState.get<Record<string, number>>('oceangram.chatMuteSettings', {});
+  const muteUntil = muteSettings[chatId];
+  return muteUntil && muteUntil > Date.now();
 }
 
 /**
@@ -517,8 +574,8 @@ export class ChatTab {
                     if (!this.isActive) {
                       this.unreadCount++;
                       this.updateTitle();
-                      // Smart notification for background tabs
-                      if (event.message && !event.message.isOutgoing) {
+                      // Smart notification for background tabs (only if not muted)
+                      if (event.message && !event.message.isOutgoing && !isChatMuted(this.context, this.chatId)) {
                         showSmartNotification(
                           event.message.text || '',
                           event.message.senderName || 'Unknown',

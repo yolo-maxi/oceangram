@@ -6,6 +6,8 @@ const searchInput = document.getElementById('searchInput');
 const errorBox = document.getElementById('errorBox');
 const backBar = document.getElementById('backBar');
 
+let activeCtxMenu = null;
+
 const avatarColors = ['#e17076','#eda86c','#a695e7','#7bc862','#6ec9cb','#65aadd','#ee7aae','#6bb2f2'];
 function pickColor(id) { return avatarColors[Math.abs(parseInt(id || '0', 10)) % avatarColors.length]; }
 
@@ -93,6 +95,13 @@ function enterForumGroup(chatId, groupName) {
 // Track expanded forum groups (persisted across renders)
 const expandedForums = new Set();
 
+function removeCtxMenu() {
+  if (activeCtxMenu) { 
+    activeCtxMenu.remove(); 
+    activeCtxMenu = null; 
+  }
+}
+
 function renderDialogs(dialogs, container, showPinBtn) {
   selectedIndex = -1;
   if (!dialogs.length) {
@@ -137,10 +146,12 @@ function renderDialogs(dialogs, container, showPinBtn) {
         const tPreview = topic.lastMessage ? esc(topic.lastMessage.slice(0, 60)) : '';
         const pinBtn = showPinBtn && !topic.isPinned ? '<span class="pin-btn" data-id="' + topic.id + '">\ud83d\udccc</span>' : '';
 
-        html += '<div class="chat-item" data-id="' + topic.id + '" data-name="' + esc(topic.name) + '">' +
+        const tMuteIcon = topic._isMuted ? '<span class="mute-icon" title="Muted">\ud83d\udd07</span>' : '';
+        
+        html += '<div class="chat-item" data-id="' + topic.id + '" data-name="' + esc(topic.name) + '" data-muted="' + (topic._isMuted ? '1' : '0') + '">' +
           '<div class="avatar" style="background:transparent;font-size:18px">' + esc(tEmoji) + '</div>' +
           '<div class="chat-info">' +
-            '<div class="chat-name-row"><span class="chat-name">' + esc(topic.topicName || topic.name) + '</span><span class="' + tTimeClass + '">' + tTimeStr + '</span></div>' +
+            '<div class="chat-name-row">' + tMuteIcon + '<span class="chat-name">' + esc(topic.topicName || topic.name) + '</span><span class="' + tTimeClass + '">' + tTimeStr + '</span></div>' +
             '<div class="chat-preview-row"><span class="chat-preview">' + tPreview + '</span>' + tUnreadHtml + '</div>' +
           '</div>' +
           pinBtn +
@@ -177,11 +188,13 @@ function renderDialogs(dialogs, container, showPinBtn) {
         ? (d.isPinned ? '' : '<span class="pin-btn" data-id="' + d.id + '">\ud83d\udccc</span>')
         : '<span class="unpin-btn" data-id="' + d.id + '" title="Unpin">\u2715</span>';
 
-      html += '<div class="chat-item" data-id="' + d.id + '" data-name="' + esc(d.name) + '">' +
+      const topicMuteIcon = d._isMuted ? '<span class="mute-icon" title="Muted">\ud83d\udd07</span>' : '';
+      
+      html += '<div class="chat-item" data-id="' + d.id + '" data-name="' + esc(d.name) + '" data-muted="' + (d._isMuted ? '1' : '0') + '">' +
         '<div class="avatar" style="background:' + color + '">' + esc(d.initials) + '<span class="topic-badge">#</span></div>' +
         '<div class="chat-info">' +
           '<div class="chat-name-row"><div class="chat-group-name">\u2317 ' + esc(d.groupName) + '</div><span class="' + timeClass + '">' + timeStr + '</span></div>' +
-          '<div class="chat-name-row"><div class="chat-topic-name">' + esc(d.topicEmoji || '') + ' ' + esc(d.topicName) + '</div></div>' +
+          '<div class="chat-name-row">' + topicMuteIcon + '<div class="chat-topic-name">' + esc(d.topicEmoji || '') + ' ' + esc(d.topicName) + '</div></div>' +
           '<div class="chat-preview-row"><span class="chat-preview">' + preview + '</span>' + unreadHtml + '</div>' +
         '</div>' +
         actionBtn +
@@ -198,10 +211,12 @@ function renderDialogs(dialogs, container, showPinBtn) {
       ? (d.isPinned ? '' : '<span class="pin-btn" data-id="' + d.id + '">\ud83d\udccc</span>')
       : '<span class="unpin-btn" data-id="' + d.id + '" title="Unpin">\u2715</span>';
 
-    html += '<div class="chat-item" data-id="' + d.id + '" data-name="' + esc(d.name) + '">' +
+    const muteIcon = d._isMuted ? '<span class="mute-icon" title="Muted">\ud83d\udd07</span>' : '';
+    
+    html += '<div class="chat-item" data-id="' + d.id + '" data-name="' + esc(d.name) + '" data-muted="' + (d._isMuted ? '1' : '0') + '">' +
       '<div class="avatar" style="background:' + color + '">' + esc(d.initials) + '</div>' +
       '<div class="chat-info">' +
-        '<div class="chat-name-row"><span class="chat-name">' + esc(d.name) + '</span><span class="' + timeClass + '">' + timeStr + '</span></div>' +
+        '<div class="chat-name-row">' + muteIcon + '<span class="chat-name">' + esc(d.name) + '</span><span class="' + timeClass + '">' + timeStr + '</span></div>' +
         '<div class="chat-preview-row"><span class="chat-preview">' + preview + '</span>' + unreadHtml + '</div>' +
       '</div>' +
       actionBtn +

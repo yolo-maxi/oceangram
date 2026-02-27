@@ -114,3 +114,104 @@ li { padding: 2px 0; }
 .confirm-box { background: var(--vscode-editorWidget-background, #252526); border: 1px solid var(--vscode-editorWidget-border, #454545); border-radius: 8px; padding: 20px; max-width: 360px; text-align: center; }
 .confirm-box p { margin-bottom: 16px; font-size: 14px; }
 .confirm-actions { display: flex; gap: 10px; justify-content: center; }
+
+/* Fleet View Styles */
+.fleet-card { 
+  background: var(--vscode-editor-background, #1e1e1e); 
+  border: 1px solid var(--vscode-editorWidget-border, #454545); 
+  border-radius: 6px; 
+  padding: 12px 14px; 
+  margin-bottom: 10px; 
+}
+.fleet-card-header { 
+  display: flex; 
+  align-items: center; 
+  justify-content: space-between; 
+  margin-bottom: 8px; 
+}
+.fleet-name { 
+  font-weight: 600; 
+  font-size: 13px; 
+}
+.fleet-status-pill { 
+  display: inline-block; 
+  padding: 2px 8px; 
+  border-radius: 10px; 
+  font-size: 11px; 
+  color: #fff; 
+  font-weight: 600; 
+}
+.fleet-model { 
+  display: flex; 
+  align-items: center; 
+  gap: 8px; 
+  font-size: 12px; 
+  margin-bottom: 6px; 
+}
+.fleet-model-label { 
+  color: var(--vscode-descriptionForeground, #999); 
+  min-width: 50px; 
+}
+.fleet-model-name { 
+  font-family: var(--vscode-editor-font-family, monospace); 
+  background: var(--vscode-textCodeBlock-background, #2d2d2d); 
+  padding: 2px 6px; 
+  border-radius: 3px; 
+  font-size: 11px; 
+}
+.fleet-context { 
+  display: flex; 
+  align-items: center; 
+  gap: 8px; 
+  font-size: 12px; 
+  margin-bottom: 6px; 
+}
+.fleet-context-label { 
+  color: var(--vscode-descriptionForeground, #999); 
+  min-width: 50px; 
+}
+.fleet-context-bar { 
+  flex: 1; 
+  height: 6px; 
+  background: var(--vscode-editorWidget-border, #454545); 
+  border-radius: 3px; 
+  overflow: hidden; 
+}
+.fleet-context-fill { 
+  height: 100%; 
+  transition: width 0.3s ease; 
+}
+.fleet-context-percent { 
+  font-size: 11px; 
+  color: var(--vscode-descriptionForeground, #999); 
+  min-width: 30px; 
+  text-align: right; 
+}
+.fleet-task { 
+  display: flex; 
+  gap: 8px; 
+  font-size: 12px; 
+  margin-bottom: 4px; 
+}
+.fleet-task-label { 
+  color: var(--vscode-descriptionForeground, #999); 
+  min-width: 50px; 
+  flex-shrink: 0; 
+}
+.fleet-task-text { 
+  flex: 1; 
+  color: var(--vscode-foreground, #ccc); 
+  line-height: 1.4; 
+}
+.fleet-activity { 
+  display: flex; 
+  gap: 8px; 
+  font-size: 11px; 
+  color: var(--vscode-descriptionForeground, #888); 
+}
+.fleet-activity-label { 
+  min-width: 50px; 
+}
+.fleet-activity-time { 
+  font-style: italic; 
+}

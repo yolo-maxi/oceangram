@@ -25,6 +25,10 @@ function pm2Do(type, name) {
   vscode.postMessage({type, name});
 }
 
+function fleetDo(type, name) {
+  vscode.postMessage({type, name});
+}
+
 let pendingConfirm = null;
 
 function pm2Confirm(type, name) {
@@ -69,6 +73,10 @@ window.addEventListener('message', function(event) {
   }
   if (msg.type === 'pm2Update') {
     // Could refresh PM2 cards dynamically in the future
+  }
+  if (msg.type === 'fleetUpdate') {
+    // Could refresh Fleet cards dynamically in the future
+    // For now, the panel will refresh completely when data changes
   }
 });
 

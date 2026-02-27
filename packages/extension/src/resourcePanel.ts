@@ -1,9 +1,11 @@
 import * as vscode from 'vscode';
+import { execSync } from 'child_process';
 import { loadProjectList, loadProjectBrief, readBriefRaw, saveBrief, ProjectBrief, ProjectListEntry } from './services/resources';
 import { renderMarkdown } from './services/markdownRenderer';
 import { extractAllUrls, parsePm2Json, parseGitLog, parseGitRemote, formatUptime, Pm2Process, GitLogInfo, GitRemote } from './services/resourceHelpers';
 import { fetchPM2Processes, enrichProcesses, pm2Action, pm2Logs, PM2ProcessDisplay } from './services/pm2';
 import { getRemoteHome } from './services/remoteFs';
+import { readOpenclawSessions, AgentSession } from './services/openclawSessions';
 
 export class ResourcePanel {
   private static instance: ResourcePanel | undefined;
@@ -17,6 +19,7 @@ export class ResourcePanel {
   private healthCheckInterval: NodeJS.Timeout | undefined;
   private deploymentData: { pm2: Pm2Process[]; git: GitLogInfo | null; remotes: GitRemote[] } | null = null;
   private pm2Processes: PM2ProcessDisplay[] = [];
+  private agentSessions: AgentSession[] = [];
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
   private context: vscode.ExtensionContext;
 
@@ -43,15 +46,18 @@ export class ResourcePanel {
     this.initAsync();
 
     this.refreshPM2();
+    this.refreshFleet();
     this.panel.webview.html = this.getHtml();
     this.startHealthChecks();
 
     this.loadDeploymentData();
 
-    // Auto-refresh PM2 every 30s
+    // Auto-refresh PM2 and Fleet every 30s
     this.refreshTimer = setInterval(() => {
       this.refreshPM2();
+      this.refreshFleet();
       this.panel.webview.postMessage({ type: 'pm2Update', processes: this.pm2Processes });
+      this.panel.webview.postMessage({ type: 'fleetUpdate', sessions: this.agentSessions });
     }, 30000);
 
     this.panel.webview.onDidReceiveMessage(
@@ -84,6 +90,10 @@ export class ResourcePanel {
 
   private refreshPM2() {
     this.pm2Processes = enrichProcesses(fetchPM2Processes());
+  }
+
+  private refreshFleet() {
+    this.agentSessions = readOpenclawSessions();
   }
 
   private loadDeploymentData() {
@@ -223,6 +233,11 @@ export class ResourcePanel {
         this.panel.webview.postMessage({ type: 'pm2Update', processes: this.pm2Processes });
         break;
       }
+      case 'fleetRefresh': {
+        this.refreshFleet();
+        this.panel.webview.postMessage({ type: 'fleetUpdate', sessions: this.agentSessions });
+        break;
+      }
       case 'openTerminal': {
         const terminal = vscode.window.createTerminal({ name: msg.name, cwd: msg.path });
         terminal.show();
@@ -267,6 +282,62 @@ export class ResourcePanel {
 
     html += '</div>';
     return html;
+  }
+
+  private getFleetHtml(): string {
+    if (this.agentSessions.length === 0) {
+      return `<div class="card">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
+          <span>🚢 Agent Fleet</span>
+          <button class="edit-btn" style="font-size:11px;padding:3px 8px" onclick="fleetDo('fleetRefresh','')">🔄 Refresh</button>
+        </div>
+        <div class="empty">No agents found</div>
+      </div>`;
+    }
+
+    const fleetCardsHtml = this.agentSessions.map(session => {
+      const statusColor = session.status === 'busy' ? '#ff9800' : 
+                         session.status === 'online' ? '#4caf50' : 
+                         session.status === 'idle' ? '#2196f3' : '#757575';
+      
+      const contextColor = session.contextUsage > 80 ? '#f44336' : 
+                          session.contextUsage > 60 ? '#ff9800' : '#4caf50';
+
+      return `
+        <div class="fleet-card">
+          <div class="fleet-card-header">
+            <span class="fleet-name">${escHtml(session.name)}</span>
+            <span class="fleet-status-pill" style="background:${statusColor}">${escHtml(session.status)}</span>
+          </div>
+          <div class="fleet-model">
+            <span class="fleet-model-label">Model:</span>
+            <span class="fleet-model-name">${escHtml(session.model)}</span>
+          </div>
+          <div class="fleet-context">
+            <span class="fleet-context-label">Context:</span>
+            <div class="fleet-context-bar">
+              <div class="fleet-context-fill" style="width:${session.contextUsage}%;background:${contextColor}"></div>
+            </div>
+            <span class="fleet-context-percent">${session.contextUsage}%</span>
+          </div>
+          <div class="fleet-task">
+            <span class="fleet-task-label">Task:</span>
+            <span class="fleet-task-text">${escHtml(session.activeTask)}</span>
+          </div>
+          <div class="fleet-activity">
+            <span class="fleet-activity-label">Last activity:</span>
+            <span class="fleet-activity-time">${escHtml(session.lastActivity)}</span>
+          </div>
+        </div>`;
+    }).join('');
+
+    return `<div class="card">
+      <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
+        <span>🚢 Agent Fleet</span>
+        <button class="edit-btn" style="font-size:11px;padding:3px 8px" onclick="fleetDo('fleetRefresh','')">🔄 Refresh</button>
+      </div>
+      ${fleetCardsHtml}
+    </div>`;
   }
 
   private getHtml(): string {
@@ -393,6 +464,8 @@ export class ResourcePanel {
   ${keysHtml}
 
   ${this.getDeploymentHtml()}
+
+  ${this.getFleetHtml()}
 
   <div class="card">
     <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
