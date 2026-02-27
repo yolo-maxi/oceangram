@@ -416,6 +416,11 @@ export class ChatTab {
       if (this.isActive) {
         this.unreadCount = 0;
         this.updateTitle();
+        // Notify the tree provider to update the badge
+        const treeProvider = ChatsTreeProvider.getInstance();
+        if (treeProvider) {
+          treeProvider.resetUnreadForChat(this.chatId);
+        }
       }
     }, null, this.disposables);
 

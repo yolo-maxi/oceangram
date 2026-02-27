@@ -63,11 +63,17 @@ export class ChatsTreeProvider implements vscode.TreeDataProvider<DialogInfo> {
       await api.connect();
       const dialogs = await api.getDialogs(20); // Get top 20 chats
       
-      // Calculate total unread count
-      this.totalUnreadCount = dialogs.reduce((total, dialog) => total + dialog.unreadCount, 0);
+      // Filter out any dialogs without unread count defined and only show chats with unreads or recently active
+      const recentDialogs = dialogs.filter(dialog => 
+        dialog.unreadCount > 0 || 
+        (Date.now() - dialog.lastMessageTime) < 24 * 60 * 60 * 1000 // last 24 hours
+      ).slice(0, 10); // Limit to 10 most relevant chats
+      
+      // Calculate total unread count from all dialogs (not just the filtered ones)
+      this.totalUnreadCount = dialogs.reduce((total, dialog) => total + (dialog.unreadCount || 0), 0);
       this.updateBadge();
       
-      return dialogs;
+      return recentDialogs;
     } catch (error) {
       console.error('[ChatsTreeProvider] Error fetching chats:', error);
       return [];
@@ -100,6 +106,15 @@ export class ChatsTreeProvider implements vscode.TreeDataProvider<DialogInfo> {
     api.onDialogUpdate(() => {
       this.refresh(); // This will trigger getChildren() and update the badge
     });
+
+    // Also listen for new messages on individual chats to update unread counts
+    // Note: The onDialogUpdate should handle this, but adding this for completeness
+    const updateUnreadCounts = () => {
+      this.refresh();
+    };
+
+    // Set up a periodic refresh every 30 seconds to keep unread counts updated
+    setInterval(updateUnreadCounts, 30000);
   }
 
   // Method to reset unread count when a chat is opened/focused
