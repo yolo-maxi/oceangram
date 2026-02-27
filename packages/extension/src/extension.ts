@@ -43,7 +43,7 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push({ dispose: () => daemonManager?.dispose() });
 
   // Initialize Chats Tree Provider for activity bar badge
-  const chatsProvider = new ChatsTreeProvider();
+  const chatsProvider = new ChatsTreeProvider(context);
   const chatsView = vscode.window.createTreeView('oceangram.chats', {
     treeDataProvider: chatsProvider
   });

@@ -83,6 +83,13 @@ input[type="text"]:focus { background: var(--tg-hover); }
   padding: 1px 7px; min-width: 20px; text-align: center;
   flex-shrink: 0;
 }
+
+.mute-icon {
+  font-size: 12px;
+  opacity: 0.7;
+  margin-right: 4px;
+  flex-shrink: 0;
+}
 .pin-btn, .unpin-btn {
   cursor: pointer; padding: 4px 6px; border-radius: 4px;
   flex-shrink: 0; font-size: 14px; color: var(--tg-text-secondary);
@@ -134,3 +141,29 @@ input[type="text"]:focus { background: var(--tg-hover); }
 .empty { text-align: center; padding: 40px 20px; color: var(--tg-text-secondary); font-size: 14px; line-height: 1.6; }
 .error { color: var(--tg-danger); padding: 12px 16px; font-size: 12px; background: var(--tg-bg-secondary); }
 .loading { text-align: center; padding: 24px; color: var(--tg-text-secondary); }
+
+/* Context menu for mute options */
+.ctx-menu {
+  position: fixed;
+  background: var(--tg-surface);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  border: 1px solid var(--tg-border);
+  z-index: 1000;
+  min-width: 120px;
+  overflow: hidden;
+}
+
+.ctx-menu-item {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--tg-text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ctx-menu-item:hover {
+  background: var(--tg-hover);
+}

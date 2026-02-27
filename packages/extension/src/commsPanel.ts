@@ -97,6 +97,8 @@ export class CommsPicker {
             const collapsed = msg.groupChatId
               ? cached.filter(d => d.isForum && d.chatId === msg.groupChatId && d.topicId && (d.topicName || '').toLowerCase().includes(msg.query.toLowerCase()))
               : this.collapseForumGroups(cached);
+            // Add mute status to search results
+            collapsed.forEach(d => (d as any)._isMuted = this.isChatMuted(d.id));
             this.panel.webview.postMessage({ type: msg.groupChatId ? 'topicsList' : 'searchResultsLocal', groupName: msg.groupName, groupChatId: msg.groupChatId, dialogs: collapsed });
             break;
           }
@@ -105,6 +107,8 @@ export class CommsPicker {
             const results = msg.groupChatId
               ? (await tg.getDialogs(200)).filter(d => d.isForum && d.chatId === msg.groupChatId && d.topicId && (d.topicName || '').toLowerCase().includes(msg.query.toLowerCase()))
               : this.collapseForumGroups(await tg.searchDialogs(msg.query));
+            // Add mute status to search results
+            results.forEach(d => (d as any)._isMuted = this.isChatMuted(d.id));
             this.panel.webview.postMessage({ type: msg.groupChatId ? 'topicsList' : 'searchResults', groupName: msg.groupName, groupChatId: msg.groupChatId, dialogs: results });
             break;
           case 'openChat':
@@ -120,6 +124,8 @@ export class CommsPicker {
             await tg.connect();
             const allDialogs = await tg.getDialogs(200);
             const topics = allDialogs.filter(d => d.isForum && d.groupName === msg.groupName && d.topicId);
+            // Add mute status to topics
+            topics.forEach(d => (d as any)._isMuted = this.isChatMuted(d.id));
             this.panel.webview.postMessage({ type: 'topicsList', groupName: msg.groupName, groupChatId: msg.groupChatId, dialogs: topics });
             break;
           case 'pin':
@@ -240,6 +246,8 @@ export class CommsPicker {
           forumGroups.set(key, { parent, topics: [] });
         }
         const entry = forumGroups.get(key)!;
+        // Add mute status to topic
+        (d as any)._isMuted = this.isChatMuted(d.id);
         entry.topics.push(d);
         entry.parent._totalUnread! += d.unreadCount || 0;
         // Update parent's lastMessageTime to most recent topic

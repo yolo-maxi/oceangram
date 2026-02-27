@@ -240,10 +240,12 @@ function renderTopics(dialogs, container) {
     const unreadHtml = hasUnread ? '<span class="unread-badge">' + d.unreadCount + '</span>' : '';
     const emoji = d.topicEmoji || '\u2317';
 
-    return '<div class="chat-item" data-id="' + d.id + '" data-name="' + esc(d.name) + '">' +
+    const topicsMuteIcon = d._isMuted ? '<span class="mute-icon" title="Muted">\ud83d\udd07</span>' : '';
+    
+    return '<div class="chat-item" data-id="' + d.id + '" data-name="' + esc(d.name) + '" data-muted="' + (d._isMuted ? '1' : '0') + '">' +
       '<div class="avatar" style="background:transparent;font-size:22px">' + esc(emoji) + '</div>' +
       '<div class="chat-info">' +
-        '<div class="chat-name-row"><span class="chat-name">' + esc(d.topicName || d.name) + '</span><span class="' + timeClass + '">' + timeStr + '</span></div>' +
+        '<div class="chat-name-row">' + topicsMuteIcon + '<span class="chat-name">' + esc(d.topicName || d.name) + '</span><span class="' + timeClass + '">' + timeStr + '</span></div>' +
         '<div class="chat-preview-row"><span class="chat-preview">' + (d.lastMessage ? esc(d.lastMessage.slice(0, 80)) : '') + '</span>' + unreadHtml + '</div>' +
       '</div>' +
       (d.isPinned ? '' : '<span class="pin-btn" data-id="' + d.id + '">\ud83d\udccc</span>') +
@@ -323,6 +325,56 @@ function bindChatItemEvents(container) {
       vscode.postMessage({ type: 'unpin', chatId: el.dataset.id });
     });
   });
+
+  // Add context menu for mute/unmute options
+  container.querySelectorAll('.chat-item').forEach(el => {
+    el.addEventListener('contextmenu', (e) => {
+      if (!el.dataset.id) return;
+      e.preventDefault();
+      e.stopPropagation();
+      removeCtxMenu();
+      
+      const menu = document.createElement('div');
+      menu.className = 'ctx-menu';
+      menu.style.left = e.clientX + 'px';
+      menu.style.top = e.clientY + 'px';
+      
+      const isMuted = el.dataset.muted === '1';
+      
+      let menuHtml = '';
+      if (isMuted) {
+        menuHtml = '<div class="ctx-menu-item" data-action="unmute" data-chat-id="' + el.dataset.id + '">\ud83d\udd08 Unmute</div>';
+      } else {
+        menuHtml = 
+          '<div class="ctx-menu-item" data-action="mute1h" data-chat-id="' + el.dataset.id + '">\ud83d\udd07 Mute 1h</div>' +
+          '<div class="ctx-menu-item" data-action="mute8h" data-chat-id="' + el.dataset.id + '">\ud83d\udd07 Mute 8h</div>' +
+          '<div class="ctx-menu-item" data-action="muteforever" data-chat-id="' + el.dataset.id + '">\ud83d\udd07 Mute Forever</div>';
+      }
+      
+      menu.innerHTML = menuHtml;
+      
+      menu.querySelectorAll('.ctx-menu-item').forEach(item => {
+        item.addEventListener('click', () => {
+          const action = item.dataset.action;
+          const chatId = item.dataset.chatId;
+          
+          if (action === 'unmute') {
+            vscode.postMessage({ type: 'unmuteChat', chatId: chatId });
+          } else if (action === 'mute1h') {
+            vscode.postMessage({ type: 'muteChat', chatId: chatId, duration: 'MUTE_1H' });
+          } else if (action === 'mute8h') {
+            vscode.postMessage({ type: 'muteChat', chatId: chatId, duration: 'MUTE_8H' });
+          } else if (action === 'muteforever') {
+            vscode.postMessage({ type: 'muteChat', chatId: chatId, duration: 'MUTE_FOREVER' });
+          }
+          removeCtxMenu();
+        });
+      });
+      
+      document.body.appendChild(menu);
+      activeCtxMenu = menu;
+    });
+  });
 }
 
 backBar.addEventListener('click', exitTopicsView);
@@ -348,6 +400,9 @@ searchInput.addEventListener('input', () => {
   clearTimeout(apiSearchTimeout);
   apiSearchTimeout = setTimeout(() => vscode.postMessage({ type: 'search', query: q }), 150);
 });
+
+// Close context menu on click
+document.addEventListener('click', removeCtxMenu);
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {

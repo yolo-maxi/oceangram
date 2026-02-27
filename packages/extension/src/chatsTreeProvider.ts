@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { DialogInfo } from './services/telegram';
 import { getTelegramApi } from './extension';
+import { isChatMuted } from './commsPanel';
 
 export class ChatsTreeProvider implements vscode.TreeDataProvider<DialogInfo> {
   private _onDidChangeTreeData: vscode.EventEmitter<DialogInfo | undefined | null | void> = new vscode.EventEmitter<DialogInfo | undefined | null | void>();
@@ -8,10 +9,12 @@ export class ChatsTreeProvider implements vscode.TreeDataProvider<DialogInfo> {
 
   private totalUnreadCount = 0;
   private view?: vscode.TreeView<DialogInfo>;
+  private context: vscode.ExtensionContext;
   
   private static instance?: ChatsTreeProvider;
 
-  constructor() {
+  constructor(context: vscode.ExtensionContext) {
+    this.context = context;
     ChatsTreeProvider.instance = this;
     this.watchForMessages();
   }
@@ -32,10 +35,15 @@ export class ChatsTreeProvider implements vscode.TreeDataProvider<DialogInfo> {
   getTreeItem(element: DialogInfo): vscode.TreeItem {
     const item = new vscode.TreeItem(element.name, vscode.TreeItemCollapsibleState.None);
     
+    const muted = isChatMuted(this.context, element.id);
+    const mutePrefix = muted ? '🔇 ' : '';
+    
     // Show unread count if > 0
     if (element.unreadCount > 0) {
-      item.label = `${element.name} (${element.unreadCount})`;
+      item.label = `${mutePrefix}${element.name} (${element.unreadCount})`;
       item.description = `${element.unreadCount} unread`;
+    } else {
+      item.label = `${mutePrefix}${element.name}`;
     }
     
     item.tooltip = element.lastMessage;
