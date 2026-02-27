@@ -11,6 +11,7 @@ import { showQuickPick } from './quickPick';
 import { showChatPicker } from './chatPicker';
 import { OpenClawGatewayClient } from './agent/openclawGateway';
 import { AnnotationManager } from './agent/annotations';
+import { ChatsTreeProvider } from './chatsTreeProvider';
 
 let daemonManager: DaemonManager | undefined;
 let telegramApi: TelegramApiClient | undefined;
@@ -40,6 +41,14 @@ export function activate(context: vscode.ExtensionContext) {
   // Initialize daemon manager
   daemonManager = new DaemonManager();
   context.subscriptions.push({ dispose: () => daemonManager?.dispose() });
+
+  // Initialize Chats Tree Provider for activity bar badge
+  const chatsProvider = new ChatsTreeProvider();
+  const chatsView = vscode.window.createTreeView('oceangram.chats', {
+    treeDataProvider: chatsProvider
+  });
+  chatsProvider.setView(chatsView);
+  context.subscriptions.push(chatsView);
 
   // Start daemon and create API client
   daemonManager.ensureRunning().then(async (running) => {
@@ -240,6 +249,8 @@ export function activate(context: vscode.ExtensionContext) {
       try {
         await api.connect();
         await api.sendMessage(chosen.id, codeBlock);
+        // Track this chat as recently used after successfully sending
+        api.trackRecentChat(chosen.id);
         vscode.window.showInformationMessage(`Terminal output sent to ${chosen.name}`);
       } catch (err: any) {
         vscode.window.showErrorMessage(`Failed to send: ${err.message}`);
@@ -279,6 +290,8 @@ export function activate(context: vscode.ExtensionContext) {
 
       try {
         await api.sendMessage(chat.id, message);
+        // Track this chat as recently used after successfully sending
+        api.trackRecentChat(chat.id);
         vscode.window.showInformationMessage(`Sent to ${chat.name}`);
       } catch (err: any) {
         vscode.window.showErrorMessage(`Failed to send: ${err.message}`);
@@ -321,6 +334,61 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showInformationMessage('Sent to OpenClaw agent');
       } catch (err: any) {
         vscode.window.showErrorMessage(`Failed to send to agent: ${err.message}`);
+      }
+    })
+  );
+
+  // Reply from IDE (Cmd+Shift+R)
+  context.subscriptions.push(
+    vscode.commands.registerCommand('oceangram.replyFromIDE', async () => {
+      const api = getTelegramApi();
+      if (!api) {
+        vscode.window.showErrorMessage('Telegram not connected. Open Comms first.');
+        return;
+      }
+
+      // Get the most recent chat
+      const recentChats = api.getRecentChats();
+      if (recentChats.length === 0) {
+        vscode.window.showWarningMessage('No recent chats found. Open a chat first.');
+        return;
+      }
+
+      const lastChatId = recentChats[0].id;
+
+      // Get the dialog info for the last chat to show its name
+      let chatName = lastChatId;
+      try {
+        await api.connect();
+        const dialogs = api.getCachedDialogs();
+        const dialog = dialogs?.find(d => d.id === lastChatId);
+        chatName = dialog?.name || lastChatId;
+      } catch {
+        // Use the chat ID if we can't get the name
+      }
+
+      // Show input box for the reply
+      const reply = await vscode.window.showInputBox({
+        prompt: `Reply to ${chatName}`,
+        placeHolder: 'Type your reply...',
+        ignoreFocusOut: false,
+      });
+
+      if (!reply || reply.trim() === '') {
+        return; // User cancelled or entered empty message
+      }
+
+      try {
+        await api.connect();
+        await api.sendMessage(lastChatId, reply.trim());
+        
+        // Track this chat as recently used (since we just sent a message)
+        api.trackRecentChat(lastChatId);
+        
+        // Show brief status bar notification
+        vscode.window.setStatusBarMessage('✓ Sent', 2000);
+      } catch (err: any) {
+        vscode.window.showErrorMessage(`Failed to send reply: ${err.message}`);
       }
     })
   );

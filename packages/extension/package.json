@@ -64,6 +64,10 @@
       {
         "command": "oceangram.toggleAnnotations",
         "title": "Oceangram: Toggle Agent Annotations"
+      },
+      {
+        "command": "oceangram.replyFromIDE",
+        "title": "Oceangram: Reply from IDE"
       }
     ],
     "menus": {
@@ -77,6 +81,24 @@
           "command": "oceangram.sendToAgent",
           "when": "editorHasSelection",
           "group": "oceangram@2"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "oceangram",
+          "title": "Oceangram",
+          "icon": "$(comment-discussion)"
+        }
+      ]
+    },
+    "views": {
+      "oceangram": [
+        {
+          "id": "oceangram.chats",
+          "name": "Chats",
+          "when": "true"
         }
       ]
     },
@@ -111,6 +133,11 @@
         "key": "ctrl+shift+t",
         "mac": "cmd+shift+t",
         "when": "terminalFocus"
+      },
+      {
+        "command": "oceangram.replyFromIDE",
+        "key": "ctrl+shift+r",
+        "mac": "cmd+shift+r"
       }
     ],
     "configuration": {

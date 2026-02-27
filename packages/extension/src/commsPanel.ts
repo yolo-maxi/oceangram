@@ -6,6 +6,7 @@ import { OpenClawService, AgentSessionInfo, AgentDetailedInfo } from './agent/op
 import { ToolCall, getToolIcon, truncateParams, formatDuration, groupToolCallsByMessage, parseToolCallsFromText, messageHasToolCalls, EmbeddedToolCall, truncateString } from './agent/toolExecution';
 import { highlightMessageCodeBlocks, disposeHighlighter } from './services/highlighter';
 import { showSmartNotification } from './services/notifications';
+import { ChatsTreeProvider } from './chatsTreeProvider';
 
 /** Union type for either direct gramjs or daemon API client */
 type TelegramBackend = TelegramService | TelegramApiClient;
@@ -570,6 +571,8 @@ export class ChatTab {
             await tg.connect();
             try {
               await tg.sendMessage(this.chatId, msg.text, msg.replyToId);
+              // Track this chat as recently used after successfully sending a message
+              tg.trackRecentChat(this.chatId);
               this.panel.webview.postMessage({ type: 'sendSuccess', tempId: msg.tempId });
             } catch (sendErr: any) {
               this.panel.webview.postMessage({ type: 'sendFailed', tempId: msg.tempId, error: sendErr.message || 'Send failed' });
