@@ -69,15 +69,67 @@ function renderColumn(col) {
 function renderCard(t) {
   const expanded = expandedTasks.has(t.id);
   return '<div class="card" draggable="true" data-task-id="' + t.id + '" data-priority="' + t.priority + '">' +
-    '<div class="card-title" onclick="openTaskDetail(\'' + t.id + '\')">' + escHtml(t.title) + '</div>' +
+    '<div class="card-header">' +
+      '<div class="card-title" onclick="openTaskDetail(\'' + t.id + '\')">' + escHtml(t.title) + '</div>' +
+      '<div class="card-actions">' +
+        '<button class="context-menu-btn" onclick="showContextMenu(event, \'' + t.id + '\')">⋯</button>' +
+      '</div>' +
+    '</div>' +
     '<div class="card-meta">' +
       '<span class="badge badge-' + t.priority + '">' + t.priority + '</span>' +
       '<span class="card-id">' + t.id + '</span>' +
       t.tags.map(tag => '<span class="tag">' + escHtml(tag) + '</span>').join('') +
       (t.assigned ? '<span class="assigned">' + escHtml(t.assigned) + '</span>' : '') +
+      (t.pullRequests && t.pullRequests.length > 0 ? renderPRBadges(t.pullRequests) : '') +
     '</div>' +
     (t.description ? '<div class="card-desc' + (expanded ? ' show' : '') + '" data-task-id="' + t.id + '">' + escHtml(t.description) + '</div>' : '') +
   '</div>';
+}
+
+function renderPRBadges(pullRequests) {
+  return pullRequests.map(pr => {
+    let stateIcon, stateClass, statusIcon = '';
+    
+    // State badge
+    switch (pr.state) {
+      case 'open':
+        stateIcon = '🟢';
+        stateClass = 'pr-state-open';
+        break;
+      case 'merged':
+        stateIcon = '🟣';
+        stateClass = 'pr-state-merged';
+        break;
+      case 'closed':
+        stateIcon = '🔴';
+        stateClass = 'pr-state-closed';
+        break;
+      default:
+        stateIcon = '⚪';
+        stateClass = 'pr-state-unknown';
+    }
+    
+    // CI status
+    if (pr.statusCheckState) {
+      switch (pr.statusCheckState) {
+        case 'success':
+          statusIcon = ' ✅';
+          break;
+        case 'failure':
+        case 'error':
+          statusIcon = ' ❌';
+          break;
+        case 'pending':
+          statusIcon = ' ⏳';
+          break;
+      }
+    }
+    
+    return '<span class="pr-badge ' + stateClass + '" ' +
+           'onclick="openPR(\'' + escAttr(pr.url) + '\')" ' +
+           'title="PR #' + pr.number + ': ' + escAttr(pr.title) + ' (' + pr.state + ')">' +
+           stateIcon + statusIcon + '</span>';
+  }).join('');
 }
 
 function toggleDesc(taskId) {
@@ -407,6 +459,75 @@ window.addEventListener('message', (e) => {
     setTimeout(() => openTaskDetail(detailTaskId), 50);
   }
 });
+
+/* Context Menu */
+let contextMenuTaskId = null;
+
+function showContextMenu(event, taskId) {
+  event.stopPropagation();
+  event.preventDefault();
+  
+  // Remove any existing context menu
+  const existingMenu = document.querySelector('.context-menu');
+  if (existingMenu) {
+    existingMenu.remove();
+  }
+  
+  contextMenuTaskId = taskId;
+  const task = findTaskInBoard(taskId);
+  if (!task) return;
+  
+  const menu = document.createElement('div');
+  menu.className = 'context-menu';
+  menu.innerHTML = 
+    '<div class="context-menu-item" onclick="linkPRDialog()">🔗 Link PR</div>' +
+    '<div class="context-menu-item" onclick="refreshSingleTaskPRs()">🔄 Refresh PRs</div>';
+  
+  // Position the menu
+  const rect = event.currentTarget.getBoundingClientRect();
+  menu.style.position = 'fixed';
+  menu.style.top = (rect.bottom + 5) + 'px';
+  menu.style.left = rect.left + 'px';
+  menu.style.zIndex = '1000';
+  
+  document.body.appendChild(menu);
+  
+  // Close menu when clicking elsewhere
+  setTimeout(() => {
+    document.addEventListener('click', closeContextMenu, { once: true });
+  }, 50);
+}
+
+function closeContextMenu() {
+  const menu = document.querySelector('.context-menu');
+  if (menu) {
+    menu.remove();
+  }
+  contextMenuTaskId = null;
+}
+
+function linkPRDialog() {
+  closeContextMenu();
+  
+  const prUrl = prompt('Enter GitHub PR URL:');
+  if (prUrl && prUrl.trim()) {
+    // Add PR URL to task description
+    const task = findTaskInBoard(contextMenuTaskId);
+    if (task) {
+      const newDesc = task.description + '\n\nPR: ' + prUrl.trim();
+      updateField(contextMenuTaskId, 'description', newDesc);
+    }
+  }
+}
+
+function refreshSingleTaskPRs() {
+  closeContextMenu();
+  vscode.postMessage({ type: 'refreshPRs' });
+}
+
+function openPR(prUrl) {
+  vscode.postMessage({ type: 'openPR', prUrl });
+}
 
 function escHtml(s) {
   return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');

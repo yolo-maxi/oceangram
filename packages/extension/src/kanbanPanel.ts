@@ -5,10 +5,12 @@ import {
   writeBoard,
   moveTask,
   createTask,
+  enrichBoardWithPRInfo,
   KanbanBoard,
   KanbanTask,
   ProjectInfo,
 } from './services/kanban';
+import { clearPRCache } from './services/github';
 import { remoteFileExists, watchRemoteFile } from './services/remoteFs';
 
 export class KanbanPanel {
@@ -19,6 +21,8 @@ export class KanbanPanel {
   private currentProject: ProjectInfo | undefined;
   private board: KanbanBoard | undefined;
   private watcher: vscode.FileSystemWatcher | undefined;
+  private prRefreshTimer: NodeJS.Timeout | undefined;
+  private context: vscode.ExtensionContext;
 
   static createOrShow(context: vscode.ExtensionContext) {
     if (KanbanPanel.current) {
@@ -34,11 +38,13 @@ export class KanbanPanel {
 
   private constructor(panel: vscode.WebviewPanel, context: vscode.ExtensionContext) {
     this.panel = panel;
+    this.context = context;
     this.panel.webview.html = this.getHtml();
 
     this.panel.onDidDispose(() => {
       KanbanPanel.current = undefined;
       this.stopWatching();
+      this.stopPRRefreshTimer();
       this.disposables.forEach(d => d.dispose());
     }, null, this.disposables);
 
@@ -121,6 +127,17 @@ export class KanbanPanel {
               }
             }
             break;
+
+          case 'refreshPRs':
+            clearPRCache();
+            await this.loadBoardWithPRInfo();
+            break;
+
+          case 'openPR':
+            if (msg.prUrl) {
+              vscode.env.openExternal(vscode.Uri.parse(msg.prUrl));
+            }
+            break;
         }
       } catch (e: any) {
         this.panel.webview.postMessage({ type: 'error', message: e.message });
@@ -142,14 +159,23 @@ export class KanbanPanel {
     if (!this.currentProject) return;
 
     this.stopWatching();
+    this.stopPRRefreshTimer();
 
     if (await remoteFileExists(this.currentProject.file)) {
-      this.board = await readBoard(this.currentProject.file);
-      this.sendBoard();
+      await this.loadBoardWithPRInfo();
       this.startWatching(this.currentProject.file);
+      this.startPRRefreshTimer();
     } else {
       this.panel.webview.postMessage({ type: 'error', message: `File not found: ${this.currentProject.file}` });
     }
+  }
+
+  private async loadBoardWithPRInfo() {
+    if (!this.currentProject) return;
+    
+    this.board = await readBoard(this.currentProject.file);
+    await enrichBoardWithPRInfo(this.board);
+    this.sendBoard();
   }
 
   private sendBoard() {
@@ -169,8 +195,7 @@ export class KanbanPanel {
         if (this.currentProject) {
           setTimeout(async () => {
             try {
-              this.board = await readBoard(this.currentProject!.file);
-              this.sendBoard();
+              await this.loadBoardWithPRInfo();
             } catch (e) {
               // File might be mid-write
             }
@@ -186,6 +211,27 @@ export class KanbanPanel {
     if (this.watcher) {
       this.watcher.dispose();
       this.watcher = undefined;
+    }
+  }
+
+  private startPRRefreshTimer() {
+    // Auto-refresh PR status every 5 minutes
+    this.prRefreshTimer = setInterval(async () => {
+      if (this.board && this.currentProject) {
+        const oldBoard = JSON.stringify(this.board);
+        await enrichBoardWithPRInfo(this.board);
+        // Only send update if PR info actually changed
+        if (JSON.stringify(this.board) !== oldBoard) {
+          this.sendBoard();
+        }
+      }
+    }, 5 * 60 * 1000); // 5 minutes
+  }
+
+  private stopPRRefreshTimer() {
+    if (this.prRefreshTimer) {
+      clearInterval(this.prRefreshTimer);
+      this.prRefreshTimer = undefined;
     }
   }
 

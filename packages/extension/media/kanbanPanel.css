@@ -412,6 +412,105 @@ body {
   margin-top: 8px;
 }
 
+/* GitHub PR Badges */
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.card-actions {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.card:hover .card-actions {
+  opacity: 1;
+}
+
+.context-menu-btn {
+  background: none;
+  border: none;
+  color: var(--tg-text-secondary);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 2px;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.context-menu-btn:hover {
+  background: var(--tg-border);
+  color: var(--tg-text);
+}
+
+.pr-badge {
+  display: inline-block;
+  font-size: 14px;
+  cursor: pointer;
+  margin-left: 4px;
+  transition: transform 0.2s ease;
+}
+
+.pr-badge:hover {
+  transform: scale(1.1);
+}
+
+.pr-state-open {
+  filter: brightness(1.1);
+}
+
+.pr-state-merged {
+  filter: brightness(1.1);
+}
+
+.pr-state-closed {
+  filter: brightness(0.8);
+}
+
+.pr-state-unknown {
+  filter: brightness(0.6);
+}
+
+/* Context Menu */
+.context-menu {
+  background: var(--tg-bg-secondary);
+  border: 1px solid var(--tg-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  min-width: 150px;
+  z-index: 1000;
+}
+
+.context-menu-item {
+  padding: 8px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: background-color 0.2s ease;
+}
+
+.context-menu-item:hover {
+  background: var(--tg-border);
+  color: var(--tg-accent);
+}
+
+.context-menu-item:first-child {
+  border-top-left-radius: 5px;
+  border-top-right-radius: 5px;
+}
+
+.context-menu-item:last-child {
+  border-bottom-left-radius: 5px;
+  border-bottom-right-radius: 5px;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }

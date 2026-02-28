@@ -1,5 +1,6 @@
 import * as path from 'path';
 import { readRemoteFile, writeRemoteFile, getProjectsJsonPath } from './remoteFs';
+import { extractPRReferences, fetchMultiplePRInfo, PullRequestInfo } from './github';
 
 export interface Subtask {
   text: string;
@@ -16,6 +17,7 @@ export interface KanbanTask {
   description: string;
   created: string;
   subtasks: Subtask[];
+  pullRequests?: PullRequestInfo[];
 }
 
 export interface KanbanColumn {
@@ -359,6 +361,47 @@ export function createTask(
 export async function readBoard(filePath: string): Promise<KanbanBoard> {
   const content = await readRemoteFile(filePath);
   return parseKanbanMarkdown(content);
+}
+
+/**
+ * Enhance board with PR information for all tasks
+ */
+export async function enrichBoardWithPRInfo(board: KanbanBoard): Promise<void> {
+  // Collect all PR URLs from all task descriptions
+  const allPRUrls: string[] = [];
+  const taskPRMapping: Map<string, string[]> = new Map();
+  
+  for (const column of board.columns) {
+    for (const task of column.tasks) {
+      const prRefs = extractPRReferences(task.description);
+      if (prRefs.length > 0) {
+        taskPRMapping.set(task.id, prRefs);
+        allPRUrls.push(...prRefs);
+      }
+    }
+  }
+  
+  if (allPRUrls.length === 0) return;
+  
+  // Fetch PR info for all unique URLs
+  const uniquePRUrls = [...new Set(allPRUrls)];
+  const prInfos = await fetchMultiplePRInfo(uniquePRUrls);
+  
+  // Create URL to PR info mapping
+  const prInfoMap = new Map<string, PullRequestInfo>();
+  prInfos.forEach(pr => prInfoMap.set(pr.url, pr));
+  
+  // Assign PR info to tasks
+  for (const column of board.columns) {
+    for (const task of column.tasks) {
+      const taskPRs = taskPRMapping.get(task.id);
+      if (taskPRs) {
+        task.pullRequests = taskPRs
+          .map(url => prInfoMap.get(url))
+          .filter((pr): pr is PullRequestInfo => pr !== undefined);
+      }
+    }
+  }
 }
 
 /**
