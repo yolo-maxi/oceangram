@@ -196,7 +196,11 @@ function detectMessageContext(text) {
   if (!text) return null;
   var t = text.trim();
   
-  for (var contextType in REPLY_PATTERNS) {
+  // Check patterns in specific order: more specific patterns first
+  var checkOrder = ['request', 'problem', 'status', 'question'];
+  
+  for (var orderIndex = 0; orderIndex < checkOrder.length; orderIndex++) {
+    var contextType = checkOrder[orderIndex];
     var patterns = REPLY_PATTERNS[contextType];
     for (var i = 0; i < patterns.regexes.length; i++) {
       if (patterns.regexes[i].test(t)) {
