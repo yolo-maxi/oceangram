@@ -601,6 +601,15 @@ export class ChatTab {
                     if (hlMsg.senderId && !hlMsg.isOutgoing) {
                       this.fetchAndSendProfilePhotos(tg, [hlMsg]);
                     }
+                    
+                    // TASK-035: Incrementally index new message for semantic search
+                    if (event.message && event.message.text && event.message.text.trim().length > 10) {
+                      try {
+                        await this.semanticSearch.indexMessages([event.message], this.chatId);
+                      } catch (err) {
+                        console.warn('[SemanticSearch] Failed to index new message:', err);
+                      }
+                    }
                     break;
                   case 'editMessage':
                     this.panel.webview.postMessage({ type: 'editMessage', message: await addSyntaxHighlightingSingle(event.message) });
@@ -998,6 +1007,7 @@ export class ChatTab {
               vscode.window.showInformationMessage(`Chat exported to ${uri.fsPath}`);
             }
             break;
+          }
           case 'dismissDigest':
             // Update the last seen timestamp when digest is dismissed
             try {
@@ -1157,6 +1167,12 @@ export class ChatTab {
 </div>
 <div class="search-bar" id="searchBar">
   <input type="text" id="searchInput" placeholder="Search messages…" />
+  <div class="search-toggle-group">
+    <label class="search-toggle-label">
+      <input type="checkbox" id="semanticToggle" title="Enable semantic search" />
+      <span class="search-toggle-text">🧠 Semantic</span>
+    </label>
+  </div>
   <span class="search-count" id="searchCount"></span>
   <button id="searchUp" title="Previous">▲</button>
   <button id="searchDown" title="Next">▼</button>

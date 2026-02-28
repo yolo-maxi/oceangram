@@ -2208,11 +2208,56 @@ function navigateSearch(delta) {
   searchCount.textContent = (searchIdx + 1) + ' / ' + searchMatches.length;
 }
 
+// TASK-035: Semantic Search Variables
+var semanticToggle = document.getElementById('semanticToggle');
+var isSemanticSearchAvailable = false;
+var semanticSearchResults = [];
+
+// Check if semantic search is available
+function checkSemanticSearchAvailability() {
+  vscode.postMessage({ type: 'getSearchIndexStats' });
+}
+
+// Perform semantic search
+function doSemanticSearch(query) {
+  if (!query || query.trim().length < 2) {
+    searchCount.textContent = '';
+    return;
+  }
+  
+  searchCount.textContent = 'Searching...';
+  vscode.postMessage({ 
+    type: 'searchSemantic', 
+    query: query,
+    limit: 50 
+  });
+}
+
+// Handle search input with debouncing
 var searchDebounce;
 searchInput.addEventListener('input', function() {
   clearTimeout(searchDebounce);
-  searchDebounce = setTimeout(doLocalSearch, 150);
+  var query = searchInput.value.trim();
+  
+  if (semanticToggle.checked && isSemanticSearchAvailable) {
+    searchDebounce = setTimeout(function() { doSemanticSearch(query); }, 300);
+  } else {
+    searchDebounce = setTimeout(doLocalSearch, 150);
+  }
 });
+
+// Toggle between semantic and keyword search
+semanticToggle.addEventListener('change', function() {
+  var query = searchInput.value.trim();
+  if (query) {
+    if (semanticToggle.checked && isSemanticSearchAvailable) {
+      doSemanticSearch(query);
+    } else {
+      doLocalSearch();
+    }
+  }
+});
+
 searchInput.addEventListener('keydown', function(e) {
   if (e.key === 'Enter') { e.preventDefault(); navigateSearch(e.shiftKey ? -1 : 1); }
   if (e.key === 'Escape') { e.preventDefault(); closeSearch(); }
