@@ -1497,6 +1497,76 @@ window.addEventListener('message', (event) => {
         scrollToMessageById(msg.messageId);
       }
       break;
+    // TASK-035: Semantic Search Response Handlers
+    case 'searchIndexStats':
+      isSemanticSearchAvailable = msg.stats.isAvailable;
+      if (!isSemanticSearchAvailable) {
+        semanticToggle.disabled = true;
+        semanticToggle.parentElement.innerHTML = `
+          <button class="index-button" onclick="indexMessagesManually()" title="Index this chat for semantic search">
+            🧠 Index Chat
+          </button>
+        `;
+      } else {
+        semanticToggle.disabled = false;
+        semanticToggle.parentElement.innerHTML = `
+          <input type="checkbox" id="semanticToggle" title="Enable semantic search" />
+          <span class="search-toggle-text">🧠 Semantic</span>
+        `;
+        // Re-assign the toggle reference since we recreated the element
+        semanticToggle = document.getElementById('semanticToggle');
+        semanticToggle.addEventListener('change', function() {
+          var query = searchInput.value.trim();
+          if (query) {
+            if (semanticToggle.checked && isSemanticSearchAvailable) {
+              doSemanticSearch(query);
+            } else {
+              doLocalSearch();
+            }
+          }
+        });
+        semanticToggle.parentElement.title = `${msg.stats.dialogCount} messages indexed`;
+      }
+      break;
+    case 'autoIndexingComplete':
+      if (msg.messageCount > 0) {
+        isSemanticSearchAvailable = true;
+        semanticToggle.disabled = false;
+        semanticToggle.parentElement.title = `${msg.messageCount} messages indexed for semantic search`;
+        // Show a brief notification
+        searchCount.textContent = `🧠 Indexed ${msg.messageCount} messages`;
+        setTimeout(() => {
+          if (searchCount.textContent.includes('🧠 Indexed')) {
+            searchCount.textContent = '';
+          }
+        }, 3000);
+      }
+      break;
+    case 'indexingComplete':
+      if (msg.stats && msg.stats.totalMessages > 0) {
+        isSemanticSearchAvailable = true;
+        semanticToggle.disabled = false;
+        semanticToggle.parentElement.title = `${msg.stats.totalMessages} messages indexed`;
+        searchCount.textContent = `✅ Indexed ${msg.stats.totalMessages} messages`;
+        setTimeout(() => {
+          if (searchCount.textContent.includes('✅ Indexed')) {
+            searchCount.textContent = '';
+          }
+        }, 3000);
+      }
+      break;
+    case 'semanticSearchResults':
+      handleSemanticSearchResults(msg.messages, msg.query);
+      break;
+    case 'indexingError':
+    case 'semanticSearchError':
+      searchCount.textContent = '❌ Search failed';
+      setTimeout(() => {
+        if (searchCount.textContent.includes('❌ Search failed')) {
+          searchCount.textContent = '';
+        }
+      }, 3000);
+      break;
   }
 });
 
@@ -2218,6 +2288,17 @@ function checkSemanticSearchAvailability() {
   vscode.postMessage({ type: 'getSearchIndexStats' });
 }
 
+// Manually index messages for semantic search
+function indexMessagesManually() {
+  if (isSemanticSearchAvailable) return;
+  
+  semanticToggle.parentElement.innerHTML = '<span class="search-toggle-text">🧠 Indexing...</span>';
+  vscode.postMessage({ 
+    type: 'indexMessagesForSearch',
+    limit: 1000 
+  });
+}
+
 // Perform semantic search
 function doSemanticSearch(query) {
   if (!query || query.trim().length < 2) {
@@ -2265,6 +2346,53 @@ searchInput.addEventListener('keydown', function(e) {
 document.getElementById('searchUp').addEventListener('click', function() { navigateSearch(-1); });
 document.getElementById('searchDown').addEventListener('click', function() { navigateSearch(1); });
 document.getElementById('searchClose').addEventListener('click', closeSearch);
+
+// TASK-035: Handle semantic search results
+function handleSemanticSearchResults(messages, query) {
+  clearSearchHighlights();
+  searchMatches = [];
+  searchIdx = -1;
+  
+  if (!messages || messages.length === 0) {
+    searchCount.textContent = 'No results';
+    return;
+  }
+  
+  // Create virtual search highlights for semantic results
+  for (var i = 0; i < messages.length; i++) {
+    var msg = messages[i];
+    var msgEl = document.querySelector('.msg[data-msg-id="' + msg.id + '"]');
+    
+    if (msgEl) {
+      var bubble = msgEl.querySelector('.msg-bubble');
+      if (bubble) {
+        bubble.classList.add('search-highlight', 'semantic-result');
+        
+        // Add semantic score indicator
+        var scoreEl = bubble.querySelector('.semantic-score');
+        if (scoreEl) scoreEl.remove();
+        
+        if (msg.semanticScore) {
+          var scoreIndicator = document.createElement('div');
+          scoreIndicator.className = 'semantic-score';
+          scoreIndicator.textContent = `${Math.round(msg.semanticScore * 100)}% match`;
+          scoreIndicator.title = `Semantic relevance: ${msg.semanticScore.toFixed(3)}`;
+          bubble.appendChild(scoreIndicator);
+        }
+        
+        searchMatches.push(bubble);
+      }
+    }
+  }
+  
+  if (searchMatches.length > 0) {
+    searchIdx = 0;
+    searchMatches[0].classList.add('search-current');
+    searchMatches[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  
+  searchCount.textContent = searchMatches.length + ' semantic match' + (searchMatches.length === 1 ? '' : 'es');
+}
 
 document.addEventListener('keydown', function(e) {
   if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
@@ -3143,3 +3271,8 @@ if (digestClose) {
 
 // Initialize: request messages from extension
 vscode.postMessage({ type: 'init' });
+
+// TASK-035: Initialize semantic search availability check
+setTimeout(function() {
+  checkSemanticSearchAvailability();
+}, 1000);

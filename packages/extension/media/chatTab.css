@@ -2337,8 +2337,94 @@ body {
   line-height: 1;
 }
 .search-bar button:hover { color: var(--tg-text); background: rgba(255,255,255,0.06); }
+
+/* TASK-035: Semantic Search Toggle */
+.search-toggle-group {
+  display: flex;
+  align-items: center;
+  margin-right: 8px;
+}
+.search-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--tg-text-secondary);
+  user-select: none;
+  padding: 4px 8px;
+  border-radius: 12px;
+  transition: all 0.2s;
+}
+.search-toggle-label:hover {
+  background: rgba(255,255,255,0.06);
+}
+.search-toggle-label input[type="checkbox"] {
+  margin: 0;
+  width: 14px;
+  height: 14px;
+  accent-color: var(--tg-accent);
+}
+.search-toggle-label input[type="checkbox"]:disabled {
+  opacity: 0.5;
+}
+.search-toggle-label:has(input:checked) {
+  background: rgba(106, 178, 242, 0.15);
+  color: var(--tg-accent);
+}
+.search-toggle-text {
+  font-weight: 500;
+}
+
+/* Index button for non-indexed chats */
+.index-button {
+  background: var(--tg-accent);
+  color: white;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.index-button:hover {
+  background: #5a9de8;
+}
+.index-button:disabled {
+  background: var(--tg-text-secondary);
+  cursor: not-allowed;
+}
+
+/* Semantic search results styling */
 .msg-bubble.search-highlight { box-shadow: 0 0 0 2px var(--tg-accent); }
 .msg-bubble.search-current { box-shadow: 0 0 0 2px #e5c07b; background: rgba(229,192,123,0.12); }
+.msg-bubble.semantic-result {
+  box-shadow: 0 0 0 2px #c678dd;
+  position: relative;
+}
+.msg-bubble.semantic-result.search-current {
+  box-shadow: 0 0 0 2px #e5c07b;
+  background: rgba(229,192,123,0.12);
+}
+.semantic-score {
+  position: absolute;
+  top: -8px;
+  right: 8px;
+  background: #c678dd;
+  color: white;
+  font-size: 10px;
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 8px;
+  line-height: 1;
+  pointer-events: none;
+  z-index: 10;
+}
+.msg-bubble.search-current .semantic-score {
+  background: #e5c07b;
+  color: #000;
+}
 
 /* Floating date header */
 .floating-date {
