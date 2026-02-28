@@ -983,6 +983,50 @@ body {
 .approval-btn.reject { background: #e05d5d; }
 .approval-btn.chosen { opacity: 1 !important; outline: 2px solid var(--tg-accent); }
 
+/* TASK-170: Reply suggestions */
+.reply-suggestions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 2px 0;
+  opacity: 1;
+  transition: opacity 0.3s ease;
+  animation: replySlideIn 0.3s ease-out;
+}
+.reply-suggestion-btn {
+  padding: 4px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: var(--tg-composer-input-bg);
+  font-size: 12px;
+  color: var(--tg-text);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.reply-suggestion-btn:hover {
+  background: var(--tg-accent);
+  color: #fff;
+  border-color: var(--tg-accent);
+  transform: translateY(-1px);
+}
+.reply-suggestion-btn:active {
+  transform: translateY(0);
+}
+
+@keyframes replySlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* New messages indicator */
 .new-msgs-btn {
   position: sticky;
@@ -2567,4 +2611,130 @@ body {
   content: '📄 ';
   font-size: 0.85em;
   font-style: normal;
+}
+
+/* Context pack styles */
+.context-pack-container {
+  background: var(--tg-bg-secondary);
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  flex-shrink: 0;
+  animation: slideDown 0.2s ease-out;
+}
+
+.context-pack-header {
+  display: flex;
+  align-items: center;
+  padding: 8px 16px;
+  gap: 8px;
+}
+
+.context-pack-icon {
+  font-size: 16px;
+}
+
+.context-pack-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--tg-text-secondary);
+  flex: 1;
+}
+
+.context-pack-attach-all {
+  background: var(--tg-accent);
+  color: white;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.context-pack-attach-all:hover {
+  background: #5a9ad9;
+}
+
+.context-pack-close {
+  background: none;
+  border: none;
+  color: var(--tg-text-secondary);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  font-size: 14px;
+  line-height: 1;
+  transition: background 0.2s;
+}
+
+.context-pack-close:hover {
+  background: rgba(255,255,255,0.05);
+}
+
+.context-pack-chips {
+  padding: 0 16px 8px 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.context-chip {
+  display: inline-flex;
+  align-items: center;
+  background: var(--tg-composer-input-bg);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 16px;
+  padding: 4px 8px;
+  gap: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 12px;
+  max-width: 200px;
+}
+
+.context-chip:hover {
+  background: rgba(106, 178, 242, 0.15);
+  border-color: var(--tg-accent);
+}
+
+.context-chip.selected {
+  background: var(--tg-accent);
+  color: white;
+  border-color: var(--tg-accent);
+}
+
+.context-chip-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.context-chip-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+
+.context-chip-reason {
+  font-size: 10px;
+  color: var(--tg-text-secondary);
+  background: rgba(0,0,0,0.2);
+  border-radius: 8px;
+  padding: 1px 4px;
+  white-space: nowrap;
+}
+
+.context-chip.selected .context-chip-reason {
+  color: rgba(255,255,255,0.8);
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

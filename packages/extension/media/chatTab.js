@@ -152,6 +152,27 @@ function isEmojiOnly(text) {
 // TASK-040: Approval-seeking pattern detection (inline in webview)
 var _approvalVerbs = /\\b(deploy|send|delete|merge|restart|proceed|continue|execute|publish|push|remove|update|install|upgrade|migrate|rollback|revert|release|start|stop|kill|drop|overwrite|replace)\\b/i;
 var _approvalPatterns = /\\b(should i|want me to|shall i|do you want me to|ready to|go ahead and)\\b/i;
+
+// TASK-170: Reply suggestion patterns for context detection
+var _replyTimeouts = new Map(); // Track suggestion timeouts per message
+var REPLY_PATTERNS = {
+  question: {
+    regexes: [/\\?$/, /\\b(what|how|when|where|why|which|who)\\b/i, /\\b(can you|could you|would you)\\b/i],
+    suggestions: ["Can you explain more?", "What's the priority?", "Let me check on that"]
+  },
+  request: {
+    regexes: [/\\b(please|can you|could you|would you please)\\b/i, /\\b(need|want|require)\\b.*\\b(you to|your help)\\b/i],
+    suggestions: ["Got it, working on it", "On it!", "I'll handle this"]
+  },
+  status: {
+    regexes: [/\\b(done|finished|completed|ready|deployed|fixed|updated)\\b/i, /\\b(is|has been|was)\\b.*\\b(completed|finished|done|fixed|ready)\\b/i],
+    suggestions: ["Looks good, go ahead", "Thanks for the update", "Approved, ship it"]
+  },
+  problem: {
+    regexes: [/\\b(error|failed|issue|problem|broken|bug)\\b/i, /\\b(not working|doesn't work|won't work)\\b/i],
+    suggestions: ["Hold on, let's discuss", "Not yet, needs changes", "Let me investigate"]
+  }
+};
 function isApprovalSeeking(text) {
   if (!text) return false;
   var t = text.trim();
@@ -168,6 +189,47 @@ function handleApproval(btn, action, msgId) {
   // Inject into input and trigger send
   msgInput.value = responseText;
   doSend();
+}
+
+// TASK-170: Reply suggestions for agent-assisted replies
+function detectMessageContext(text) {
+  if (!text) return null;
+  var t = text.trim();
+  
+  for (var contextType in REPLY_PATTERNS) {
+    var patterns = REPLY_PATTERNS[contextType];
+    for (var i = 0; i < patterns.regexes.length; i++) {
+      if (patterns.regexes[i].test(t)) {
+        return {
+          type: contextType,
+          suggestions: patterns.suggestions
+        };
+      }
+    }
+  }
+  
+  // Default fallback suggestions for any incoming message
+  return {
+    type: 'general',
+    suggestions: ["Got it", "Thanks", "Understood"]
+  };
+}
+
+function handleReplySuggestion(btn, msgId) {
+  var replyText = btn.textContent.trim();
+  msgInput.value = replyText;
+  doSend();
+  
+  // Hide the reply suggestions container after sending
+  var container = btn.closest('.reply-suggestions');
+  if (container) {
+    container.style.opacity = '0';
+    setTimeout(function() {
+      if (container.parentNode) {
+        container.parentNode.removeChild(container);
+      }
+    }, 300);
+  }
 }
 
 // TASK-037: Tool execution viewer - parse tool calls from message text
@@ -506,6 +568,22 @@ function renderMessages(msgs) {
           '</div>';
       }
 
+      // TASK-170: Reply suggestions for agent-assisted replies
+      var replySuggestionsHtml = '';
+      if (!g.isOutgoing && isLast && m.text && !isApprovalSeeking(m.text)) {
+        var context = detectMessageContext(m.text);
+        if (context && context.suggestions.length > 0) {
+          replySuggestionsHtml = '<div class="reply-suggestions" data-msg-id="' + m.id + '">';
+          // Take up to 3 suggestions
+          var suggestionsToShow = context.suggestions.slice(0, 3);
+          for (var si = 0; si < suggestionsToShow.length; si++) {
+            var suggestion = esc(suggestionsToShow[si]);
+            replySuggestionsHtml += '<button class="reply-suggestion-btn" onclick="handleReplySuggestion(this, ' + m.id + ')">' + suggestion + '</button>';
+          }
+          replySuggestionsHtml += '</div>';
+        }
+      }
+
       // TASK-037: Tool execution timeline for messages with tool calls
       var toolTimelineHtml = '';
       if (!g.isOutgoing && m.text) {
@@ -520,6 +598,7 @@ function renderMessages(msgs) {
         toolTimelineHtml +
         reactionsHtml +
         approvalHtml +
+        replySuggestionsHtml +
         '</div>';
     }
     if (!g.isOutgoing) {
@@ -532,6 +611,13 @@ function renderMessages(msgs) {
   var prevLen = allMessages ? allMessages.length : 0;
   var isFirstRender = messagesList.querySelector('.empty-state') !== null || messagesList.querySelector('.loading') !== null;
   var shouldScroll = isFirstRender || (messagesList.scrollHeight - messagesList.scrollTop - messagesList.clientHeight < 60);
+  
+  // TASK-170: Clear any existing reply suggestion timeouts
+  _replyTimeouts.forEach(function(timeoutId) {
+    clearTimeout(timeoutId);
+  });
+  _replyTimeouts.clear();
+  
   messagesList.innerHTML = html;
   if (shouldScroll) {
     // Use setTimeout to ensure DOM has fully updated before scrolling
@@ -542,6 +628,27 @@ function renderMessages(msgs) {
   if (msgs.length > 0) {
     lastMsgId = msgs[msgs.length - 1].id || 0;
   }
+  
+  // TASK-170: Auto-dismiss reply suggestions after 30 seconds
+  var suggestions = document.querySelectorAll('.reply-suggestions');
+  suggestions.forEach(function(suggestion) {
+    var msgId = suggestion.getAttribute('data-msg-id');
+    if (msgId) {
+      var timeoutId = setTimeout(function() {
+        if (suggestion.parentNode) {
+          suggestion.style.opacity = '0';
+          setTimeout(function() {
+            if (suggestion.parentNode) {
+              suggestion.parentNode.removeChild(suggestion);
+            }
+          }, 300);
+        }
+        _replyTimeouts.delete(msgId);
+      }, 30000);
+      _replyTimeouts.set(msgId, timeoutId);
+    }
+  });
+  
   startPolling();
 }
 
@@ -3276,3 +3383,200 @@ vscode.postMessage({ type: 'init' });
 setTimeout(function() {
   checkSemanticSearchAvailability();
 }, 1000);
+
+// TASK-173: Context Pack functionality
+var contextPackContainer = document.getElementById('contextPackContainer');
+var contextPackChips = document.getElementById('contextPackChips');
+var contextPackAttachAll = document.getElementById('contextPackAttachAll');
+var contextPackClose = document.getElementById('contextPackClose');
+
+var currentContextPack = null;
+var selectedContextFiles = new Set();
+
+// Handle context pack updates from extension
+window.addEventListener('message', function(event) {
+  if (event.data.type === 'contextPackUpdate') {
+    handleContextPackUpdate(event.data.pack);
+  } else if (event.data.type === 'contextPack') {
+    handleContextPackUpdate(event.data.pack);
+  } else if (event.data.type === 'contextFilesAttached') {
+    handleContextFilesAttached(event.data.files);
+  } else if (event.data.type === 'contextFilesError') {
+    showError('Failed to attach context files: ' + event.data.error);
+  }
+});
+
+function handleContextPackUpdate(pack) {
+  currentContextPack = pack;
+  
+  if (!pack || pack.files.length === 0) {
+    hideContextPack();
+    return;
+  }
+  
+  showContextPack(pack);
+}
+
+function showContextPack(pack) {
+  if (!contextPackContainer || !contextPackChips) return;
+  
+  // Clear existing chips
+  contextPackChips.innerHTML = '';
+  selectedContextFiles.clear();
+  
+  // Create chips for each file
+  pack.files.forEach(function(file) {
+    var chip = createContextChip(file);
+    contextPackChips.appendChild(chip);
+  });
+  
+  // Show the container
+  contextPackContainer.style.display = 'block';
+}
+
+function hideContextPack() {
+  if (contextPackContainer) {
+    contextPackContainer.style.display = 'none';
+  }
+  selectedContextFiles.clear();
+}
+
+function createContextChip(file) {
+  var chip = document.createElement('div');
+  chip.className = 'context-chip';
+  chip.dataset.fileId = file.id;
+  
+  var icon = document.createElement('span');
+  icon.className = 'context-chip-icon';
+  icon.textContent = file.icon;
+  
+  var name = document.createElement('span');
+  name.className = 'context-chip-name';
+  name.textContent = file.name;
+  
+  var reason = document.createElement('span');
+  reason.className = 'context-chip-reason';
+  reason.textContent = getReasonLabel(file.reason);
+  
+  chip.appendChild(icon);
+  chip.appendChild(name);
+  chip.appendChild(reason);
+  
+  chip.addEventListener('click', function() {
+    toggleContextFile(file.id, chip);
+  });
+  
+  return chip;
+}
+
+function getReasonLabel(reason) {
+  switch (reason) {
+    case 'open-editor': return 'open';
+    case 'recent-change': return 'git';
+    case 'terminal-error': return 'error';
+    case 'dependency': return 'dep';
+    default: return 'rel';
+  }
+}
+
+function toggleContextFile(fileId, chipEl) {
+  if (selectedContextFiles.has(fileId)) {
+    selectedContextFiles.delete(fileId);
+    chipEl.classList.remove('selected');
+  } else {
+    selectedContextFiles.add(fileId);
+    chipEl.classList.add('selected');
+  }
+  
+  updateAttachAllButton();
+}
+
+function updateAttachAllButton() {
+  if (!contextPackAttachAll) return;
+  
+  var selectedCount = selectedContextFiles.size;
+  var totalCount = currentContextPack ? currentContextPack.files.length : 0;
+  
+  if (selectedCount === 0) {
+    contextPackAttachAll.textContent = 'Attach all';
+  } else if (selectedCount === totalCount) {
+    contextPackAttachAll.textContent = 'Attached (' + selectedCount + ')';
+  } else {
+    contextPackAttachAll.textContent = 'Attach (' + selectedCount + ')';
+  }
+}
+
+function attachSelectedFiles() {
+  if (!currentContextPack) return;
+  
+  var fileIds = selectedContextFiles.size > 0 
+    ? Array.from(selectedContextFiles)
+    : currentContextPack.files.map(function(f) { return f.id; });
+  
+  vscode.postMessage({
+    type: 'attachContextFiles',
+    fileIds: fileIds
+  });
+}
+
+function handleContextFilesAttached(files) {
+  // Add context files to the message input
+  var input = document.getElementById('msgInput');
+  if (!input) return;
+  
+  var contextText = '\n\n## Context Files\n\n';
+  
+  Object.keys(files).forEach(function(filePath) {
+    var content = files[filePath];
+    var extension = filePath.split('.').pop();
+    
+    contextText += '### ' + filePath + '\n\n';
+    contextText += '```' + extension + '\n';
+    contextText += content + '\n';
+    contextText += '```\n\n';
+  });
+  
+  // Append to current input value
+  var currentValue = input.value;
+  input.value = currentValue + contextText;
+  
+  // Hide context pack
+  hideContextPack();
+  
+  // Focus input and resize
+  input.focus();
+  autoResizeTextarea(input);
+  
+  // Scroll to bottom to show new content
+  input.scrollTop = input.scrollHeight;
+  
+  showSuccess('Attached ' + Object.keys(files).length + ' context file(s)');
+}
+
+function showSuccess(message) {
+  // Simple success notification
+  var notification = document.createElement('div');
+  notification.className = 'context-notification success';
+  notification.textContent = '✓ ' + message;
+  notification.style.cssText = 'position:fixed;top:20px;right:20px;background:#4caf50;color:white;padding:8px 16px;border-radius:4px;z-index:9999;font-size:13px;';
+  
+  document.body.appendChild(notification);
+  
+  setTimeout(function() {
+    notification.remove();
+  }, 3000);
+}
+
+// Wire up event listeners
+if (contextPackAttachAll) {
+  contextPackAttachAll.addEventListener('click', attachSelectedFiles);
+}
+
+if (contextPackClose) {
+  contextPackClose.addEventListener('click', hideContextPack);
+}
+
+// Request initial context pack
+setTimeout(function() {
+  vscode.postMessage({ type: 'getContextPack' });
+}, 2000);

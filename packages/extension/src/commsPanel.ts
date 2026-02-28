@@ -9,6 +9,7 @@ import { showSmartNotification } from './services/notifications';
 import { ChatsTreeProvider } from './chatsTreeProvider';
 import { SemanticSearchService } from './services/semanticSearch';
 import { generateSessionDigest, SessionDigest, DigestItem, formatTimestamp } from './services/sessionDigest';
+import { ContextPacksService, ContextPack, ContextFile } from './services/contextPacks';
 
 /** Union type for either direct gramjs or daemon API client */
 type TelegramBackend = TelegramService | TelegramApiClient;
@@ -445,6 +446,7 @@ export class ChatTab {
   private unreadCount: number = 0;
   private isActive: boolean = true;
   private semanticSearch: SemanticSearchService;
+  private contextPacks: ContextPacksService;
 
   static createOrShow(chatId: string, chatName: string, context: vscode.ExtensionContext) {
     console.log('[Oceangram] ChatTab.createOrShow:', chatId, chatName, 'existing:', ChatTab.tabs.has(chatId));
@@ -476,6 +478,7 @@ export class ChatTab {
     this.chatName = chatName;
     this.context = context;
     this.semanticSearch = new SemanticSearchService(context);
+    this.contextPacks = new ContextPacksService();
     // NOTE: webview.html is set AFTER onDidReceiveMessage is registered (end of constructor)
     // to prevent the webview's 'init' message from firing before the listener exists.
 
@@ -517,11 +520,18 @@ export class ChatTab {
       this.panel.webview.postMessage({ type: 'userStatus', userId, status });
     });
 
+    // Subscribe to context pack updates
+    const unsubContextPacks = this.contextPacks.onPackUpdate((pack) => {
+      this.panel.webview.postMessage({ type: 'contextPackUpdate', pack });
+    });
+
     this.panel.onDidDispose(() => {
       ChatTab.tabs.delete(this.chatId);
       if (this.unsubscribeEvents) this.unsubscribeEvents();
       unsubConnState();
       unsubUserStatus();
+      unsubContextPacks();
+      this.contextPacks.dispose();
       if (isAgentEnabled()) {
         const { chatId: rawChatId, topicId } = TelegramService.parseDialogId(this.chatId);
         getOpenClaw().stopPolling(rawChatId, topicId);
@@ -1021,6 +1031,43 @@ export class ChatTab {
             // Handle digest item clicks (for future implementation of scrolling to messages)
             this.handleDigestItemClick(msg.messageId);
             break;
+          case 'getContextPack':
+            // Get current context pack
+            const currentPack = this.contextPacks.getCurrentPack();
+            this.panel.webview.postMessage({ type: 'contextPack', pack: currentPack });
+            break;
+          case 'loadFileContent':
+            // Load content for a specific context file
+            try {
+              const file: ContextFile = msg.file;
+              const content = await this.contextPacks.loadFileContent(file);
+              this.panel.webview.postMessage({ type: 'fileContent', fileId: file.id, content });
+            } catch (err: any) {
+              this.panel.webview.postMessage({ type: 'fileContentError', fileId: msg.file?.id, error: err.message || 'Failed to load file' });
+            }
+            break;
+          case 'attachContextFiles':
+            // Attach selected context files to the next message
+            try {
+              const fileIds: string[] = msg.fileIds || [];
+              const currentPack = this.contextPacks.getCurrentPack();
+              if (!currentPack) {
+                break;
+              }
+              
+              const selectedFiles = currentPack.files.filter(f => fileIds.includes(f.id));
+              const fileContents: { [key: string]: string } = {};
+              
+              for (const file of selectedFiles) {
+                const content = await this.contextPacks.loadFileContent(file);
+                fileContents[file.path] = content;
+              }
+              
+              this.panel.webview.postMessage({ type: 'contextFilesAttached', files: fileContents });
+            } catch (err: any) {
+              this.panel.webview.postMessage({ type: 'contextFilesError', error: err.message || 'Failed to attach files' });
+            }
+            break;
         }
       } catch (err: any) {
         this.panel.webview.postMessage({ type: 'error', message: err.message || 'Unknown error' });
@@ -1248,6 +1295,18 @@ export class ChatTab {
     <button class="voice-preview-send" id="voicePreviewSend" title="Send voice message">
       <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
     </button>
+  </div>
+  <!-- Context pack suggestion area -->
+  <div class="context-pack-container" id="contextPackContainer" style="display:none">
+    <div class="context-pack-header">
+      <span class="context-pack-icon">📎</span>
+      <span class="context-pack-title">Relevant files</span>
+      <button class="context-pack-attach-all" id="contextPackAttachAll" title="Attach all files">Attach all</button>
+      <button class="context-pack-close" id="contextPackClose" title="Dismiss">✕</button>
+    </div>
+    <div class="context-pack-chips" id="contextPackChips">
+      <!-- Dynamically populated with context file chips -->
+    </div>
   </div>
   <div class="composer">
     <textarea id="msgInput" rows="1" placeholder="Message ${name}…" autofocus></textarea>
