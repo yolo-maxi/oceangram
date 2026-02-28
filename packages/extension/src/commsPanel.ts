@@ -7,6 +7,8 @@ import { ToolCall, getToolIcon, truncateParams, formatDuration, groupToolCallsBy
 import { highlightMessageCodeBlocks, disposeHighlighter } from './services/highlighter';
 import { showSmartNotification } from './services/notifications';
 import { ChatsTreeProvider } from './chatsTreeProvider';
+import { SemanticSearchService } from './services/semanticSearch';
+import { generateSessionDigest, SessionDigest, DigestItem, formatTimestamp } from './services/sessionDigest';
 
 /** Union type for either direct gramjs or daemon API client */
 type TelegramBackend = TelegramService | TelegramApiClient;
@@ -442,6 +444,7 @@ export class ChatTab {
   private unsubscribeEvents?: () => void;
   private unreadCount: number = 0;
   private isActive: boolean = true;
+  private semanticSearch: SemanticSearchService;
 
   static createOrShow(chatId: string, chatName: string, context: vscode.ExtensionContext) {
     console.log('[Oceangram] ChatTab.createOrShow:', chatId, chatName, 'existing:', ChatTab.tabs.has(chatId));
@@ -472,6 +475,7 @@ export class ChatTab {
     this.chatId = chatId;
     this.chatName = chatName;
     this.context = context;
+    this.semanticSearch = new SemanticSearchService(context);
     // NOTE: webview.html is set AFTER onDidReceiveMessage is registered (end of constructor)
     // to prevent the webview's 'init' message from firing before the listener exists.
 
@@ -636,6 +640,30 @@ export class ChatTab {
                 }
               });
             }
+            
+            // TASK-035: Auto-index messages for semantic search if this is a pinned chat
+            const pinnedIds = tg.getPinnedIds();
+            if (pinnedIds.includes(this.chatId)) {
+              // Asynchronously index this chat for semantic search
+              setTimeout(async () => {
+                try {
+                  console.log(`[SemanticSearch] Auto-indexing pinned chat: ${this.chatName}`);
+                  const allMessages = await tg.getMessages(this.chatId, 1000); // Index up to 1000 recent messages
+                  await this.semanticSearch.indexMessages(allMessages, this.chatId);
+                  
+                  // Notify frontend that indexing is complete
+                  const stats = await this.semanticSearch.getIndexStats();
+                  this.panel.webview.postMessage({ 
+                    type: 'autoIndexingComplete', 
+                    dialogId: this.chatId,
+                    messageCount: stats.dialogCounts[this.chatId] || 0
+                  });
+                } catch (err) {
+                  console.warn(`[SemanticSearch] Failed to auto-index chat ${this.chatName}:`, err);
+                }
+              }, 2000); // Wait 2 seconds after init to avoid blocking
+            }
+            
             break;
           case 'sendMessage':
             await tg.connect();
@@ -768,6 +796,84 @@ export class ChatTab {
             const searchResults = await addSyntaxHighlighting(await tg.searchMessages(this.chatId, msg.query, msg.limit || 20));
             this.panel.webview.postMessage({ type: 'searchResults', messages: searchResults });
             break;
+          case 'indexMessagesForSearch':
+            // Index messages from this chat for semantic search
+            try {
+              await tg.connect();
+              const messages = await tg.getMessages(this.chatId, msg.limit || 1000);
+              await this.semanticSearch.indexMessages(messages, this.chatId);
+              const stats = await this.semanticSearch.getIndexStats();
+              this.panel.webview.postMessage({ 
+                type: 'indexingComplete', 
+                dialogId: this.chatId,
+                stats: {
+                  totalMessages: stats.dialogCounts[this.chatId] || 0,
+                  totalDocuments: stats.totalDocuments,
+                  totalTerms: stats.totalTerms
+                }
+              });
+            } catch (indexErr: any) {
+              this.panel.webview.postMessage({ 
+                type: 'indexingError', 
+                error: indexErr.message || 'Indexing failed' 
+              });
+            }
+            break;
+          case 'searchSemantic':
+            // Perform semantic search
+            try {
+              const semanticResults = await this.semanticSearch.searchSemantic(
+                msg.query, 
+                this.chatId, 
+                msg.limit || 20
+              );
+              
+              // Convert search results to MessageInfo format for display
+              const messages = semanticResults.map(result => ({
+                id: result.document.id.split(':')[1], // Extract message ID
+                text: result.document.text,
+                timestamp: result.document.timestamp,
+                senderName: result.document.senderName,
+                isOutgoing: false,
+                entities: [],
+                // Add semantic search metadata
+                semanticScore: result.score,
+                matchedTerms: result.matchedTerms
+              }));
+              
+              const highlightedMessages = await addSyntaxHighlighting(messages);
+              this.panel.webview.postMessage({ 
+                type: 'semanticSearchResults', 
+                messages: highlightedMessages,
+                query: msg.query
+              });
+            } catch (semanticErr: any) {
+              this.panel.webview.postMessage({ 
+                type: 'semanticSearchError', 
+                error: semanticErr.message || 'Semantic search failed' 
+              });
+            }
+            break;
+          case 'getSearchIndexStats':
+            // Get indexing statistics
+            try {
+              const stats = await this.semanticSearch.getIndexStats();
+              const isAvailable = await this.semanticSearch.isIndexAvailable();
+              this.panel.webview.postMessage({ 
+                type: 'searchIndexStats', 
+                stats: {
+                  ...stats,
+                  isAvailable,
+                  dialogCount: stats.dialogCounts[this.chatId] || 0
+                }
+              });
+            } catch (statsErr: any) {
+              this.panel.webview.postMessage({ 
+                type: 'searchIndexStatsError', 
+                error: statsErr.message || 'Failed to get index stats' 
+              });
+            }
+            break;
           case 'deleteMessage':
             await tg.connect();
             try {
@@ -892,7 +998,19 @@ export class ChatTab {
               vscode.window.showInformationMessage(`Chat exported to ${uri.fsPath}`);
             }
             break;
-          }
+          case 'dismissDigest':
+            // Update the last seen timestamp when digest is dismissed
+            try {
+              const lastSeenKey = `oceangram.digest.lastSeen.${this.chatId}`;
+              await this.context.globalState.update(lastSeenKey, Date.now());
+            } catch (error) {
+              console.error('Error dismissing digest:', error);
+            }
+            break;
+          case 'digestItemClick':
+            // Handle digest item clicks (for future implementation of scrolling to messages)
+            this.handleDigestItemClick(msg.messageId);
+            break;
         }
       } catch (err: any) {
         this.panel.webview.postMessage({ type: 'error', message: err.message || 'Unknown error' });
@@ -901,6 +1019,9 @@ export class ChatTab {
 
     // Set HTML LAST — webview sends 'init' on load, listener must exist first
     this.panel.webview.html = this.getHtml();
+    
+    // Initialize digest tracking
+    this.initializeDigest();
   }
 
   /**
@@ -1020,6 +1141,20 @@ export class ChatTab {
   <span class="pin-count" id="pinnedCount"></span>
   <button class="pin-close" id="pinnedClose" title="Dismiss">✕</button>
 </div>
+<!-- Session digest banner -->
+<div class="digest-banner" id="digestBanner" style="display:none">
+  <div class="digest-header">
+    <span class="digest-icon">📋</span>
+    <span class="digest-title">What happened while I were gone?</span>
+    <button class="digest-close" id="digestClose" title="Dismiss">✕</button>
+  </div>
+  <div class="digest-content" id="digestContent">
+    <!-- Dynamically populated -->
+  </div>
+  <div class="digest-footer">
+    <span class="digest-meta" id="digestMeta"></span>
+  </div>
+</div>
 <div class="search-bar" id="searchBar">
   <input type="text" id="searchInput" placeholder="Search messages…" />
   <span class="search-count" id="searchCount"></span>
@@ -1114,5 +1249,59 @@ export class ChatTab {
 <script src="${jsUri}"></script>
 </body>
 </html>`;
+  }
+
+  /**
+   * Initialize session digest functionality
+   */
+  private initializeDigest(): void {
+    // Check if agent features are enabled
+    if (!isAgentEnabled()) {
+      return;
+    }
+    
+    // Check for inactivity and show digest if needed
+    this.checkAndShowDigest();
+  }
+
+  /**
+   * Check if digest should be shown based on last panel close time
+   */
+  private async checkAndShowDigest(): Promise<void> {
+    try {
+      const lastSeenKey = `oceangram.digest.lastSeen.${this.chatId}`;
+      const lastSeen = this.context.globalState.get<number>(lastSeenKey, 0);
+      const now = Date.now();
+      const thirtyMinutesAgo = now - (30 * 60 * 1000);
+
+      // Only show digest if it's been more than 30 minutes since last seen
+      if (lastSeen > 0 && lastSeen < thirtyMinutesAgo) {
+        const digest = generateSessionDigest(lastSeen);
+        
+        if (digest.hasActivity) {
+          // Send digest data to webview
+          this.panel.webview.postMessage({
+            type: 'showDigest',
+            digest
+          });
+        }
+      }
+
+      // Update last seen timestamp
+      await this.context.globalState.update(lastSeenKey, now);
+    } catch (error) {
+      console.error('Error checking digest:', error);
+    }
+  }
+
+  /**
+   * Handle digest item clicks (scroll to message)
+   */
+  private handleDigestItemClick(messageId: string): void {
+    // Send message to webview to scroll to the specific message
+    this.panel.webview.postMessage({
+      type: 'scrollToMessage',
+      messageId
+    });
   }
 }

@@ -12,6 +12,7 @@ import { showChatPicker } from './chatPicker';
 import { OpenClawGatewayClient } from './agent/openclawGateway';
 import { AnnotationManager } from './agent/annotations';
 import { ChatsTreeProvider } from './chatsTreeProvider';
+import { ActionTimelinePanel } from './actionTimelinePanel';
 
 let daemonManager: DaemonManager | undefined;
 let telegramApi: TelegramApiClient | undefined;
@@ -179,6 +180,17 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
       AgentPanel.createOrShow(context);
+    })
+  );
+
+  // Action Timeline (Cmd+Shift+5) — always registered, graceful when disabled
+  context.subscriptions.push(
+    vscode.commands.registerCommand('oceangram.actionTimeline', () => {
+      if (!agentEnabled) {
+        vscode.window.showInformationMessage('Enable agent features in settings (oceangram.features.agent)');
+        return;
+      }
+      ActionTimelinePanel.createOrShow(context);
     })
   );
 

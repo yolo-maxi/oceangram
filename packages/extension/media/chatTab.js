@@ -1487,6 +1487,16 @@ window.addEventListener('message', (event) => {
       errorBox.style.display = 'block';
       setTimeout(() => errorBox.style.display = 'none', 30000);
       break;
+    case 'showDigest':
+      if (msg.digest) {
+        showSessionDigest(msg.digest);
+      }
+      break;
+    case 'scrollToMessage':
+      if (msg.messageId) {
+        scrollToMessageById(msg.messageId);
+      }
+      break;
   }
 });
 
@@ -2990,6 +3000,101 @@ function toggleToolDetail(el) {
   observer.observe(messagesList, { childList: true, subtree: false });
 })();
 
+
+// --- Session Digest ---
+const digestBanner = document.getElementById('digestBanner');
+const digestContent = document.getElementById('digestContent');
+const digestMeta = document.getElementById('digestMeta');
+const digestClose = document.getElementById('digestClose');
+
+function showSessionDigest(digest) {
+  if (!digest.hasActivity || digest.items.length === 0) {
+    return;
+  }
+
+  // Populate digest content
+  let html = '';
+  for (let i = 0; i < digest.items.length; i++) {
+    const item = digest.items[i];
+    const iconMap = {
+      'task': '✅',
+      'deploy': '🚀',
+      'error': '❌',
+      'cost': '💰'
+    };
+    const icon = iconMap[item.type] || '📋';
+    const timeAgo = formatDigestTime(item.timestamp);
+    
+    html += '<div class="digest-item" onclick="handleDigestItemClick(\'' + esc(item.messageId || '') + '\')">';
+    html += '<span class="digest-item-icon">' + icon + '</span>';
+    html += '<div class="digest-item-content">';
+    html += '<div class="digest-item-title">' + esc(item.title) + '</div>';
+    html += '<div class="digest-item-details">' + esc(item.details) + '</div>';
+    html += '</div>';
+    html += '<span class="digest-item-time">' + esc(timeAgo) + '</span>';
+    html += '</div>';
+  }
+  
+  digestContent.innerHTML = html;
+  
+  // Update meta info
+  let metaText = digest.sessionCount + ' session' + (digest.sessionCount !== 1 ? 's' : '');
+  if (digest.totalCost > 0) {
+    metaText += ' • <span class="digest-cost">$' + digest.totalCost.toFixed(3) + '</span> cost';
+  }
+  digestMeta.innerHTML = metaText;
+  
+  // Show the banner
+  digestBanner.style.display = 'flex';
+}
+
+function handleDigestItemClick(messageId) {
+  if (messageId) {
+    vscode.postMessage({ type: 'digestItemClick', messageId: messageId });
+  }
+}
+
+function dismissDigest() {
+  digestBanner.style.display = 'none';
+  vscode.postMessage({ type: 'dismissDigest' });
+}
+
+function formatDigestTime(timestamp) {
+  try {
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / (1000 * 60));
+    
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return diffMins + 'm ago';
+    
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return diffHours + 'h ago';
+    
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 7) return diffDays + ' days ago';
+    
+    return date.toLocaleDateString();
+  } catch {
+    return 'Unknown';
+  }
+}
+
+function scrollToMessageById(messageId) {
+  const msgEl = document.querySelector('[data-msg-id="' + messageId + '"]');
+  if (msgEl) {
+    msgEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    msgEl.classList.add('msg-highlight');
+    setTimeout(function() { msgEl.classList.remove('msg-highlight'); }, 1500);
+  }
+}
+
+// Wire up digest close button
+if (digestClose) {
+  digestClose.addEventListener('click', dismissDigest);
+}
 
 // Initialize: request messages from extension
 vscode.postMessage({ type: 'init' });

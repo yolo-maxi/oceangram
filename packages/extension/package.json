@@ -34,6 +34,10 @@
         "title": "Oceangram: Open Agent Status"
       },
       {
+        "command": "oceangram.actionTimeline",
+        "title": "Oceangram: Action Timeline Replay"
+      },
+      {
         "command": "oceangram.telegramLogin",
         "title": "Oceangram: Telegram Login / Switch Account"
       },
@@ -122,6 +126,11 @@
         "command": "oceangram.openAgent",
         "key": "ctrl+shift+4",
         "mac": "cmd+shift+4"
+      },
+      {
+        "command": "oceangram.actionTimeline",
+        "key": "ctrl+shift+5",
+        "mac": "cmd+shift+5"
       },
       {
         "command": "oceangram.quickPick",
