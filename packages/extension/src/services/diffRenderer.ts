@@ -35,7 +35,7 @@ export class DiffRenderer {
    */
   parseDiff(diffContent: string): DiffFile[] {
     const files: DiffFile[] = [];
-    const lines = diffContent.split('\\n');
+    const lines = diffContent.split('\n');
     
     let currentFile: DiffFile | null = null;
     let oldLineNum = 0;
@@ -50,7 +50,7 @@ export class DiffRenderer {
           files.push(currentFile);
         }
         
-        const match = line.match(/diff --git a\\/(.+) b\\/(.+)/);
+        const match = line.match(/diff --git a\/(.+) b\/(.+)/);
         if (match) {
           const [, oldPath, newPath] = match;
           currentFile = {
@@ -72,7 +72,7 @@ export class DiffRenderer {
 
       // Hunk header: @@ -oldStart,oldCount +newStart,newCount @@
       if (line.startsWith('@@')) {
-        const match = line.match(/@@ -(\\d+),?\\d* \\+(\\d+),?\\d* @@/);
+        const match = line.match(/@@ -(\d+),?\d* \+(\d+),?\d* @@/);
         if (match && currentFile) {
           oldLineNum = parseInt(match[1], 10);
           newLineNum = parseInt(match[2], 10);
@@ -294,10 +294,10 @@ export class DiffRenderer {
   renderPlainText(files: DiffFile[]): string {
     if (files.length === 0) return 'No changes';
     
-    let text = `${files.length} file(s) changed:\\n`;
+    let text = `${files.length} file(s) changed:\n`;
     
     for (const file of files) {
-      text += `  ${file.path} (+${file.insertions} -${file.deletions})\\n`;
+      text += `  ${file.path} (+${file.insertions} -${file.deletions})\n`;
     }
     
     return text;

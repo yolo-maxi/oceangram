@@ -55,16 +55,16 @@ export class GitDiffService {
     const originalText = messageText;
     
     // Detect commit hashes (7+ hex chars)
-    const commitHashRegex = /\\b([0-9a-f]{7,40})\\b/gi;
+    const commitHashRegex = /\b([0-9a-f]{7,40})\b/gi;
     const commitHashes = [...originalText.matchAll(commitHashRegex)]
       .map(match => match[1])
       .filter(hash => hash.length >= 7);
 
     // Detect file paths (various patterns)
     const filePathRegexes = [
-      /([a-zA-Z0-9_\\-\\/\\.]+\\.[a-zA-Z0-9]+)/g, // file.ext
-      /\\b(src|lib|packages|components|services)\\/[a-zA-Z0-9_\\-\\/.]+/g, // typical project paths
-      /\\b[a-zA-Z0-9_\\-]+\\.(ts|js|tsx|jsx|py|rb|go|rs|java|cpp|c|h)\\b/g, // code files
+      /([a-zA-Z0-9_\-\/\.]+\.[a-zA-Z0-9]+)/g, // file.ext
+      /\b(src|lib|packages|components|services)\/[a-zA-Z0-9_\-\/.]+/g, // typical project paths
+      /\b[a-zA-Z0-9_\-]+\.(ts|js|tsx|jsx|py|rb|go|rs|java|cpp|c|h)\b/g, // code files
     ];
     
     const filePaths = [];
@@ -165,7 +165,7 @@ export class GitDiffService {
   async getGitStatus(): Promise<{ hasChanges: boolean; hasStagedChanges: boolean } | null> {
     try {
       const { stdout: statusOutput } = await exec('git status --porcelain', { cwd: this.workspaceRoot });
-      const lines = statusOutput.trim().split('\\n').filter(line => line.trim());
+      const lines = statusOutput.trim().split('\n').filter(line => line.trim());
       
       const hasChanges = lines.length > 0;
       const hasStagedChanges = lines.some(line => {
@@ -203,7 +203,7 @@ export class GitDiffService {
    */
   private parseGitStat(statOutput: string): FileChange[] {
     const files: FileChange[] = [];
-    const lines = statOutput.trim().split('\\n');
+    const lines = statOutput.trim().split('\n');
 
     for (const line of lines) {
       if (!line.trim() || line.includes('file') || line.includes('insertion') || line.includes('deletion')) {
@@ -211,11 +211,11 @@ export class GitDiffService {
       }
 
       // Parse lines like: " path/to/file.ts | 5 ++---"
-      const match = line.match(/^\\s*(.+?)\\s*\\|\\s*(\\d+)\\s*([+-]*)$/);
+      const match = line.match(/^\s*(.+?)\s*\|\s*(\d+)\s*([+-]*)$/);
       if (match) {
         const [, filePath, changesStr, symbols] = match;
         const changes = parseInt(changesStr, 10);
-        const insertions = (symbols.match(/\\+/g) || []).length;
+        const insertions = (symbols.match(/\+/g) || []).length;
         const deletions = (symbols.match(/-/g) || []).length;
 
         files.push({
