@@ -10,6 +10,7 @@ import { ChatsTreeProvider } from './chatsTreeProvider';
 import { SemanticSearchService } from './services/semanticSearch';
 import { generateSessionDigest, SessionDigest, DigestItem, formatTimestamp } from './services/sessionDigest';
 import { ContextPacksService, ContextPack, ContextFile, ConversationContext } from './services/contextPacks';
+import { SessionResumeService, ResumeData } from './services/sessionResume';
 
 /** Union type for either direct gramjs or daemon API client */
 type TelegramBackend = TelegramService | TelegramApiClient;
@@ -495,6 +496,7 @@ export class ChatTab {
   private contextPacks: ContextPacksService;
   private gitDiffService: GitDiffService;
   private diffRenderer: DiffRenderer;
+  private sessionResume: SessionResumeService;
 
   static createOrShow(chatId: string, chatName: string, context: vscode.ExtensionContext) {
     console.log('[Oceangram] ChatTab.createOrShow:', chatId, chatName, 'existing:', ChatTab.tabs.has(chatId));
@@ -529,6 +531,7 @@ export class ChatTab {
     this.contextPacks = new ContextPacksService();
     this.gitDiffService = new GitDiffService();
     this.diffRenderer = new DiffRenderer();
+    this.sessionResume = new SessionResumeService(context);
     // NOTE: webview.html is set AFTER onDidReceiveMessage is registered (end of constructor)
     // to prevent the webview's 'init' message from firing before the listener exists.
 
@@ -626,7 +629,17 @@ export class ChatTab {
 
             // Update context packs with conversation context
             this.updateContextPacksWithConversation(messages);
-            // Session resume would go here if implemented
+            // Check if we should show a session resume summary
+            if (this.sessionResume.shouldShowResume(this.chatId) && !this.sessionResume.wasRecentlyDismissed(this.chatId)) {
+              try {
+                const resumeData = await this.sessionResume.generateResumeSummary(this.chatId, messages);
+                if (resumeData) {
+                  this.panel.webview.postMessage({ type: 'sessionResume', resumeData });
+                }
+              } catch (resumeErr) {
+                console.warn('[Oceangram] Failed to generate session resume:', resumeErr);
+              }
+            }
             // Fetch profile photos for senders
             this.fetchAndSendProfilePhotos(tg, messages);
             // Fetch user status for DM chats (non-negative chatId = user)
@@ -978,6 +991,10 @@ export class ChatTab {
           case 'tabFocused':
             this.unreadCount = 0;
             this.updateTitle();
+            break;
+          case 'dismissResume':
+            await this.sessionResume.dismissResume(this.chatId);
+            this.panel.webview.postMessage({ type: 'resumeDismissed' });
             break;
           case 'dismissResume':
             await this.sessionResume.dismissResume(this.chatId);
