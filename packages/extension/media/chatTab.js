@@ -597,9 +597,31 @@ function renderMessages(msgs) {
         }
       }
 
-      html += '<div class="msg ' + pos + optClass + '" data-msg-id="' + m.id + '" data-sender="' + esc(m.senderName || '') + '" data-text="' + esc((m.text || '').slice(0, 100)) + '" data-outgoing="' + (g.isOutgoing ? '1' : '0') + '" data-timestamp="' + (m.timestamp || 0) + '">' +
+      // TASK-177: Git diff preview for messages with diff references
+      var diffPreviewHtml = '';
+      var hasDiffRefs = !!(m.hasDiffReferences || (m.diffDetection && (
+        m.diffDetection.commitHashes.length > 0 || 
+        m.diffDetection.filePaths.length > 0 || 
+        m.diffDetection.keywords.length >= 2
+      )));
+      
+      if (!g.isOutgoing && hasDiffRefs) {
+        diffPreviewHtml = '<div class="diff-preview-placeholder" data-msg-id="' + m.id + '">' +
+          '<div class="diff-quick-actions">' +
+          '<button class="diff-quick-btn" onclick="generateDiffPreview(' + m.id + ')">📊 Show diff</button>' +
+          '</div>' +
+          '</div>';
+      }
+
+      var msgAttrs = 'data-msg-id="' + m.id + '" data-sender="' + esc(m.senderName || '') + '" data-text="' + esc((m.text || '').slice(0, 100)) + '" data-outgoing="' + (g.isOutgoing ? '1' : '0') + '" data-timestamp="' + (m.timestamp || 0) + '"';
+      if (hasDiffRefs) {
+        msgAttrs += ' data-has-diff-refs="true"';
+      }
+
+      html += '<div class="msg ' + pos + optClass + '" ' + msgAttrs + '>' +
         '<div class="' + bubbleCls + '">' + bubbleInner + '<span class="msg-time' + timeClass + '">' + timeStr + statusHtml + '</span>' + retryHtml + '</div>' +
         toolTimelineHtml +
+        diffPreviewHtml +
         reactionsHtml +
         approvalHtml +
         replySuggestionsHtml +
@@ -1677,6 +1699,12 @@ window.addEventListener('message', (event) => {
           searchCount.textContent = '';
         }
       }, 3000);
+      break;
+    case 'sessionResume':
+      handleSessionResume(msg.resumeData);
+      break;
+    case 'resumeDismissed':
+      hideResumeBanner();
       break;
   }
 });
@@ -3479,6 +3507,7 @@ function getReasonLabel(reason) {
     case 'recent-change': return 'git';
     case 'terminal-error': return 'error';
     case 'dependency': return 'dep';
+    case 'mentioned': return 'chat';
     default: return 'rel';
   }
 }
@@ -3584,3 +3613,188 @@ if (contextPackClose) {
 setTimeout(function() {
   vscode.postMessage({ type: 'getContextPack' });
 }, 2000);
+
+// ── Session Resume ──
+function handleSessionResume(resumeData) {
+  const resumeBanner = document.getElementById('resumeBanner');
+  const resumeContent = document.getElementById('resumeContent');
+  
+  if (!resumeBanner || !resumeContent || !resumeData) return;
+  
+  let html = '';
+  
+  // Show message count
+  if (resumeData.messageCount > 0) {
+    html += `<div class="resume-item resume-messages">
+      <span class="resume-icon">💬</span>
+      <span class="resume-text">${resumeData.messageCount} new message${resumeData.messageCount > 1 ? 's' : ''} received</span>
+    </div>`;
+  }
+  
+  // Show errors first (high priority)
+  if (resumeData.errors && resumeData.errors.length > 0) {
+    resumeData.errors.forEach(error => {
+      html += `<div class="resume-item resume-error">
+        <span class="resume-icon">❌</span>
+        <span class="resume-text">${esc(error.content)}</span>
+        <span class="resume-time">${formatResumeTime(error.timestamp)}</span>
+      </div>`;
+    });
+  }
+  
+  // Show key events
+  if (resumeData.keyEvents && resumeData.keyEvents.length > 0) {
+    resumeData.keyEvents.forEach(event => {
+      const icon = getResumeEventIcon(event.type, event.priority);
+      html += `<div class="resume-item resume-event resume-${event.priority}">
+        <span class="resume-icon">${icon}</span>
+        <span class="resume-text">${esc(event.content)}</span>
+        <span class="resume-time">${formatResumeTime(event.timestamp)}</span>
+      </div>`;
+    });
+  }
+  
+  if (html === '') {
+    html = '<div class="resume-item"><span class="resume-text">No significant changes while you were away</span></div>';
+  }
+  
+  resumeContent.innerHTML = html;
+  resumeBanner.style.display = 'block';
+}
+
+// TASK-177: Git diff preview functions
+function generateDiffPreview(messageId) {
+  // Find the message element and get its text content
+  var msgElement = document.querySelector('[data-msg-id="' + messageId + '"]');
+  if (!msgElement) return;
+  
+  var messageText = msgElement.getAttribute('data-text') || '';
+  var fullTextElement = msgElement.querySelector('.msg-bubble');
+  if (fullTextElement) {
+    messageText = fullTextElement.textContent || messageText;
+  }
+  
+  // Send request to backend to generate diff
+  vscode.postMessage({ 
+    type: 'generateDiff', 
+    messageId: messageId,
+    messageText: messageText 
+  });
+  
+  // Show loading state
+  var placeholder = msgElement.querySelector('.diff-preview-placeholder');
+  if (placeholder) {
+    placeholder.innerHTML = '<div class="diff-preview-loading">🔄 Generating diff...</div>';
+  }
+}
+
+function toggleDiffPreview(button) {
+  var header = button.closest('.diff-preview-header');
+  var content = header.nextElementSibling;
+  
+  header.classList.toggle('collapsed');
+  if (header.classList.contains('collapsed')) {
+    content.style.display = 'none';
+  } else {
+    content.style.display = 'block';
+  }
+}
+
+function toggleDiffFile(header) {
+  var content = header.nextElementSibling;
+  
+  header.classList.toggle('collapsed');
+  if (header.classList.contains('collapsed')) {
+    content.style.display = 'none';
+  } else {
+    content.style.display = 'block';
+  }
+}
+
+function openDiffFile(filePath, line) {
+  vscode.postMessage({ 
+    type: 'openDiffFile', 
+    filePath: filePath,
+    line: line 
+  });
+}
+
+function revertDiffFile(filePath, staged) {
+  if (!confirm('Are you sure you want to revert changes to ' + filePath + '?')) {
+    return;
+  }
+  
+  vscode.postMessage({ 
+    type: 'revertDiffFile', 
+    filePath: filePath,
+    staged: staged || false 
+  });
+}
+
+// Handle diff generation response from backend
+function handleDiffGenerated(messageId, html, summary) {
+  var msgElement = document.querySelector('[data-msg-id="' + messageId + '"]');
+  if (!msgElement) return;
+  
+  var placeholder = msgElement.querySelector('.diff-preview-placeholder');
+  if (placeholder) {
+    placeholder.innerHTML = html;
+    
+    // If it's a successful diff, hide the generate button
+    if (html.indexOf('diff-preview-empty') === -1) {
+      var quickActions = placeholder.querySelector('.diff-quick-actions');
+      if (quickActions) {
+        quickActions.style.display = 'none';
+      }
+    }
+  }
+}
+
+function getResumeEventIcon(type, priority) {
+  if (priority === 'high') {
+    switch (type) {
+      case 'agent_action': return '🚨';
+      case 'status_change': return '⚠️';
+      default: return '🔥';
+    }
+  } else if (type === 'agent_action') {
+    return '🤖';
+  } else if (type === 'status_change') {
+    return '🔄';
+  }
+  return 'ℹ️';
+}
+
+function formatResumeTime(timestamp) {
+  const now = new Date();
+  const then = new Date(timestamp);
+  const diffMs = now - then;
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMins / 60);
+  
+  if (diffMins < 60) {
+    return `${diffMins}m ago`;
+  } else if (diffHours < 24) {
+    return `${diffHours}h ago`;
+  } else {
+    return then.toLocaleDateString();
+  }
+}
+
+function hideResumeBanner() {
+  const resumeBanner = document.getElementById('resumeBanner');
+  if (resumeBanner) {
+    resumeBanner.style.display = 'none';
+  }
+}
+
+// Wire up resume banner close button
+document.addEventListener('DOMContentLoaded', function() {
+  const resumeClose = document.getElementById('resumeClose');
+  if (resumeClose) {
+    resumeClose.addEventListener('click', function() {
+      vscode.postMessage({ type: 'dismissResume' });
+      hideResumeBanner();
+    });
+  }
+});

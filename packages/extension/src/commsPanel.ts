@@ -9,7 +9,7 @@ import { showSmartNotification } from './services/notifications';
 import { ChatsTreeProvider } from './chatsTreeProvider';
 import { SemanticSearchService } from './services/semanticSearch';
 import { generateSessionDigest, SessionDigest, DigestItem, formatTimestamp } from './services/sessionDigest';
-import { ContextPacksService, ContextPack, ContextFile } from './services/contextPacks';
+import { ContextPacksService, ContextPack, ContextFile, ConversationContext } from './services/contextPacks';
 
 /** Union type for either direct gramjs or daemon API client */
 type TelegramBackend = TelegramService | TelegramApiClient;
@@ -432,6 +432,52 @@ async function addSyntaxHighlightingSingle(m: any): Promise<any> {
 }
 
 /**
+ * Process messages to include both syntax highlighting and git diff detection.
+ * Adds diff previews to messages that reference file modifications.
+ */
+async function processMessagesWithDiffDetection(messages: any[], gitDiffService: GitDiffService, diffRenderer: DiffRenderer): Promise<any[]> {
+  // First, add syntax highlighting
+  const highlighted = await addSyntaxHighlighting(messages);
+  
+  // Then, add diff detection for incoming messages
+  const results = await Promise.all(highlighted.map(async (m: any) => {
+    // Only process incoming messages (not outgoing)
+    if (m.isOutgoing || !m.text) {
+      return m;
+    }
+    
+    try {
+      // Check if this message has git diff references
+      const detection = gitDiffService.detectDiffReferences(m.text);
+      if (!detection.hasDiff) {
+        return m;
+      }
+      
+      // Add diff detection metadata to the message
+      return {
+        ...m,
+        hasDiffReferences: true,
+        diffDetection: {
+          commitHashes: detection.commitHashes,
+          filePaths: detection.filePaths,
+          keywords: detection.keywords
+        }
+      };
+    } catch (err) {
+      console.warn('[GitDiff] Failed to detect diff in message:', err);
+      return m;
+    }
+  }));
+  
+  return results;
+}
+
+async function processMessageWithDiffDetectionSingle(m: any, gitDiffService: GitDiffService, diffRenderer: DiffRenderer): Promise<any> {
+  const result = await processMessagesWithDiffDetection([m], gitDiffService, diffRenderer);
+  return result[0];
+}
+
+/**
  * Individual chat tab — one per conversation.
  * Tab title is the chat name, e.g. "💬 Pilou"
  */
@@ -447,6 +493,8 @@ export class ChatTab {
   private isActive: boolean = true;
   private semanticSearch: SemanticSearchService;
   private contextPacks: ContextPacksService;
+  private gitDiffService: GitDiffService;
+  private diffRenderer: DiffRenderer;
 
   static createOrShow(chatId: string, chatName: string, context: vscode.ExtensionContext) {
     console.log('[Oceangram] ChatTab.createOrShow:', chatId, chatName, 'existing:', ChatTab.tabs.has(chatId));
@@ -479,6 +527,8 @@ export class ChatTab {
     this.context = context;
     this.semanticSearch = new SemanticSearchService(context);
     this.contextPacks = new ContextPacksService();
+    this.gitDiffService = new GitDiffService();
+    this.diffRenderer = new DiffRenderer();
     // NOTE: webview.html is set AFTER onDidReceiveMessage is registered (end of constructor)
     // to prevent the webview's 'init' message from firing before the listener exists.
 
@@ -488,6 +538,8 @@ export class ChatTab {
       if (this.isActive) {
         this.unreadCount = 0;
         this.updateTitle();
+        // Record user interaction when tab becomes active
+        this.sessionResume.recordInteraction(this.chatId);
         // Notify the tree provider to update the badge
         const treeProvider = ChatsTreeProvider.getInstance();
         if (treeProvider) {
@@ -559,7 +611,7 @@ export class ChatTab {
               console.log('[Oceangram] INIT: calling getMessages...');
               const raw = await tg.getMessages(this.chatId, 20);
               console.log('[Oceangram] INIT: getMessages returned', raw?.length, 'msgs');
-              messages = await addSyntaxHighlighting(raw);
+              messages = await processMessagesWithDiffDetection(raw, this.gitDiffService, this.diffRenderer);
               console.log('[Oceangram] INIT: highlight done, posting to webview');
             } catch (initErr: any) {
               console.error('[Oceangram] INIT: getMessages FAILED:', initErr?.message, initErr?.stack?.split('\n')[1]);
@@ -571,6 +623,10 @@ export class ChatTab {
             if (messages.length > 0) {
               tg.trackMessageId(this.chatId, messages[messages.length - 1].id);
             }
+
+            // Update context packs with conversation context
+            this.updateContextPacksWithConversation(messages);
+            // Session resume would go here if implemented
             // Fetch profile photos for senders
             this.fetchAndSendProfilePhotos(tg, messages);
             // Fetch user status for DM chats (non-negative chatId = user)
@@ -605,7 +661,7 @@ export class ChatTab {
                         );
                       }
                     }
-                    const hlMsg = await addSyntaxHighlightingSingle(event.message);
+                    const hlMsg = await processMessageWithDiffDetectionSingle(event.message, this.gitDiffService, this.diffRenderer);
                     this.panel.webview.postMessage({ type: 'newMessage', message: hlMsg });
                     // Fetch profile photo for new sender
                     if (hlMsg.senderId && !hlMsg.isOutgoing) {
@@ -622,7 +678,7 @@ export class ChatTab {
                     }
                     break;
                   case 'editMessage':
-                    this.panel.webview.postMessage({ type: 'editMessage', message: await addSyntaxHighlightingSingle(event.message) });
+                    this.panel.webview.postMessage({ type: 'editMessage', message: await processMessageWithDiffDetectionSingle(event.message, this.gitDiffService, this.diffRenderer) });
                     break;
                   case 'deleteMessages':
                     this.panel.webview.postMessage({ type: 'deleteMessages', messageIds: event.messageIds });
@@ -652,7 +708,7 @@ export class ChatTab {
                   default:
                     // Handle messagesRefreshed from cache background refresh
                     if ((event as any).type === 'messagesRefreshed') {
-                      const refreshed = await addSyntaxHighlighting((event as any).messages);
+                      const refreshed = await processMessagesWithDiffDetection((event as any).messages, this.gitDiffService, this.diffRenderer);
                       this.panel.webview.postMessage({ type: 'messages', messages: refreshed });
                     }
                     break;
@@ -690,6 +746,8 @@ export class ChatTab {
               await tg.sendMessage(this.chatId, msg.text, msg.replyToId);
               // Track this chat as recently used after successfully sending a message
               tg.trackRecentChat(this.chatId);
+              // Record user interaction
+              this.sessionResume.recordInteraction(this.chatId);
               this.panel.webview.postMessage({ type: 'sendSuccess', tempId: msg.tempId });
             } catch (sendErr: any) {
               this.panel.webview.postMessage({ type: 'sendFailed', tempId: msg.tempId, error: sendErr.message || 'Send failed' });
@@ -921,6 +979,10 @@ export class ChatTab {
             this.unreadCount = 0;
             this.updateTitle();
             break;
+          case 'dismissResume':
+            await this.sessionResume.dismissResume(this.chatId);
+            this.panel.webview.postMessage({ type: 'resumeDismissed' });
+            break;
           case 'sendTyping':
             await tg.connect();
             await tg.sendTyping(this.chatId);
@@ -1068,6 +1130,87 @@ export class ChatTab {
               this.panel.webview.postMessage({ type: 'contextFilesError', error: err.message || 'Failed to attach files' });
             }
             break;
+          case 'generateDiff':
+            // Generate git diff for the specified message
+            try {
+              const messageText: string = msg.messageText || '';
+              const detection = this.gitDiffService.detectDiffReferences(messageText);
+              
+              if (!detection.hasDiff) {
+                this.panel.webview.postMessage({ 
+                  type: 'diffGenerated', 
+                  messageId: msg.messageId,
+                  html: '<div class="diff-preview-empty">No git changes detected in this message</div>' 
+                });
+                break;
+              }
+
+              // Try to generate diff based on detected references
+              let diffResult: GitDiffResult | null = null;
+              
+              if (detection.commitHashes.length > 0) {
+                // Try each commit hash until one works
+                for (const hash of detection.commitHashes) {
+                  diffResult = await this.gitDiffService.generateDiff(hash);
+                  if (diffResult) break;
+                }
+              } else if (detection.filePaths.length > 0) {
+                // Generate diff for specific file paths
+                diffResult = await this.gitDiffService.generateDiff(undefined, detection.filePaths);
+              } else {
+                // Generate diff for current changes
+                diffResult = await this.gitDiffService.generateDiff();
+              }
+
+              if (diffResult && this.diffRenderer.hasSignificantChanges(this.diffRenderer.parseDiff(diffResult.diff))) {
+                const rendered = this.diffRenderer.renderDiff(diffResult.diff, diffResult.commitHash, diffResult.staged);
+                this.panel.webview.postMessage({ 
+                  type: 'diffGenerated', 
+                  messageId: msg.messageId,
+                  html: rendered.html,
+                  summary: rendered.summary,
+                  files: rendered.files.map(f => ({ path: f.path, status: f.status }))
+                });
+              } else {
+                this.panel.webview.postMessage({ 
+                  type: 'diffGenerated', 
+                  messageId: msg.messageId,
+                  html: '<div class="diff-preview-empty">No git changes found</div>' 
+                });
+              }
+            } catch (err: any) {
+              console.warn('[GitDiff] Failed to generate diff:', err);
+              this.panel.webview.postMessage({ 
+                type: 'diffError', 
+                messageId: msg.messageId,
+                error: err.message || 'Failed to generate git diff' 
+              });
+            }
+            break;
+          case 'openDiffFile':
+            // Open a file from diff preview in VS Code
+            try {
+              await this.gitDiffService.openFileInEditor(msg.filePath, msg.line);
+            } catch (err: any) {
+              vscode.window.showErrorMessage(`Failed to open file: ${err.message}`);
+            }
+            break;
+          case 'revertDiffFile':
+            // Revert changes for a specific file
+            try {
+              const success = await this.gitDiffService.revertFile(msg.filePath, msg.staged || false);
+              if (success) {
+                vscode.window.showInformationMessage(`Reverted changes to ${msg.filePath}`);
+                // Trigger diff regeneration to update the display
+                this.panel.webview.postMessage({ 
+                  type: 'diffFileReverted', 
+                  filePath: msg.filePath 
+                });
+              }
+            } catch (err: any) {
+              vscode.window.showErrorMessage(`Failed to revert file: ${err.message}`);
+            }
+            break;
         }
       } catch (err: any) {
         this.panel.webview.postMessage({ type: 'error', message: err.message || 'Unknown error' });
@@ -1212,6 +1355,17 @@ export class ChatTab {
     <span class="digest-meta" id="digestMeta"></span>
   </div>
 </div>
+<!-- Session resume banner -->
+<div class="resume-banner" id="resumeBanner" style="display:none">
+  <div class="resume-header">
+    <span class="resume-icon">⏰</span>
+    <span class="resume-title">What changed while you were away</span>
+    <button class="resume-close" id="resumeClose" title="Dismiss">✕</button>
+  </div>
+  <div class="resume-content" id="resumeContent">
+    <!-- Dynamically populated -->
+  </div>
+</div>
 <div class="search-bar" id="searchBar">
   <input type="text" id="searchInput" placeholder="Search messages…" />
   <div class="search-toggle-group">
@@ -1342,6 +1496,31 @@ export class ChatTab {
   /**
    * Check if digest should be shown based on last panel close time
    */
+  /**
+   * Update context packs service with recent conversation for file mention detection
+   */
+  private updateContextPacksWithConversation(messages: any[]): void {
+    try {
+      // Extract recent text messages for file mention analysis
+      const recentMessages = messages
+        .slice(-20) // Last 20 messages
+        .filter(m => m.text) // Only text messages
+        .map(m => ({
+          text: m.text,
+          timestamp: m.timestamp,
+          isOutgoing: m.isOutgoing || false
+        }));
+
+      const conversationContext: ConversationContext = {
+        recentMessages
+      };
+
+      this.contextPacks.setConversationContext(conversationContext);
+    } catch (error) {
+      console.error('[Oceangram] Failed to update context packs with conversation:', error);
+    }
+  }
+
   private async checkAndShowDigest(): Promise<void> {
     try {
       const lastSeenKey = `oceangram.digest.lastSeen.${this.chatId}`;

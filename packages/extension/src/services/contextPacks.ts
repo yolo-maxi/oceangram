@@ -9,7 +9,7 @@ export interface ContextFile {
   /** Display name for the chip */
   name: string;
   /** Reason this file is relevant */
-  reason: 'open-editor' | 'recent-change' | 'terminal-error' | 'dependency';
+  reason: 'open-editor' | 'recent-change' | 'terminal-error' | 'dependency' | 'mentioned';
   /** File content (loaded when needed) */
   content?: string;
   /** Icon for the chip */
@@ -25,6 +25,15 @@ export interface ContextPack {
   timestamp: number;
 }
 
+export interface ConversationContext {
+  /** Recent chat messages to analyze for file mentions */
+  recentMessages: Array<{
+    text: string;
+    timestamp: number;
+    isOutgoing: boolean;
+  }>;
+}
+
 /**
  * Service for detecting relevant context files to suggest for agent messages
  */
@@ -34,6 +43,7 @@ export class ContextPacksService {
   private lastPack: ContextPack | null = null;
   private debounceTimer: NodeJS.Timeout | null = null;
   private workspaceRoot: string | null = null;
+  private conversationContext: ConversationContext | null = null;
 
   constructor() {
     // Get workspace root
@@ -71,6 +81,15 @@ export class ContextPacksService {
    */
   getCurrentPack(): ContextPack | null {
     return this.lastPack;
+  }
+
+  /**
+   * Set conversation context for file mention detection
+   */
+  setConversationContext(context: ConversationContext): void {
+    this.conversationContext = context;
+    // Trigger pack update to include conversation-mentioned files
+    this.schedulePackUpdate();
   }
 
   /**
@@ -118,6 +137,10 @@ export class ContextPacksService {
     // 4. Active file dependencies
     const dependencies = await this.getActiveFileDependencies();
     files.push(...dependencies);
+
+    // 5. Files mentioned in conversation (if conversationContext provided)
+    const mentionedFiles = await this.getConversationMentionedFiles();
+    files.push(...mentionedFiles);
 
     // Deduplicate by path, keeping highest priority
     const deduped = this.deduplicateFiles(files);
@@ -399,6 +422,95 @@ export class ContextPacksService {
     }
 
     return files.slice(0, 3); // Limit to 3 dependencies
+  }
+
+  /**
+   * Get files mentioned in recent conversation
+   */
+  private async getConversationMentionedFiles(): Promise<ContextFile[]> {
+    if (!this.workspaceRoot || !this.conversationContext) {
+      return [];
+    }
+
+    const files: ContextFile[] = [];
+    const mentionedPaths = new Set<string>();
+
+    // Analyze recent messages for file path patterns
+    for (const message of this.conversationContext.recentMessages.slice(-20)) {
+      const filePaths = this.extractFilePathsFromText(message.text);
+      for (const filePath of filePaths) {
+        mentionedPaths.add(filePath);
+      }
+    }
+
+    // Validate and add mentioned files
+    for (const filePath of mentionedPaths) {
+      try {
+        const fullPath = path.resolve(this.workspaceRoot, filePath);
+        const uri = vscode.Uri.file(fullPath);
+        
+        // Check if file exists and is within workspace
+        const relativePath = path.relative(this.workspaceRoot, fullPath);
+        if (relativePath.startsWith('..')) {
+          continue; // Skip files outside workspace
+        }
+
+        await vscode.workspace.fs.stat(uri);
+        
+        const fileName = path.basename(relativePath);
+        const fileExt = path.extname(fileName).toLowerCase();
+
+        files.push({
+          id: `mentioned-${relativePath}`,
+          path: relativePath,
+          name: fileName,
+          reason: 'mentioned',
+          icon: this.getFileIcon(fileExt),
+          priority: 7 // Higher than terminal errors, lower than open files
+        });
+      } catch {
+        // File doesn't exist or can't be accessed
+      }
+    }
+
+    return files.slice(0, 4); // Limit to 4 mentioned files
+  }
+
+  /**
+   * Extract file paths from text using common patterns
+   */
+  private extractFilePathsFromText(text: string): string[] {
+    if (!text) return [];
+
+    const paths: string[] = [];
+    
+    // Common file path patterns
+    const patterns = [
+      // Standard file paths (with extensions)
+      /(?:^|\s)([a-zA-Z0-9_-]+\/[a-zA-Z0-9_\-\/\.]+\.[a-zA-Z0-9]+)(?:\s|$)/g,
+      // Relative paths starting with ./
+      /(?:^|\s)(\.[\/\\][a-zA-Z0-9_\-\/\\\.]+\.[a-zA-Z0-9]+)(?:\s|$)/g,
+      // Package.json style paths in src/
+      /(?:^|\s)(src\/[a-zA-Z0-9_\-\/\.]+\.[a-zA-Z0-9]+)(?:\s|$)/g,
+      // Extension specific paths
+      /(?:^|\s)(packages\/[a-zA-Z0-9_\-\/\.]+\.[a-zA-Z0-9]+)(?:\s|$)/g,
+      // Code block file references (```typescript /path/to/file.ts)
+      /```[a-zA-Z]*\s+([a-zA-Z0-9_\-\/\.]+\.[a-zA-Z0-9]+)/g,
+    ];
+
+    for (const pattern of patterns) {
+      let match;
+      while ((match = pattern.exec(text)) !== null) {
+        const filePath = match[1];
+        // Basic validation - has an extension and looks like a file
+        if (/\.[a-zA-Z0-9]+$/.test(filePath)) {
+          paths.push(filePath);
+        }
+      }
+    }
+
+    // Remove duplicates and sort by length (more specific first)
+    return [...new Set(paths)].sort((a, b) => b.length - a.length);
   }
 
   /**
