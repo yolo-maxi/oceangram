@@ -1706,6 +1706,23 @@ window.addEventListener('message', (event) => {
     case 'resumeDismissed':
       hideResumeBanner();
       break;
+    case 'diffGenerated':
+      // Handle diff generation response
+      handleDiffGenerated(msg.messageId, msg.html, msg.summary);
+      break;
+    case 'diffError':
+      // Handle diff generation error
+      var msgElement = document.querySelector('[data-msg-id="' + msg.messageId + '"]');
+      if (msgElement) {
+        var placeholder = msgElement.querySelector('.diff-preview-placeholder');
+        if (placeholder) {
+          placeholder.innerHTML = '<div class="diff-preview-empty">❌ ' + (msg.error || 'Failed to generate diff') + '</div>';
+        }
+      }
+      break;
+    case 'diffFileReverted':
+      // Handle file revert success - could trigger diff refresh
+      break;
   }
 });
 

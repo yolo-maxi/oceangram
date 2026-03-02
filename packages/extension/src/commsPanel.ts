@@ -710,7 +710,7 @@ export class ChatTab {
                     try {
                       const missed = await tg.fetchMissedMessages(this.chatId);
                       if (missed.length > 0) {
-                        const hlMissed = await addSyntaxHighlighting(missed);
+                        const hlMissed = await processMessagesWithDiffDetection(missed, this.gitDiffService, this.diffRenderer);
                         for (const m of hlMissed) {
                           tg.trackMessageId(this.chatId, m.id);
                           this.panel.webview.postMessage({ type: 'newMessage', message: m });
@@ -883,7 +883,7 @@ export class ChatTab {
             break;
           case 'searchMessages':
             await tg.connect();
-            const searchResults = await addSyntaxHighlighting(await tg.searchMessages(this.chatId, msg.query, msg.limit || 20));
+            const searchResults = await processMessagesWithDiffDetection(await tg.searchMessages(this.chatId, msg.query, msg.limit || 20), this.gitDiffService, this.diffRenderer);
             this.panel.webview.postMessage({ type: 'searchResults', messages: searchResults });
             break;
           case 'indexMessagesForSearch':
@@ -931,7 +931,7 @@ export class ChatTab {
                 matchedTerms: result.matchedTerms
               }));
               
-              const highlightedMessages = await addSyntaxHighlighting(messages);
+              const highlightedMessages = await processMessagesWithDiffDetection(messages, this.gitDiffService, this.diffRenderer);
               this.panel.webview.postMessage({ 
                 type: 'semanticSearchResults', 
                 messages: highlightedMessages,
@@ -984,17 +984,13 @@ export class ChatTab {
             break;
           case 'loadOlder':
             await tg.connect();
-            const older = await addSyntaxHighlighting(await tg.getMessages(this.chatId, 30, msg.beforeId));
+            const older = await processMessagesWithDiffDetection(await tg.getMessages(this.chatId, 30, msg.beforeId), this.gitDiffService, this.diffRenderer);
             this.panel.webview.postMessage({ type: 'olderMessages', messages: older });
             this.fetchAndSendProfilePhotos(tg, older);
             break;
           case 'tabFocused':
             this.unreadCount = 0;
             this.updateTitle();
-            break;
-          case 'dismissResume':
-            await this.sessionResume.dismissResume(this.chatId);
-            this.panel.webview.postMessage({ type: 'resumeDismissed' });
             break;
           case 'dismissResume':
             await this.sessionResume.dismissResume(this.chatId);
@@ -1011,7 +1007,7 @@ export class ChatTab {
             const lastKnown = msg.afterId || 0;
             const hasNew = polled.some((m: any) => m.id > lastKnown);
             if (hasNew) {
-              this.panel.webview.postMessage({ type: 'messages', messages: await addSyntaxHighlighting(polled) });
+              this.panel.webview.postMessage({ type: 'messages', messages: await processMessagesWithDiffDetection(polled, this.gitDiffService, this.diffRenderer) });
             }
             break;
           case 'getAgentDetails': {
