@@ -99,19 +99,47 @@
   }
 
   function updateToolFilter(toolNames, currentFilter) {
-    toolFilter.innerHTML = '<option value="all">All tools</option>';
+    toolFilter.innerHTML = '';
     
-    toolNames.forEach(toolName => {
-      const option = document.createElement('option');
-      option.value = toolName;
-      option.textContent = toolName;
-      if (toolName === currentFilter) {
-        option.selected = true;
+    // Add semantic categories first
+    const categories = [
+      { value: 'all', label: 'All actions' },
+      { value: 'errors', label: 'Errors only' },
+      { value: 'file-changes', label: 'File changes' },
+      { value: 'commands', label: 'Commands' }
+    ];
+    
+    categories.forEach(cat => {
+      if (toolNames.includes(cat.value)) {
+        const option = document.createElement('option');
+        option.value = cat.value;
+        option.textContent = cat.label;
+        if (cat.value === currentFilter) {
+          option.selected = true;
+        }
+        toolFilter.appendChild(option);
       }
-      toolFilter.appendChild(option);
     });
+    
+    // Add separator if we have both categories and specific tools
+    const specificTools = toolNames.filter(name => !['all', 'errors', 'file-changes', 'commands'].includes(name));
+    if (specificTools.length > 0) {
+      const separator = document.createElement('option');
+      separator.disabled = true;
+      separator.textContent = '── Specific Tools ──';
+      toolFilter.appendChild(separator);
+      
+      specificTools.forEach(toolName => {
+        const option = document.createElement('option');
+        option.value = toolName;
+        option.textContent = toolName;
+        if (toolName === currentFilter) {
+          option.selected = true;
+        }
+        toolFilter.appendChild(option);
+      });
+    }
   }
-
   function updateSessionInfo(sessionInfo) {
     if (!sessionInfo) {
       sessionInfo.textContent = '';

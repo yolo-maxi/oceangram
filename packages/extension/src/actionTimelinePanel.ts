@@ -305,13 +305,44 @@ export class ActionTimelinePanel {
     return JSON.stringify(content).slice(0, 80) + '...';
   }
 
+  private filterToolCalls(toolCalls: ToolCall[], filter: string): ToolCall[] {
+    switch (filter) {
+      case 'all':
+        return toolCalls;
+      
+      case 'errors':
+        return toolCalls.filter(tc => tc.outputStatus === 'error');
+      
+      case 'file-changes':
+        return toolCalls.filter(tc => 
+          tc.toolName === 'read' || 
+          tc.toolName === 'write' || 
+          tc.toolName === 'edit' || 
+          tc.toolName === 'Read' || 
+          tc.toolName === 'Write' || 
+          tc.toolName === 'Edit' ||
+          (tc.fullInput && (tc.fullInput.file_path || tc.fullInput.path))
+        );
+      
+      case 'commands':
+        return toolCalls.filter(tc => 
+          tc.toolName === 'exec' || 
+          tc.toolName === 'process' || 
+          (tc.fullInput && tc.fullInput.command)
+        );
+      
+      default:
+        // Filter by specific tool name
+        return toolCalls.filter(tc => tc.toolName === filter);
+    }
+  }
   private sendToolCalls() {
     const filteredCalls = this.currentFilter 
-      ? this.toolCalls.filter(tc => tc.toolName === this.currentFilter)
+      ? this.filterToolCalls(this.toolCalls, this.currentFilter)
       : this.toolCalls;
 
     // Get unique tool names for filter dropdown
-    const toolNames = [...new Set(this.toolCalls.map(tc => tc.toolName))].sort();
+    const toolNames = ["all", "errors", "file-changes", "commands", ...new Set(this.toolCalls.map(tc => tc.toolName))];
 
     this.panel.webview.postMessage({
       type: 'toolCalls',
