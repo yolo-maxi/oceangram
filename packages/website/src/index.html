@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Oceangram - Telegram, everywhere</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <!-- Hero Section -->
+        <header class="hero">
+            <div class="logo">
+                <span class="icon">🪸</span>
+                <h1>Oceangram</h1>
+            </div>
+            <p class="tagline">Telegram, everywhere.</p>
+            <p class="subtitle">One daemon, multiple surfaces. Your Telegram session stays on your machine — no cloud, no third-party servers.</p>
+            
+            <div class="cta-section">
+                <a href="#install" class="cta-button primary">Get VS Code Extension</a>
+                <a href="#demo" class="cta-button secondary">See Demo</a>
+            </div>
+        </header>
+
+        <!-- Features Section -->
+        <section class="features">
+            <h2>Top Features</h2>
+            <div class="features-grid">
+                <div class="feature">
+                    <div class="feature-icon">🔌</div>
+                    <h3>Universal Client</h3>
+                    <p>One daemon powers multiple surfaces: macOS tray app, VS Code extension, CLI, and web client. Connect from anywhere.</p>
+                </div>
+                
+                <div class="feature">
+                    <div class="feature-icon">💻</div>
+                    <h3>VS Code Integration</h3>
+                    <p>Native Telegram panel in VS Code/Cursor with AI agent integration, kanban boards, and seamless code sharing.</p>
+                </div>
+                
+                <div class="feature">
+                    <div class="feature-icon">📱</div>
+                    <h3>Menu Bar Tray</h3>
+                    <p>Ultra-minimal macOS tray popup with whitelisted contacts, smart filters, and instant message access.</p>
+                </div>
+                
+                <div class="feature">
+                    <div class="feature-icon">⚡</div>
+                    <h3>100+ API Methods</h3>
+                    <p>Complete Telegram feature set: messaging, media, groups, admin tools, scheduling, and real-time WebSocket events.</p>
+                </div>
+                
+                <div class="feature">
+                    <div class="feature-icon">🤖</div>
+                    <h3>AI Agent Cockpit</h3>
+                    <p>OpenClaw integration for chat management, project kanban boards, resource tracking, and agent status monitoring.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Demo Section -->
+        <section id="demo" class="demo">
+            <h2>See It In Action</h2>
+            <div class="demo-container">
+                <img src="demo.svg" alt="Oceangram Demo" class="demo-gif">
+                <p class="demo-caption">Oceangram in VS Code: Send code, manage chats, track AI agents</p>
+            </div>
+        </section>
+
+        <!-- Install Section -->
+        <section id="install" class="install">
+            <h2>Get Started</h2>
+            <div class="install-grid">
+                <div class="install-option">
+                    <h3>VS Code Extension</h3>
+                    <ol>
+                        <li>Download the latest <code>.vsix</code> from releases</li>
+                        <li>In VS Code: <code>Ctrl+Shift+P</code> → "Extensions: Install from VSIX"</li>
+                        <li>Select the downloaded file and install</li>
+                        <li>Open Oceangram panel from Activity Bar</li>
+                    </ol>
+                    <a href="https://github.com/oceangram/oceangram/releases" class="install-link">Download Extension</a>
+                </div>
+                
+                <div class="install-option">
+                    <h3>macOS Tray App</h3>
+                    <ol>
+                        <li>Clone the repository</li>
+                        <li><code>cd packages/tray && pnpm install</code></li>
+                        <li><code>pnpm run compile && pnpm run build:daemon</code></li>
+                        <li><code>pnpm start</code></li>
+                    </ol>
+                    <a href="https://github.com/oceangram/oceangram" class="install-link">View Source</a>
+                </div>
+            </div>
+        </section>
+
+        <!-- Built At Section -->
+        <section class="built-at">
+            <div class="badge">
+                <span class="badge-text">Built at</span>
+                <a href="https://repo.box" class="badge-link">repo.box</a>
+            </div>
+            <p class="built-description">Oceangram is developed at repo.box — a collaborative development environment for AI agents and humans.</p>
+        </section>
+
+        <!-- Footer -->
+        <footer>
+            <p>&copy; 2024 <a href="https://repo.box">Ocean Vael</a> 🪸 | MIT License | <a href="https://github.com/oceangram/oceangram">GitHub</a></p>
+        </footer>
+    </div>
+</body>
+</html>

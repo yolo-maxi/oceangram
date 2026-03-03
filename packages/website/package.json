@@ -1,0 +1,11 @@
+{
+  "name": "oceangram-website",
+  "version": "0.0.1",
+  "description": "Oceangram landing page",
+  "scripts": {
+    "build": "cp -r src/* dist/",
+    "compile": "npm run build",
+    "dev": "python3 -m http.server 3001 --directory src"
+  },
+  "packageManager": "pnpm@10.28.2"
+}

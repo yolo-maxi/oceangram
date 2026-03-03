@@ -1,0 +1,43 @@
+<svg width="800" height="400" viewBox="0 0 800 400" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f8fafc"/>
+      <stop offset="100%" style="stop-color:#e2e8f0"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="800" height="400" fill="url(#bg)" rx="12"/>
+  
+  <!-- Demo placeholder content -->
+  <rect x="50" y="50" width="700" height="300" fill="white" rx="8" stroke="#e2e8f0"/>
+  
+  <!-- VS Code mockup -->
+  <rect x="70" y="70" width="200" height="260" fill="#1e1e1e" rx="4"/>
+  <rect x="80" y="80" width="180" height="20" fill="#333" rx="2"/>
+  <rect x="80" y="110" width="180" height="200" fill="#2d2d30" rx="2"/>
+  
+  <!-- Telegram chat mockup -->
+  <rect x="300" y="70" width="250" height="260" fill="#17212b" rx="4"/>
+  <circle cx="320" cy="100" r="15" fill="#5bb3f5"/>
+  <rect x="345" y="95" width="180" height="10" fill="#ffffff" rx="2"/>
+  <rect x="345" y="110" width="120" height="8" fill="#aaaaaa" rx="1"/>
+  
+  <!-- Message bubbles -->
+  <rect x="320" y="140" width="150" height="25" fill="#5bb3f5" rx="12"/>
+  <rect x="380" y="180" width="130" height="25" fill="#ffffff" rx="12"/>
+  <rect x="320" y="220" width="170" height="25" fill="#5bb3f5" rx="12"/>
+  
+  <!-- Tray app mockup -->
+  <rect x="580" y="70" width="150" height="200" fill="#f8f9fa" rx="8" stroke="#dee2e6"/>
+  <circle cx="605" cy="100" r="10" fill="#28a745"/>
+  <rect x="625" y="95" width="80" height="8" fill="#333" rx="2"/>
+  <rect x="625" y="108" width="60" height="6" fill="#666" rx="1"/>
+  
+  <!-- Center icon -->
+  <circle cx="400" cy="200" r="30" fill="white" stroke="#2563eb" stroke-width="3"/>
+  <text x="400" y="210" text-anchor="middle" font-family="Arial" font-size="24">🪸</text>
+  
+  <!-- Demo text -->
+  <text x="400" y="360" text-anchor="middle" font-family="Inter" font-size="16" fill="#64748b">Demo GIF Placeholder - Replace with actual recording</text>
+</svg>
