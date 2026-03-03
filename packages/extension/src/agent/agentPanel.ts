@@ -34,6 +34,7 @@ import {
   filterByToolName,
 } from './liveTools';
 import { watchRemoteFile, remoteFileExists } from '../services/remoteFs';
+import { fetchCapabilityHeatmapData, generateHeatmapHTML, CapabilityHeatmapData } from './capabilityHeatmap';
 
 export class AgentPanel {
   private static instance: AgentPanel | undefined;
@@ -41,7 +42,7 @@ export class AgentPanel {
   private disposables: vscode.Disposable[] = [];
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
   private fileWatcher: vscode.FileSystemWatcher | undefined;
-  private currentTab: 'overview' | 'tools' | 'subagents' | 'crons' | 'costs' | 'memory' | 'livetools' | 'chat' = 'overview';
+  private currentTab: 'overview' | 'tools' | 'subagents' | 'crons' | 'costs' | 'memory' | 'livetools' | 'capabilities' | 'chat' = 'overview';
   private chatMessages: Array<{ role: string; content: string; timestamp?: number }> = [];
   private chatLoading = false;
   private chatSessionKey: string | undefined;
@@ -49,6 +50,7 @@ export class AgentPanel {
   private liveToolsFilter: string | null = null;
   private jsonlWatcher: vscode.FileSystemWatcher | undefined;
   private liveToolEntries: ToolCallEntry[] = [];
+  private capabilityHeatmapData: CapabilityHeatmapData | null = null;
 
   public static createOrShow(context: vscode.ExtensionContext) {
     if (AgentPanel.instance) {
@@ -119,6 +121,9 @@ export class AgentPanel {
           case 'liveToolsFilter':
             this.liveToolsFilter = msg.filter;
             this.refreshLiveTools();
+            break;
+          case 'loadCapabilities': 
+            this.loadCapabilityHeatmapData(); 
             break;
           case 'chatSend': {
             const gw = getGatewayClient();
@@ -196,6 +201,7 @@ export class AgentPanel {
       }
     } catch { /* ignore */ }
   }
+
 
   private async loadChatHistory() {
     const gw = getGatewayClient();
@@ -542,6 +548,23 @@ export class AgentPanel {
     </div>`;
   }
 
+  private renderCapabilitiesTab(): string {
+    // Start with a loading state - the actual data will be fetched and updated via postMessage
+    return `
+      <div id="capabilities-content" class="capabilities-container">
+        <div class="loading-state">
+          <span class="loading-icon">⏳</span>
+          <p>Loading capability analysis...</p>
+        </div>
+      </div>
+      <script>
+        // Request capability data from the extension
+        window.addEventListener('DOMContentLoaded', () => {
+          vscode.postMessage({ type: 'loadCapabilities' });
+        });
+      </script>
+    `;
+  }
   private renderLiveToolsTab(): string {
     const entries = filterByToolName(this.liveToolEntries, this.liveToolsFilter);
     const toolNames = getUniqueToolNames(this.liveToolEntries);
@@ -664,6 +687,7 @@ export class AgentPanel {
       { id: 'costs', label: '💰 Costs' },
       { id: 'memory', label: '📂 Memory' },
       { id: 'livetools', label: '⚡ Live Tools' },
+      { id: 'capabilities', label: '🔥 Capabilities' },
       { id: 'chat', label: '💬 Chat' },
     ];
 
@@ -680,6 +704,7 @@ export class AgentPanel {
       case 'costs': tabContent = this.renderCostsTab(data); break;
       case 'memory': tabContent = this.renderMemoryTab(data); break;
       case 'livetools': tabContent = this.renderLiveToolsTab(); break;
+      case 'capabilities': tabContent = this.renderCapabilitiesTab(); break;
       case 'chat': tabContent = this.renderChatTab(); this.setupGatewayEvents(); break;
     }
 
