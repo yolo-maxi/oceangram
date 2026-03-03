@@ -16,6 +16,13 @@ Oceangram is a universal Telegram client powered by a centralized daemon. Your T
 ## Architecture
 
 ```
+
+## Demo
+
+![Oceangram Demo](packages/website/src/assets/demo.gif)
+
+_15-second feature showcase: VS Code Extension, Tray App, 100+ APIs, AI Integration_
+
 ┌─────────────┐  ┌──────────────┐  ┌───────────┐
 │  Tray App   │  │  VS Code Ext │  │   CLI     │
 └──────┬──────┘  └──────┬───────┘  └─────┬─────┘
