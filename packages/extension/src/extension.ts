@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { CommsPicker } from './commsPanel';
+import { CommsPicker, ChatTab } from './commsPanel';
 import { KanbanPanel } from './kanbanPanel';
 import { SimplePanel } from './simplePanel';
 import { ResourcePanel } from './resourcePanel';
@@ -456,6 +456,82 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push({ dispose: () => clearInterval(costInterval) });
   }
 
+
+  // Ask about this file - explorer context menu
+  context.subscriptions.push(
+    vscode.commands.registerCommand('oceangram.askAboutFile', async (uri: vscode.Uri) => {
+      if (!uri || !uri.fsPath) {
+        vscode.window.showWarningMessage('No file selected.');
+        return;
+      }
+
+      try {
+        // Check if file exists and is readable
+        const fs = require('fs');
+        if (!fs.existsSync(uri.fsPath)) {
+          vscode.window.showWarningMessage('File does not exist.');
+          return;
+        }
+
+        const stat = fs.statSync(uri.fsPath);
+        if (!stat.isFile()) {
+          vscode.window.showWarningMessage('Selected item is not a file.');
+          return;
+        }
+
+        // Check file size (limit to 50KB)
+        const maxSize = 50 * 1024; // 50KB
+        if (stat.size > maxSize) {
+          vscode.window.showWarningMessage(`File is too large (>${Math.round(maxSize/1024)}KB). Please select a smaller file.`);
+          return;
+        }
+
+        // Try to detect if it's a binary file by reading a small sample
+        const buffer = fs.readFileSync(uri.fsPath);
+        const sampleSize = Math.min(buffer.length, 512);
+        let isBinary = false;
+        for (let i = 0; i < sampleSize; i++) {
+          if (buffer[i] === 0) {
+            isBinary = true;
+            break;
+          }
+        }
+
+        if (isBinary) {
+          vscode.window.showWarningMessage('Binary files are not supported.');
+          return;
+        }
+
+        // Read file content
+        const content = fs.readFileSync(uri.fsPath, 'utf-8');
+        const relativePath = vscode.workspace.asRelativePath(uri);
+        const fileName = require('path').basename(uri.fsPath);
+        const ext = require('path').extname(uri.fsPath).slice(1);
+
+        // Format the message with file content
+        const message = `Help me understand this file:\n\n\`\`\`${ext}\n${content}\n\`\`\``;
+
+        // Get Telegram API client
+        const api = getTelegramApi();
+        if (!api) {
+          vscode.window.showErrorMessage('Telegram not connected. Open Comms first.');
+          return;
+        }
+
+        // Show chat picker
+        const { showChatPicker } = await import('./chatPicker');
+        const chat = await showChatPicker(api);
+        if (!chat) { return; }
+
+        // Open chat with pre-populated message
+        ChatTab.createOrShow(chat.id, chat.name, context, message);
+        
+        vscode.window.showInformationMessage(`File ${fileName} loaded into chat with ${chat.name}`);
+      } catch (err: any) {
+        vscode.window.showErrorMessage(`Failed to load file: ${err.message}`);
+      }
+    })
+  );
   console.log('Oceangram activated — Cmd+Shift+1-4');
 }
 

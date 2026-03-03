@@ -498,16 +498,12 @@ export class ChatTab {
   private diffRenderer: DiffRenderer;
   private sessionResume: SessionResumeService;
 
-  static createOrShow(chatId: string, chatName: string, context: vscode.ExtensionContext, initialText?: string) {
+  static createOrShow(chatId: string, chatName: string, context: vscode.ExtensionContext) {
     console.log('[Oceangram] ChatTab.createOrShow:', chatId, chatName, 'existing:', ChatTab.tabs.has(chatId));
     const existing = ChatTab.tabs.get(chatId);
     if (existing) {
       console.log('[Oceangram] ChatTab: revealing existing tab');
       existing.panel.reveal();
-      // If we have initial text and the tab already exists, prepopulate the input
-      if (initialText) {
-        existing.prepopulateInput(initialText);
-      }
       return;
     }
     const mediaUri = vscode.Uri.joinPath(context.extensionUri, 'media');
@@ -515,16 +511,7 @@ export class ChatTab {
       'oceangram.chat', `💬 ${chatName}`, vscode.ViewColumn.Active,
       { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [mediaUri] }
     );
-    const chatTab = new ChatTab(panel, chatId, chatName, context);
-    ChatTab.tabs.set(chatId, chatTab);
-    
-    // If we have initial text, prepopulate after the webview is ready
-    if (initialText) {
-      // Use a timeout to ensure the webview is fully loaded
-      setTimeout(() => {
-        chatTab.prepopulateInput(initialText);
-      }, 1000);
-    }
+    ChatTab.tabs.set(chatId, new ChatTab(panel, chatId, chatName, context));
   }
 
   private updateTitle() {
@@ -1248,13 +1235,6 @@ export class ChatTab {
     
     // Initialize digest tracking
     this.initializeDigest();
-  }
-
-  /**
-   * Prepopulate the chat input field with the given text.
-   */
-  prepopulateInput(text: string) {
-    this.panel.webview.postMessage({ type: "prepopulateInput", text });
   }
 
   /**

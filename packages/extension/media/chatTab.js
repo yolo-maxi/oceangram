@@ -1723,8 +1723,19 @@ window.addEventListener('message', (event) => {
     case 'diffFileReverted':
       // Handle file revert success - could trigger diff refresh
       break;
+    case 'prepopulateInput':
+      // Prepopulate the message input field with the provided text
+      if (msg.text && msgInput) {
+        msgInput.value = msg.text;
+        // Auto-resize the textarea if it has that functionality
+        msgInput.style.height = 'auto';
+        msgInput.style.height = msgInput.scrollHeight + 'px';
+        // Focus the input and put cursor at the end
+        msgInput.focus();
+        msgInput.setSelectionRange(msgInput.value.length, msgInput.value.length);
+      }
+      break;
   }
-});
 
 // Agent banner
 const agentBanner = document.getElementById('agentBanner');

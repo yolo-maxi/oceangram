@@ -72,10 +72,6 @@
       {
         "command": "oceangram.replyFromIDE",
         "title": "Oceangram: Reply from IDE"
-      },
-      {
-        "command": "oceangram.askAboutFile",
-        "title": "Ask about this file"
       }
     ],
     "menus": {
@@ -89,14 +85,6 @@
           "command": "oceangram.sendToAgent",
           "when": "editorHasSelection",
           "group": "oceangram@2"
-        }
-      ]
-      ,
-      "explorer/context": [
-        {
-          "command": "oceangram.askAboutFile",
-          "when": "resourceScheme == file",
-          "group": "oceangram@1"
         }
       ]
     },
